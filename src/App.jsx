@@ -328,7 +328,31 @@ export default function App() {
     audit("REJECT", { type: entry?.type, submittedBy: entry?.submittedByName });
   }, [pending, audit]);
 
-  // ── Login / Logout ───────────────────────────────────────────────
+  // ── FIX Bug 2: Live-poll pending queue every 10s when owner is logged in ──
+  // This makes staff submissions appear instantly in owner's Approval tab
+  // without needing to logout/login.
+  useEffect(() => {
+    if (!session || session.role !== "owner") return;
+    if (!_sb) return;
+    const poll = setInterval(async () => {
+      try {
+        const fresh = await sbGet("pending_queue");
+        if (fresh && Array.isArray(fresh)) {
+          setPending(prev => {
+            // Only update if something actually changed (new item or item removed)
+            const prevIds = prev.map(p => p.id).sort().join(",");
+            const freshIds = fresh.map(p => p.id).sort().join(",");
+            if (prevIds !== freshIds) {
+              LS.set("opti_pending", fresh);
+              return fresh;
+            }
+            return prev;
+          });
+        }
+      } catch {}
+    }, 10000); // poll every 10 seconds
+    return () => clearInterval(poll);
+  }, [session]);
   const login = useCallback((acc) => {
     const s = { ...acc, loginTime: ts() };
     LS.sess(s);
@@ -361,7 +385,7 @@ export default function App() {
   return (
     <Shell session={session} onLogout={logout} pending={pending} view={view} setView={setView} can={can} sbStatus={sbStatus}>
       {view === "dashboard"    && <Dashboard session={session} data={data} pending={pending} setView={setView} auditLog={auditLog} />}
-      {view === "approval"     && session.role === "owner" && <ApprovalQueue pending={pending} onApprove={approvePending} onReject={rejectPending} />}
+      {view === "approval"     && session.role === "owner" && <ApprovalQueue pending={pending} onApprove={approvePending} onReject={rejectPending} onRefresh={async () => { const f = await sbGet("pending_queue"); if (f && Array.isArray(f)) { setPending(f); LS.set("opti_pending", f); } }} />}
       {view === "patients"     && <PatientsSection     {...sharedProps} />}
       {view === "patientBill"  && <PatientBillSection  {...sharedProps} />}
       {view === "inventory"    && <InventorySection    {...sharedProps} />}
@@ -566,13 +590,36 @@ function Dashboard({ session, data, pending, setView, auditLog }) {
 // ════════════════════════════════════════════════════════════════════════
 // APPROVAL QUEUE
 // ════════════════════════════════════════════════════════════════════════
-function ApprovalQueue({ pending, onApprove, onReject }) {
+function ApprovalQueue({ pending, onApprove, onReject, onRefresh }) {
   const [detail, setDetail] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   const colors = { patients: "#1d4ed8", patientBill: "#7c3aed", inventory: "#16a34a", invoices: "#a16207" };
+
+  const handleRefresh = async () => {
+    if (!onRefresh) return;
+    setRefreshing(true);
+    await onRefresh();
+    setRefreshing(false);
+  };
+
   return (
     <div>
-      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Approval Queue</div>
-      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 22 }}>Review staff submissions before they are saved to the database.</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700 }}>Approval Queue</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {/* Live indicator dot */}
+          <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#9b8e82" }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#16a34a", display: "inline-block", boxShadow: "0 0 0 3px #dcfce7" }} />
+            Auto-refreshes every 10s
+          </span>
+          <button className="btn btn-outline btn-sm" onClick={handleRefresh} disabled={refreshing}>
+            {refreshing ? "Refreshing…" : "↻ Refresh Now"}
+          </button>
+        </div>
+      </div>
+      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 22 }}>
+        Staff submissions appear here automatically. Click <strong>Refresh Now</strong> to check instantly.
+      </div>
       {pending.length === 0
         ? <div className="card" style={{ textAlign: "center", padding: 48, color: "#9b8e82" }}><div style={{ fontSize: 36, marginBottom: 10 }}>✅</div><div style={{ fontWeight: 600 }}>No pending approvals</div></div>
         : pending.map(entry => (
@@ -1165,6 +1212,37 @@ function AlertsSection({ session, data, mutate }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// STAFF CARD  (extracted from UsersSection to avoid hook-in-loop bug)
+// ════════════════════════════════════════════════════════════════════════
+function StaffCard({ acc, onDelete, onUpdatePassword }) {
+  const [newPw, setNewPw] = useState("");
+  return (
+    <div className="card" style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name}</div>
+          <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>
+            ID: <code style={CS}>{acc.id}</code> · {acc.branch} · Password: <code style={CS}>{acc.password}</code>
+          </div>
+        </div>
+        <button className="btn btn-danger btn-sm" onClick={() => onDelete(acc.id)}>Delete</button>
+      </div>
+      <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
+        <input type="text" placeholder="Change password…" value={newPw} onChange={e => setNewPw(e.target.value)} style={{ width: 200, padding: "5px 8px", fontSize: 12 }} />
+        <button className="btn btn-sm btn-outline" onClick={() => { onUpdatePassword(acc.id, newPw); setNewPw(""); }}>Update Password</button>
+      </div>
+      <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {SECTIONS.map(s => (
+          <div key={s} style={{ fontSize: 11, background: "#f0ede8", borderRadius: 20, padding: "2px 10px" }}>
+            {SECTION_LABELS[s]}: {["view", "add", "edit"].filter(a => acc.perms?.[s]?.[a]).join("/") || "none"}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // MANAGE STAFF (Users)
 // ════════════════════════════════════════════════════════════════════════
 function UsersSection({ accounts, setAccounts, audit }) {
@@ -1203,32 +1281,9 @@ function UsersSection({ accounts, setAccounts, audit }) {
         <strong>ℹ How staff accounts sync:</strong> Accounts are saved to <em>localStorage</em> on this browser AND pushed to Supabase cloud (if connected). Other devices pull the latest accounts on page load. If a new staff account isn't visible on another browser, open that browser and <strong>refresh the page</strong>.
       </div>
       {msg && <div style={{ marginBottom: 14, fontSize: 13, padding: "8px 14px", borderRadius: 8, background: "#dcfce7", color: "#16a34a" }}>{msg}</div>}
-      {staff.map(acc => {
-        const [newPw, setNewPw] = useState("");
-        return (
-          <div key={acc.id} className="card" style={{ marginBottom: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name}</div>
-                <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>ID: <code style={CS}>{acc.id}</code> · {acc.branch} · Password: <code style={CS}>{acc.password}</code></div>
-              </div>
-              <button className="btn btn-danger btn-sm" onClick={() => delStaff(acc.id)}>Delete</button>
-            </div>
-            {/* Inline password change */}
-            <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
-              <input type="text" placeholder="Change password…" value={newPw} onChange={e => setNewPw(e.target.value)} style={{ width: 200, padding: "5px 8px", fontSize: 12 }} />
-              <button className="btn btn-sm btn-outline" onClick={() => { updatePassword(acc.id, newPw); setNewPw(""); }}>Update Password</button>
-            </div>
-            <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {SECTIONS.map(s => (
-                <div key={s} style={{ fontSize: 11, background: "#f0ede8", borderRadius: 20, padding: "2px 10px" }}>
-                  {SECTION_LABELS[s]}: {["view", "add", "edit"].filter(a => acc.perms?.[s]?.[a]).join("/") || "none"}
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
+      {staff.map(acc => (
+        <StaffCard key={acc.id} acc={acc} onDelete={delStaff} onUpdatePassword={updatePassword} />
+      ))}
       {addModal && (
         <Modal title="Add New Staff" onClose={() => setAddModal(false)} onSave={addStaff} saveLabel="Create Account">
           <div className="form-grid">
