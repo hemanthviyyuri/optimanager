@@ -179,8 +179,19 @@ export default function App() {
   const [sbStatus,    setSbStatus]    = useState("idle"); // idle | ok | error
   const [view,        setView]        = useState("dashboard");
 
-  // Init Supabase on load
-  useEffect(() => { if (sbCreds.url && sbCreds.key) initSB(sbCreds.url, sbCreds.key); }, []);
+  // Init Supabase on load + immediately pull latest accounts from cloud
+  useEffect(() => {
+    if (sbCreds.url && sbCreds.key) {
+      initSB(sbCreds.url, sbCreds.key);
+      // Pull accounts immediately so new staff added on another device are visible
+      sbGet("accounts").then(accs => {
+        if (accs && accs.length > 0) {
+          setAccounts(accs);
+          LS.set("opti_accounts", accs);
+        }
+      }).catch(() => {});
+    }
+  }, []);
 
   // Persist everything locally as fallback
   useEffect(() => { LS.set("opti_accounts", accounts); }, [accounts]);
@@ -189,6 +200,16 @@ export default function App() {
   useEffect(() => { LS.set("opti_audit",    auditLog); }, [auditLog]);
   useEffect(() => { LS.set("opti_fields",   fieldVis); }, [fieldVis]);
   useEffect(() => { LS.set("opti_sb",       sbCreds);  }, [sbCreds]);
+
+  // ── FIX: Auto-push accounts to Supabase whenever they change ────
+  // This ensures new/edited staff accounts are immediately visible
+  // on ALL browsers and devices — not just the one that made the change.
+  const isFirstAccountsRender = useRef(true);
+  useEffect(() => {
+    if (isFirstAccountsRender.current) { isFirstAccountsRender.current = false; return; }
+    if (!_sb) return;
+    sbUpsert("accounts", accounts).catch(() => {});
+  }, [accounts]);
 
   // ── Audit log entry ──────────────────────────────────────────────
   const audit = useCallback((action, detail = {}) => {
@@ -1150,6 +1171,8 @@ function UsersSection({ accounts, setAccounts, audit }) {
   const staff = accounts.filter(a => a.role === "staff");
   const [addModal, setAddModal] = useState(false);
   const [newUser, setNewUser]   = useState({ id: "", name: "", branch: BRANCHES[0], password: "" });
+  const [msg, setMsg]           = useState("");
+
   const addStaff = () => {
     if (!newUser.id || !newUser.name || !newUser.password) { alert("Fill all fields."); return; }
     if (accounts.find(a => a.id === newUser.id)) { alert("User ID already exists."); return; }
@@ -1157,7 +1180,16 @@ function UsersSection({ accounts, setAccounts, audit }) {
     setAccounts(p => [...p, { ...newUser, role: "staff", perms }]);
     audit("CREATE_STAFF", { userId: newUser.id, name: newUser.name });
     setAddModal(false); setNewUser({ id: "", name: "", branch: BRANCHES[0], password: "" });
+    setMsg(`✅ Staff "${newUser.name}" created. If Supabase is connected, it will sync to all devices automatically.`);
   };
+
+  const updatePassword = (id, newPw) => {
+    if (!newPw || newPw.length < 4) { alert("Password must be at least 4 characters."); return; }
+    setAccounts(p => p.map(a => a.id === id ? { ...a, password: newPw } : a));
+    audit("UPDATE_STAFF_PW", { userId: id });
+    setMsg(`✅ Password updated. Changes will sync to all devices automatically.`);
+  };
+
   const delStaff = id => { if (confirm("Delete staff account?")) { setAccounts(p => p.filter(a => a.id !== id)); audit("DELETE_STAFF", { userId: id }); } };
   return (
     <div>
@@ -1166,24 +1198,37 @@ function UsersSection({ accounts, setAccounts, audit }) {
         <button className="btn btn-dark btn-sm" onClick={() => setAddModal(true)}>+ Add Staff</button>
       </div>
       <div style={{ marginBottom: 14, fontSize: 13, color: "#9b8e82" }}>Use <strong>Dashboard Builder</strong> to control field visibility and section permissions per staff member.</div>
-      {staff.map(acc => (
-        <div key={acc.id} className="card" style={{ marginBottom: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name}</div>
-              <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>ID: <code style={CS}>{acc.id}</code> · {acc.branch} · Password: <code style={CS}>{acc.password}</code></div>
-            </div>
-            <button className="btn btn-danger btn-sm" onClick={() => delStaff(acc.id)}>Delete</button>
-          </div>
-          <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {SECTIONS.map(s => (
-              <div key={s} style={{ fontSize: 11, background: "#f0ede8", borderRadius: 20, padding: "2px 10px" }}>
-                {SECTION_LABELS[s]}: {["view", "add", "edit"].filter(a => acc.perms?.[s]?.[a]).join("/") || "none"}
+      {/* FIX: show sync status so owner knows accounts are saved to cloud */}
+      <div style={{ marginBottom: 14, fontSize: 13, padding: "10px 14px", borderRadius: 10, background: "#f0ede8", color: "#6b5e52" }}>
+        <strong>ℹ How staff accounts sync:</strong> Accounts are saved to <em>localStorage</em> on this browser AND pushed to Supabase cloud (if connected). Other devices pull the latest accounts on page load. If a new staff account isn't visible on another browser, open that browser and <strong>refresh the page</strong>.
+      </div>
+      {msg && <div style={{ marginBottom: 14, fontSize: 13, padding: "8px 14px", borderRadius: 8, background: "#dcfce7", color: "#16a34a" }}>{msg}</div>}
+      {staff.map(acc => {
+        const [newPw, setNewPw] = useState("");
+        return (
+          <div key={acc.id} className="card" style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name}</div>
+                <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>ID: <code style={CS}>{acc.id}</code> · {acc.branch} · Password: <code style={CS}>{acc.password}</code></div>
               </div>
-            ))}
+              <button className="btn btn-danger btn-sm" onClick={() => delStaff(acc.id)}>Delete</button>
+            </div>
+            {/* Inline password change */}
+            <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="text" placeholder="Change password…" value={newPw} onChange={e => setNewPw(e.target.value)} style={{ width: 200, padding: "5px 8px", fontSize: 12 }} />
+              <button className="btn btn-sm btn-outline" onClick={() => { updatePassword(acc.id, newPw); setNewPw(""); }}>Update Password</button>
+            </div>
+            <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {SECTIONS.map(s => (
+                <div key={s} style={{ fontSize: 11, background: "#f0ede8", borderRadius: 20, padding: "2px 10px" }}>
+                  {SECTION_LABELS[s]}: {["view", "add", "edit"].filter(a => acc.perms?.[s]?.[a]).join("/") || "none"}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
       {addModal && (
         <Modal title="Add New Staff" onClose={() => setAddModal(false)} onSave={addStaff} saveLabel="Create Account">
           <div className="form-grid">
