@@ -179,37 +179,60 @@ export default function App() {
   const [sbStatus,    setSbStatus]    = useState("idle"); // idle | ok | error
   const [view,        setView]        = useState("dashboard");
 
-  // Init Supabase on load + immediately pull latest accounts from cloud
+  const [lastSync, setLastSync] = useState(null);
+  const [syncing,  setSyncing]  = useState(false);
+
+  // ── Init Supabase + auto-load on startup ──────────────────────
   useEffect(() => {
     if (sbCreds.url && sbCreds.key) {
       initSB(sbCreds.url, sbCreds.key);
-      // Pull accounts immediately so new staff added on another device are visible
-      sbGet("accounts").then(accs => {
-        if (accs && accs.length > 0) {
-          setAccounts(accs);
-          LS.set("opti_accounts", accs);
-        }
-      }).catch(() => {});
+      // Always pull fresh data from Supabase on every page load
+      autoSync(sbCreds.url, sbCreds.key);
     }
   }, []);
 
-  // Persist everything locally as fallback
+  // ── Auto-refresh every 20 seconds when Supabase is connected ──
+  useEffect(() => {
+    if (!sbCreds.url || !sbCreds.key) return;
+    const interval = setInterval(() => {
+      autoSync(sbCreds.url, sbCreds.key);
+    }, 20000);
+    return () => clearInterval(interval);
+  }, [sbCreds]);
+
+  // ── Core auto-sync function ────────────────────────────────────
+  const autoSync = async (url, key) => {
+    if (!url || !key) return;
+    initSB(url, key);
+    if (!_sb) return;
+    setSyncing(true);
+    try {
+      const [pts, bills, stk, inv, pend, accs] = await Promise.all([
+        sbGet("patients"), sbGet("patientBill"), sbGet("stock"),
+        sbGet("invoices"), sbGet("pending_queue"), sbGet("accounts"),
+      ]);
+      if (pts)  setData(d => ({ ...d, patients:    pts   }));
+      if (bills)setData(d => ({ ...d, patientBill: bills }));
+      if (stk)  setData(d => ({ ...d, stock:       stk   }));
+      if (inv)  setData(d => ({ ...d, invoices:    inv   }));
+      if (pend) setPending(pend);
+      if (accs && accs.length > 0) {
+        setAccounts(accs);
+        LS.set("opti_accounts", accs);
+      }
+      setLastSync(new Date());
+      setSbStatus("ok");
+    } catch { /* silent fail — use local data */ }
+    setSyncing(false);
+  };
+
+  // ── Persist locally as fallback ───────────────────────────────
   useEffect(() => { LS.set("opti_accounts", accounts); }, [accounts]);
   useEffect(() => { LS.set("opti_data_v4",  data);     }, [data]);
   useEffect(() => { LS.set("opti_pending",  pending);  }, [pending]);
   useEffect(() => { LS.set("opti_audit",    auditLog); }, [auditLog]);
   useEffect(() => { LS.set("opti_fields",   fieldVis); }, [fieldVis]);
   useEffect(() => { LS.set("opti_sb",       sbCreds);  }, [sbCreds]);
-
-  // ── FIX: Auto-push accounts to Supabase whenever they change ────
-  // This ensures new/edited staff accounts are immediately visible
-  // on ALL browsers and devices — not just the one that made the change.
-  const isFirstAccountsRender = useRef(true);
-  useEffect(() => {
-    if (isFirstAccountsRender.current) { isFirstAccountsRender.current = false; return; }
-    if (!_sb) return;
-    sbUpsert("accounts", accounts).catch(() => {});
-  }, [accounts]);
 
   // ── Audit log entry ──────────────────────────────────────────────
   const audit = useCallback((action, detail = {}) => {
@@ -252,22 +275,7 @@ export default function App() {
 
   // ── Supabase full sync ───────────────────────────────────────────
   const syncFromSupabase = async () => {
-    if (!_sb) return;
-    setSbStatus("syncing");
-    try {
-      const [pts, bills, stk, inv, pend, aud, accs] = await Promise.all([
-        sbGet("patients"), sbGet("patientBill"), sbGet("stock"),
-        sbGet("invoices"), sbGet("pending_queue"), sbGet("audit_log"), sbGet("accounts"),
-      ]);
-      if (pts)  setData(d => ({ ...d, patients: pts }));
-      if (bills)setData(d => ({ ...d, patientBill: bills }));
-      if (stk)  setData(d => ({ ...d, stock: stk }));
-      if (inv)  setData(d => ({ ...d, invoices: inv }));
-      if (pend) setPending(pend);
-      if (aud)  setAuditLog(aud);
-      if (accs) setAccounts(accs);
-      setSbStatus("ok");
-    } catch { setSbStatus("error"); }
+    await autoSync(sbCreds.url, sbCreds.key);
   };
 
   const pushToSupabase = async () => {
@@ -289,70 +297,55 @@ export default function App() {
   // ── Data mutations ───────────────────────────────────────────────
   const mutate = useCallback((key, fn) => {
     setData(d => {
-      const next = { ...d, [key]: typeof fn === "function" ? fn(d[key]) : fn };
-      if (_sb) {
-        const changed = typeof fn === "function" ? fn(d[key]) : fn;
-        if (Array.isArray(changed)) sbUpsert(key === "stock" ? "stock" : key, changed).catch(() => {});
+      const updated = typeof fn === "function" ? fn(d[key]) : fn;
+      const next = { ...d, [key]: updated };
+      // Immediately sync changed table to Supabase
+      if (_sb && Array.isArray(updated)) {
+        sbUpsert(key, updated).catch(() => {});
       }
       return next;
     });
   }, []);
 
   // ── Staff submit → pending queue ─────────────────────────────────
-  const staffSubmit = useCallback((type, record) => {
+  const staffSubmit = useCallback(async (type, record) => {
     const entry = { id: uid(), type, record: { ...record, status: "pending" }, submittedBy: session.id, submittedByName: session.name, branch: session.branch, submittedAt: ts() };
-    setPending(p => {
-      const next = [...p, entry];
-      sbUpsert("pending_queue", next).catch(() => {});
-      return next;
-    });
+    setPending(p => [...p, entry]);
+    // Immediately push this single entry to Supabase so owner sees it instantly
+    if (_sb) await sbUpsert("pending_queue", [entry]).catch(() => {});
     audit("STAFF_SUBMIT", { type, recordId: record.id });
   }, [session, audit]);
 
   // ── Owner approve ────────────────────────────────────────────────
-  const approvePending = useCallback((entryId) => {
+  const approvePending = useCallback(async (entryId) => {
     const entry = pending.find(p => p.id === entryId);
     if (!entry) return;
     const record = { ...entry.record, status: "approved", approvedBy: session.id, approvedByName: session.name, approvedAt: ts() };
+    // 1. Save approved record to Supabase immediately
+    if (_sb) await sbUpsert(entry.type, [record]).catch(() => {});
+    // 2. Update local state
     mutate(entry.type, arr => {
       const exists = arr.find(x => x.id === record.id);
       return exists ? arr.map(x => x.id === record.id ? record : x) : [...arr, record];
     });
-    setPending(p => p.filter(x => x.id !== entryId));
+    // 3. Remove from pending queue in Supabase
+    const newPending = pending.filter(x => x.id !== entryId);
+    setPending(newPending);
+    if (_sb) await sbUpsert("pending_queue", newPending.length ? newPending : []).catch(() => {});
+    // 4. Delete the specific pending entry from DB
+    if (_sb) await sbDelete("pending_queue", entryId).catch(() => {});
     audit("APPROVE", { type: entry.type, recordId: record.id, submittedBy: entry.submittedByName });
   }, [pending, session, mutate, audit]);
 
-  const rejectPending = useCallback((entryId) => {
+  const rejectPending = useCallback(async (entryId) => {
     const entry = pending.find(p => p.id === entryId);
-    setPending(p => p.filter(x => x.id !== entryId));
+    const newPending = pending.filter(x => x.id !== entryId);
+    setPending(newPending);
+    if (_sb) await sbDelete("pending_queue", entryId).catch(() => {});
     audit("REJECT", { type: entry?.type, submittedBy: entry?.submittedByName });
   }, [pending, audit]);
 
-  // ── FIX Bug 2: Live-poll pending queue every 10s when owner is logged in ──
-  // This makes staff submissions appear instantly in owner's Approval tab
-  // without needing to logout/login.
-  useEffect(() => {
-    if (!session || session.role !== "owner") return;
-    if (!_sb) return;
-    const poll = setInterval(async () => {
-      try {
-        const fresh = await sbGet("pending_queue");
-        if (fresh && Array.isArray(fresh)) {
-          setPending(prev => {
-            // Only update if something actually changed (new item or item removed)
-            const prevIds = prev.map(p => p.id).sort().join(",");
-            const freshIds = fresh.map(p => p.id).sort().join(",");
-            if (prevIds !== freshIds) {
-              LS.set("opti_pending", fresh);
-              return fresh;
-            }
-            return prev;
-          });
-        }
-      } catch {}
-    }, 10000); // poll every 10 seconds
-    return () => clearInterval(poll);
-  }, [session]);
+  // ── Login / Logout ───────────────────────────────────────────────
   const login = useCallback((acc) => {
     const s = { ...acc, loginTime: ts() };
     LS.sess(s);
@@ -383,9 +376,9 @@ export default function App() {
   const sharedProps = { session, data, mutate, staffSubmit, can, audit, fieldVis };
 
   return (
-    <Shell session={session} onLogout={logout} pending={pending} view={view} setView={setView} can={can} sbStatus={sbStatus}>
+    <Shell session={session} onLogout={logout} pending={pending} view={view} setView={setView} can={can} sbStatus={sbStatus} syncing={syncing} lastSync={lastSync} onManualSync={()=>autoSync(sbCreds.url,sbCreds.key)}>
       {view === "dashboard"    && <Dashboard session={session} data={data} pending={pending} setView={setView} auditLog={auditLog} />}
-      {view === "approval"     && session.role === "owner" && <ApprovalQueue pending={pending} onApprove={approvePending} onReject={rejectPending} onRefresh={async () => { const f = await sbGet("pending_queue"); if (f && Array.isArray(f)) { setPending(f); LS.set("opti_pending", f); } }} />}
+      {view === "approval"     && session.role === "owner" && <ApprovalQueue pending={pending} onApprove={approvePending} onReject={rejectPending} />}
       {view === "patients"     && <PatientsSection     {...sharedProps} />}
       {view === "patientBill"  && <PatientBillSection  {...sharedProps} />}
       {view === "inventory"    && <InventorySection    {...sharedProps} />}
@@ -454,7 +447,7 @@ function LoginScreen({ accounts, onLogin }) {
 // ════════════════════════════════════════════════════════════════════════
 // SHELL
 // ════════════════════════════════════════════════════════════════════════
-function Shell({ session, onLogout, pending, view, setView, can, sbStatus, children }) {
+function Shell({ session, onLogout, pending, view, setView, can, sbStatus, syncing, lastSync, onManualSync, children }) {
   const isOwner = session.role === "owner";
   const NAV = [
     { id: "dashboard",   label: "Dashboard",        icon: "⬡", show: true },
@@ -498,6 +491,12 @@ function Shell({ session, onLogout, pending, view, setView, can, sbStatus, child
               </button>
         )}
         <div style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px solid #f0ede8" }}>
+          <button className="btn btn-outline btn-sm" style={{ width: "100%", marginBottom: 8 }} onClick={onManualSync} disabled={syncing}>
+            {syncing ? "⟳ Syncing…" : "⟳ Sync Now"}
+          </button>
+          {lastSync && <div style={{ fontSize: 10, color: "#b5a99e", textAlign: "center", marginBottom: 8 }}>
+            Last sync: {lastSync.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          </div>}
           <button className="btn btn-outline btn-sm" style={{ width: "100%" }} onClick={onLogout}>🔒 Logout</button>
         </div>
       </aside>
@@ -590,36 +589,13 @@ function Dashboard({ session, data, pending, setView, auditLog }) {
 // ════════════════════════════════════════════════════════════════════════
 // APPROVAL QUEUE
 // ════════════════════════════════════════════════════════════════════════
-function ApprovalQueue({ pending, onApprove, onReject, onRefresh }) {
+function ApprovalQueue({ pending, onApprove, onReject }) {
   const [detail, setDetail] = useState(null);
-  const [refreshing, setRefreshing] = useState(false);
   const colors = { patients: "#1d4ed8", patientBill: "#7c3aed", inventory: "#16a34a", invoices: "#a16207" };
-
-  const handleRefresh = async () => {
-    if (!onRefresh) return;
-    setRefreshing(true);
-    await onRefresh();
-    setRefreshing(false);
-  };
-
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700 }}>Approval Queue</div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {/* Live indicator dot */}
-          <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#9b8e82" }}>
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#16a34a", display: "inline-block", boxShadow: "0 0 0 3px #dcfce7" }} />
-            Auto-refreshes every 10s
-          </span>
-          <button className="btn btn-outline btn-sm" onClick={handleRefresh} disabled={refreshing}>
-            {refreshing ? "Refreshing…" : "↻ Refresh Now"}
-          </button>
-        </div>
-      </div>
-      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 22 }}>
-        Staff submissions appear here automatically. Click <strong>Refresh Now</strong> to check instantly.
-      </div>
+      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Approval Queue</div>
+      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 22 }}>Review staff submissions before they are saved to the database.</div>
       {pending.length === 0
         ? <div className="card" style={{ textAlign: "center", padding: 48, color: "#9b8e82" }}><div style={{ fontSize: 36, marginBottom: 10 }}>✅</div><div style={{ fontWeight: 600 }}>No pending approvals</div></div>
         : pending.map(entry => (
@@ -1212,45 +1188,12 @@ function AlertsSection({ session, data, mutate }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// STAFF CARD  (extracted from UsersSection to avoid hook-in-loop bug)
-// ════════════════════════════════════════════════════════════════════════
-function StaffCard({ acc, onDelete, onUpdatePassword }) {
-  const [newPw, setNewPw] = useState("");
-  return (
-    <div className="card" style={{ marginBottom: 14 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name}</div>
-          <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>
-            ID: <code style={CS}>{acc.id}</code> · {acc.branch} · Password: <code style={CS}>{acc.password}</code>
-          </div>
-        </div>
-        <button className="btn btn-danger btn-sm" onClick={() => onDelete(acc.id)}>Delete</button>
-      </div>
-      <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
-        <input type="text" placeholder="Change password…" value={newPw} onChange={e => setNewPw(e.target.value)} style={{ width: 200, padding: "5px 8px", fontSize: 12 }} />
-        <button className="btn btn-sm btn-outline" onClick={() => { onUpdatePassword(acc.id, newPw); setNewPw(""); }}>Update Password</button>
-      </div>
-      <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {SECTIONS.map(s => (
-          <div key={s} style={{ fontSize: 11, background: "#f0ede8", borderRadius: 20, padding: "2px 10px" }}>
-            {SECTION_LABELS[s]}: {["view", "add", "edit"].filter(a => acc.perms?.[s]?.[a]).join("/") || "none"}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
 // MANAGE STAFF (Users)
 // ════════════════════════════════════════════════════════════════════════
 function UsersSection({ accounts, setAccounts, audit }) {
   const staff = accounts.filter(a => a.role === "staff");
   const [addModal, setAddModal] = useState(false);
   const [newUser, setNewUser]   = useState({ id: "", name: "", branch: BRANCHES[0], password: "" });
-  const [msg, setMsg]           = useState("");
-
   const addStaff = () => {
     if (!newUser.id || !newUser.name || !newUser.password) { alert("Fill all fields."); return; }
     if (accounts.find(a => a.id === newUser.id)) { alert("User ID already exists."); return; }
@@ -1258,16 +1201,7 @@ function UsersSection({ accounts, setAccounts, audit }) {
     setAccounts(p => [...p, { ...newUser, role: "staff", perms }]);
     audit("CREATE_STAFF", { userId: newUser.id, name: newUser.name });
     setAddModal(false); setNewUser({ id: "", name: "", branch: BRANCHES[0], password: "" });
-    setMsg(`✅ Staff "${newUser.name}" created. If Supabase is connected, it will sync to all devices automatically.`);
   };
-
-  const updatePassword = (id, newPw) => {
-    if (!newPw || newPw.length < 4) { alert("Password must be at least 4 characters."); return; }
-    setAccounts(p => p.map(a => a.id === id ? { ...a, password: newPw } : a));
-    audit("UPDATE_STAFF_PW", { userId: id });
-    setMsg(`✅ Password updated. Changes will sync to all devices automatically.`);
-  };
-
   const delStaff = id => { if (confirm("Delete staff account?")) { setAccounts(p => p.filter(a => a.id !== id)); audit("DELETE_STAFF", { userId: id }); } };
   return (
     <div>
@@ -1276,13 +1210,23 @@ function UsersSection({ accounts, setAccounts, audit }) {
         <button className="btn btn-dark btn-sm" onClick={() => setAddModal(true)}>+ Add Staff</button>
       </div>
       <div style={{ marginBottom: 14, fontSize: 13, color: "#9b8e82" }}>Use <strong>Dashboard Builder</strong> to control field visibility and section permissions per staff member.</div>
-      {/* FIX: show sync status so owner knows accounts are saved to cloud */}
-      <div style={{ marginBottom: 14, fontSize: 13, padding: "10px 14px", borderRadius: 10, background: "#f0ede8", color: "#6b5e52" }}>
-        <strong>ℹ How staff accounts sync:</strong> Accounts are saved to <em>localStorage</em> on this browser AND pushed to Supabase cloud (if connected). Other devices pull the latest accounts on page load. If a new staff account isn't visible on another browser, open that browser and <strong>refresh the page</strong>.
-      </div>
-      {msg && <div style={{ marginBottom: 14, fontSize: 13, padding: "8px 14px", borderRadius: 8, background: "#dcfce7", color: "#16a34a" }}>{msg}</div>}
       {staff.map(acc => (
-        <StaffCard key={acc.id} acc={acc} onDelete={delStaff} onUpdatePassword={updatePassword} />
+        <div key={acc.id} className="card" style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name}</div>
+              <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>ID: <code style={CS}>{acc.id}</code> · {acc.branch} · Password: <code style={CS}>{acc.password}</code></div>
+            </div>
+            <button className="btn btn-danger btn-sm" onClick={() => delStaff(acc.id)}>Delete</button>
+          </div>
+          <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {SECTIONS.map(s => (
+              <div key={s} style={{ fontSize: 11, background: "#f0ede8", borderRadius: 20, padding: "2px 10px" }}>
+                {SECTION_LABELS[s]}: {["view", "add", "edit"].filter(a => acc.perms?.[s]?.[a]).join("/") || "none"}
+              </div>
+            ))}
+          </div>
+        </div>
       ))}
       {addModal && (
         <Modal title="Add New Staff" onClose={() => setAddModal(false)} onSave={addStaff} saveLabel="Create Account">
