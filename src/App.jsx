@@ -42,31 +42,55 @@ function initSB(url, key) {
   return true;
 }
 
+// Map JS keys to actual Supabase table names (quoted for camelCase)
+const SB_TABLES = {
+  patients:    "patients",
+  patientBill: "patientBill",
+  stock:       "stock",
+  invoices:    "invoices",
+  pending_queue: "pending_queue",
+  accounts:    "accounts",
+  audit_log:   "audit_log",
+};
+function sbTable(key) { return SB_TABLES[key] || key; }
+
 async function sbGet(table, filters = {}) {
   if (!_sb) return null;
-  let url = `${_sb.url}/rest/v1/${table}?select=*`;
+  const tbl = encodeURIComponent(sbTable(table));
+  let url = `${_sb.url}/rest/v1/${tbl}?select=*`;
   Object.entries(filters).forEach(([k, v]) => { url += `&${k}=eq.${encodeURIComponent(v)}`; });
-  const r = await fetch(url, { headers: sbHeaders() });
-  if (!r.ok) return null;
-  return r.json();
+  try {
+    const r = await fetch(url, { headers: sbHeaders() });
+    if (!r.ok) return null;
+    const data = await r.json();
+    return Array.isArray(data) ? data : null;
+  } catch { return null; }
 }
 
 async function sbUpsert(table, rows) {
   if (!_sb) return false;
-  const r = await fetch(`${_sb.url}/rest/v1/${table}`, {
-    method: "POST",
-    headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates" },
-    body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
-  });
-  return r.ok;
+  const arr = Array.isArray(rows) ? rows : [rows];
+  if (!arr.length) return true;
+  const tbl = encodeURIComponent(sbTable(table));
+  try {
+    const r = await fetch(`${_sb.url}/rest/v1/${tbl}`, {
+      method: "POST",
+      headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates" },
+      body: JSON.stringify(arr),
+    });
+    return r.ok;
+  } catch { return false; }
 }
 
 async function sbDelete(table, id) {
   if (!_sb) return false;
-  const r = await fetch(`${_sb.url}/rest/v1/${table}?id=eq.${id}`, {
-    method: "DELETE", headers: sbHeaders(),
-  });
-  return r.ok;
+  const tbl = encodeURIComponent(sbTable(table));
+  try {
+    const r = await fetch(`${_sb.url}/rest/v1/${tbl}?id=eq.${id}`, {
+      method: "DELETE", headers: sbHeaders(),
+    });
+    return r.ok;
+  } catch { return false; }
 }
 
 async function sbInsert(table, row) {
@@ -182,23 +206,24 @@ export default function App() {
   const [lastSync, setLastSync] = useState(null);
   const [syncing,  setSyncing]  = useState(false);
 
-  // ── Init Supabase + auto-load on startup ──────────────────────
+  // ── Init Supabase on startup ──────────────────────────────────
   useEffect(() => {
     if (sbCreds.url && sbCreds.key) {
       initSB(sbCreds.url, sbCreds.key);
-      // Always pull fresh data from Supabase on every page load
-      autoSync(sbCreds.url, sbCreds.key);
+      // Initial sync is handled by the interval useEffect below
     }
   }, []);
 
-  // ── Auto-refresh every 20 seconds when Supabase is connected ──
+  // ── Auto-refresh every 15 seconds when Supabase is connected ──
   useEffect(() => {
     if (!sbCreds.url || !sbCreds.key) return;
+    // Run once immediately on mount too (covers login)
+    autoSync(sbCreds.url, sbCreds.key);
     const interval = setInterval(() => {
       autoSync(sbCreds.url, sbCreds.key);
-    }, 20000);
+    }, 15000); // every 15 seconds
     return () => clearInterval(interval);
-  }, [sbCreds]);
+  }, [sbCreds.url, sbCreds.key]);
 
   // ── Core auto-sync function ────────────────────────────────────
   const autoSync = async (url, key) => {
@@ -207,22 +232,48 @@ export default function App() {
     if (!_sb) return;
     setSyncing(true);
     try {
+      // Fetch all tables in parallel
       const [pts, bills, stk, inv, pend, accs] = await Promise.all([
-        sbGet("patients"), sbGet("patientBill"), sbGet("stock"),
-        sbGet("invoices"), sbGet("pending_queue"), sbGet("accounts"),
+        sbGet("patients"),
+        sbGet("patientBill"),
+        sbGet("stock"),
+        sbGet("invoices"),
+        sbGet("pending_queue"),
+        sbGet("accounts"),
       ]);
-      if (pts)  setData(d => ({ ...d, patients:    pts   }));
-      if (bills)setData(d => ({ ...d, patientBill: bills }));
-      if (stk)  setData(d => ({ ...d, stock:       stk   }));
-      if (inv)  setData(d => ({ ...d, invoices:    inv   }));
-      if (pend) setPending(pend);
-      if (accs && accs.length > 0) {
+
+    // CRITICAL: Only overwrite local data if Supabase returned a valid non-null array.
+      // An empty array from Supabase is valid (no records yet), but null means the fetch
+      // failed — never wipe existing data on a failed fetch.
+      // Also: never replace with an empty array if we already have local data and
+      // Supabase returned empty (could be a transient error / RLS issue).
+      setData(d => {
+        const next = {
+          ...d,
+          patients:    (Array.isArray(pts)   && (pts.length   > 0 || d.patients.length    === 0)) ? pts   : d.patients,
+          patientBill: (Array.isArray(bills) && (bills.length > 0 || d.patientBill.length  === 0)) ? bills : d.patientBill,
+          stock:       (Array.isArray(stk)   && (stk.length   > 0 || d.stock.length        === 0)) ? stk   : d.stock,
+          invoices:    (Array.isArray(inv)   && (inv.length   > 0 || d.invoices.length     === 0)) ? inv   : d.invoices,
+        };
+        // Always persist to localStorage immediately after a successful sync
+        // so a page refresh never loses data
+        LS.set("opti_data_v4", next);
+        return next;
+      });
+
+      if (Array.isArray(pend)) setPending(pend);
+
+      if (Array.isArray(accs) && accs.length > 0) {
         setAccounts(accs);
         LS.set("opti_accounts", accs);
       }
+
       setLastSync(new Date());
       setSbStatus("ok");
-    } catch { /* silent fail — use local data */ }
+    } catch(e) {
+      console.warn("Sync failed:", e);
+      setSbStatus("error");
+    }
     setSyncing(false);
   };
 
@@ -297,22 +348,32 @@ export default function App() {
   // ── Data mutations ───────────────────────────────────────────────
   const mutate = useCallback((key, fn) => {
     setData(d => {
-      const updated = typeof fn === "function" ? fn(d[key]) : fn;
-      const next = { ...d, [key]: updated };
-      // Immediately sync changed table to Supabase
-      if (_sb && Array.isArray(updated)) {
+      const updated = typeof fn === "function" ? fn(d[key] || []) : fn;
+      if (_sb && Array.isArray(updated) && updated.length > 0) {
+        // Only upsert changed/new records, not the whole array
         sbUpsert(key, updated).catch(() => {});
       }
+      const next = { ...d, [key]: updated };
+      LS.set("opti_data_v4", next); // persist immediately so refresh never loses data
       return next;
     });
   }, []);
 
   // ── Staff submit → pending queue ─────────────────────────────────
   const staffSubmit = useCallback(async (type, record) => {
-    const entry = { id: uid(), type, record: { ...record, status: "pending" }, submittedBy: session.id, submittedByName: session.name, branch: session.branch, submittedAt: ts() };
+    const entry = {
+      id: uid(),
+      type,
+      record: { ...record, status: "pending" },
+      submittedBy: session.id,
+      submittedByName: session.name,
+      branch: session.branch,
+      submittedAt: ts()
+    };
+    // 1. Push to Supabase pending_queue immediately
+    await sbUpsert("pending_queue", [entry]).catch(() => {});
+    // 2. Update local pending state
     setPending(p => [...p, entry]);
-    // Immediately push this single entry to Supabase so owner sees it instantly
-    if (_sb) await sbUpsert("pending_queue", [entry]).catch(() => {});
     audit("STAFF_SUBMIT", { type, recordId: record.id });
   }, [session, audit]);
 
@@ -320,22 +381,41 @@ export default function App() {
   const approvePending = useCallback(async (entryId) => {
     const entry = pending.find(p => p.id === entryId);
     if (!entry) return;
-    const record = { ...entry.record, status: "approved", approvedBy: session.id, approvedByName: session.name, approvedAt: ts() };
-    // 1. Save approved record to Supabase immediately
-    if (_sb) await sbUpsert(entry.type, [record]).catch(() => {});
-    // 2. Update local state
-    mutate(entry.type, arr => {
+    const record = {
+      ...entry.record,
+      status: "approved",
+      approvedBy: session.id,
+      approvedByName: session.name,
+      approvedAt: ts()
+    };
+
+    // 1. Save approved record to Supabase FIRST (so staff browsers pick it up on next sync)
+    await sbUpsert(entry.type, [record]).catch(() => {});
+
+    // 2. Remove from pending in Supabase
+    await sbDelete("pending_queue", entryId).catch(() => {});
+
+    // 3. Update local state AND localStorage immediately (so refresh doesn't lose it)
+    setData(d => {
+      const arr = d[entry.type] || [];
       const exists = arr.find(x => x.id === record.id);
-      return exists ? arr.map(x => x.id === record.id ? record : x) : [...arr, record];
+      const updated = exists
+        ? arr.map(x => x.id === record.id ? record : x)
+        : [...arr, record];
+      const next = { ...d, [entry.type]: updated };
+      LS.set("opti_data_v4", next); // persist immediately
+      return next;
     });
-    // 3. Remove from pending queue in Supabase
-    const newPending = pending.filter(x => x.id !== entryId);
-    setPending(newPending);
-    if (_sb) await sbUpsert("pending_queue", newPending.length ? newPending : []).catch(() => {});
-    // 4. Delete the specific pending entry from DB
-    if (_sb) await sbDelete("pending_queue", entryId).catch(() => {});
+
+    // 4. Remove from local pending and persist
+    setPending(p => {
+      const next = p.filter(x => x.id !== entryId);
+      LS.set("opti_pending", next);
+      return next;
+    });
+
     audit("APPROVE", { type: entry.type, recordId: record.id, submittedBy: entry.submittedByName });
-  }, [pending, session, mutate, audit]);
+  }, [pending, session, audit]);
 
   const rejectPending = useCallback(async (entryId) => {
     const entry = pending.find(p => p.id === entryId);
@@ -373,7 +453,7 @@ export default function App() {
 
   if (!session) return <LoginScreen accounts={accounts} onLogin={login} />;
 
-  const sharedProps = { session, data, mutate, staffSubmit, can, audit, fieldVis };
+  const sharedProps = { session, data, mutate, staffSubmit, can, audit, fieldVis, onSync: ()=>autoSync(sbCreds.url,sbCreds.key), syncing };
 
   return (
     <Shell session={session} onLogout={logout} pending={pending} view={view} setView={setView} can={can} sbStatus={sbStatus} syncing={syncing} lastSync={lastSync} onManualSync={()=>autoSync(sbCreds.url,sbCreds.key)}>
@@ -776,7 +856,7 @@ function DashboardBuilder({ fieldVis, setFieldVis, accounts, setAccounts }) {
 // ════════════════════════════════════════════════════════════════════════
 // PATIENTS SECTION
 // ════════════════════════════════════════════════════════════════════════
-function PatientsSection({ session, data, mutate, staffSubmit, can, audit, fieldVis }) {
+function PatientsSection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
   const isOwner = session.role === "owner";
   const branch  = session.branch || "JPT Branch";
   const rows    = (data.patients || []).filter(x => (isOwner || x.branch === branch) && x.status === "approved");
@@ -806,7 +886,7 @@ function PatientsSection({ session, data, mutate, staffSubmit, can, audit, field
 
   return (
     <div>
-      <SectionHeader title="Patients" onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "patients.csv")} onAdd={can("patients", "add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setModal(true); } : null} msg={msg} />
+      <SectionHeader title="Patients" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "patients.csv")} onAdd={can("patients", "add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setModal(true); } : null} msg={msg} />
       <div className="card" style={{ overflowX: "auto" }}>
         <table>
           <thead><tr>
@@ -853,7 +933,7 @@ function PatientsSection({ session, data, mutate, staffSubmit, can, audit, field
 // ════════════════════════════════════════════════════════════════════════
 // PATIENT BILL
 // ════════════════════════════════════════════════════════════════════════
-function PatientBillSection({ session, data, mutate, staffSubmit, can, audit, fieldVis }) {
+function PatientBillSection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
   const isOwner = session.role === "owner";
   const branch  = session.branch || "JPT Branch";
   const rows    = (data.patientBill || []).filter(x => (isOwner || x.branch === branch) && x.status === "approved");
@@ -897,7 +977,7 @@ function PatientBillSection({ session, data, mutate, staffSubmit, can, audit, fi
 
   return (
     <div>
-      <SectionHeader title="Patient Bill" onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "patient_bill.csv")} onAdd={can("patientBill", "add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setTab("basic"); setModal(true); } : null} msg={msg} />
+      <SectionHeader title="Patient Bill" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "patient_bill.csv")} onAdd={can("patientBill", "add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setTab("basic"); setModal(true); } : null} msg={msg} />
       <div className="card" style={{ overflowX: "auto" }}>
         <table><thead><tr><th>Timestamp</th><th>MR No</th><th>Name</th><th>Phone</th><th>Town</th><th>Lens Type</th><th>Delivery</th><th>Balance</th><th>By</th><th>Branch</th>{isOwner && <th></th>}</tr></thead>
           <tbody>{rows.map(r => (
@@ -1000,7 +1080,7 @@ function PatientBillSection({ session, data, mutate, staffSubmit, can, audit, fi
 // ════════════════════════════════════════════════════════════════════════
 // INVENTORY
 // ════════════════════════════════════════════════════════════════════════
-function InventorySection({ session, data, mutate, staffSubmit, can, audit, fieldVis }) {
+function InventorySection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
   const isOwner = session.role === "owner";
   const branch  = session.branch || "JPT Branch";
   const rows    = (data.stock || []).filter(x => isOwner || x.branch === branch);
@@ -1026,7 +1106,7 @@ function InventorySection({ session, data, mutate, staffSubmit, can, audit, fiel
   };
   return (
     <div>
-      <SectionHeader title="Inventory" onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "inventory.csv")} onAdd={can("inventory", "add") ? () => open(null) : null} msg={msg} />
+      <SectionHeader title="Inventory" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "inventory.csv")} onAdd={can("inventory", "add") ? () => open(null) : null} msg={msg} />
       <div className="card" style={{ overflowX: "auto" }}>
         <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
           <input type="text" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} style={{ maxWidth: 200 }} />
@@ -1083,7 +1163,7 @@ function InventorySection({ session, data, mutate, staffSubmit, can, audit, fiel
 // ════════════════════════════════════════════════════════════════════════
 // INVOICES
 // ════════════════════════════════════════════════════════════════════════
-function InvoicesSection({ session, data, mutate, staffSubmit, can, audit }) {
+function InvoicesSection({ session, data, mutate, staffSubmit, can, audit, onSync, syncing }) {
   const isOwner = session.role === "owner";
   const branch  = session.branch || "JPT Branch";
   const rows    = (data.invoices || []).filter(x => (isOwner || x.branch === branch) && x.approvalStatus === "approved");
@@ -1103,7 +1183,7 @@ function InvoicesSection({ session, data, mutate, staffSubmit, can, audit }) {
   const total = inv => (inv.items || []).reduce((s, i) => s + i.qty * i.price, 0) - (inv.discount || 0);
   return (
     <div>
-      <SectionHeader title="Sales & Invoices" onExport={() => exportCSV(rows, "invoices.csv")} onAdd={can("invoices", "add") ? () => { setForm({ patientName: "", date: todayStr(), items: [], discount: 0 }); setModal(true); } : null} msg={msg} />
+      <SectionHeader title="Sales & Invoices" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows, "invoices.csv")} onAdd={can("invoices", "add") ? () => { setForm({ patientName: "", date: todayStr(), items: [], discount: 0 }); setModal(true); } : null} msg={msg} />
       <div className="card" style={{ overflowX: "auto" }}>
         <table><thead><tr><th>Invoice</th><th>Date</th><th>Patient</th><th>Total</th><th>Status</th><th>By</th><th>Branch</th>{isOwner && <th></th>}</tr></thead>
           <tbody>{rows.map(inv => (
@@ -1152,7 +1232,7 @@ function InvoicesSection({ session, data, mutate, staffSubmit, can, audit }) {
 // ════════════════════════════════════════════════════════════════════════
 // ALERTS
 // ════════════════════════════════════════════════════════════════════════
-function AlertsSection({ session, data, mutate }) {
+function AlertsSection({ session, data, mutate, onSync, syncing }) {
   const isOwner = session.role === "owner";
   const branch  = session.branch || "JPT Branch";
   const low     = (data.stock || []).filter(s => (isOwner || s.branch === branch) && s.qty <= s.reorder);
@@ -1161,7 +1241,10 @@ function AlertsSection({ session, data, mutate }) {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div className="section-title">Low Stock Alerts</div>
-        <button className="btn btn-outline btn-sm" onClick={() => exportCSV(low.map(({ id, ...r }) => r), "low_stock.csv")}>⬇ CSV</button>
+        <div style={{ display: "flex", gap: 10 }}>
+          {onSync && <button className="btn btn-outline btn-sm" onClick={onSync} disabled={syncing}>{syncing ? "⟳ Syncing…" : "⟳ Sync"}</button>}
+          <button className="btn btn-outline btn-sm" onClick={() => exportCSV(low.map(({ id, ...r }) => r), "low_stock.csv")}>⬇ CSV</button>
+        </div>
       </div>
       {low.length === 0
         ? <div className="card" style={{ textAlign: "center", padding: 48, color: "#9b8e82" }}><div style={{ fontSize: 36, marginBottom: 10 }}>✓</div><div style={{ fontWeight: 600 }}>All stock levels healthy</div></div>
@@ -1526,12 +1609,17 @@ function LaunchGuide() {
 // ════════════════════════════════════════════════════════════════════════
 // SHARED COMPONENTS
 // ════════════════════════════════════════════════════════════════════════
-function SectionHeader({ title, onAdd, onExport, msg }) {
+function SectionHeader({ title, onAdd, onExport, onSync, syncing, msg }) {
   return (
     <div style={{ marginBottom: 18 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div className="section-title">{title}</div>
         <div style={{ display: "flex", gap: 10 }}>
+          {onSync && (
+            <button className="btn btn-outline btn-sm" onClick={onSync} disabled={syncing} title="Pull latest data from cloud">
+              {syncing ? "⟳ Syncing…" : "⟳ Sync"}
+            </button>
+          )}
           {onExport && <button className="btn btn-outline btn-sm" onClick={onExport}>⬇ CSV</button>}
           {onAdd    && <button className="btn btn-dark btn-sm"    onClick={onAdd}>+ Add</button>}
         </div>
