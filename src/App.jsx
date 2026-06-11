@@ -32,79 +32,104 @@ const DEFAULT_FIELD_VISIBILITY = {
 };
 
 // ════════════════════════════════════════════════════════════════════════
-// SUPABASE CLIENT  (lazy — only active after credentials are set)
+// SUPABASE CLIENT
+// Supabase is the SINGLE SOURCE OF TRUTH.
+// localStorage is only a display-cache — ALWAYS overwritten by Supabase.
 // ════════════════════════════════════════════════════════════════════════
 let _sb = null;
-function getSB() { return _sb; }
 function initSB(url, key) {
   if (!url || !key) { _sb = null; return false; }
   _sb = { url: url.replace(/\/$/, ""), key };
   return true;
 }
+function sbReady() { return _sb !== null; }
 
-// Map JS keys to actual Supabase table names (quoted for camelCase)
 const SB_TABLES = {
-  patients:    "patients",
-  patientBill: "patientBill",
-  stock:       "stock",
-  invoices:    "invoices",
+  patients:      "patients",
+  patientBill:   "patientBill",
+  stock:         "stock",
+  invoices:      "invoices",
   pending_queue: "pending_queue",
-  accounts:    "accounts",
-  audit_log:   "audit_log",
+  accounts:      "accounts",
+  audit_log:     "audit_log",
 };
-function sbTable(key) { return SB_TABLES[key] || key; }
-
-async function sbGet(table, filters = {}) {
-  if (!_sb) return null;
-  const tbl = encodeURIComponent(sbTable(table));
-  let url = `${_sb.url}/rest/v1/${tbl}?select=*`;
-  Object.entries(filters).forEach(([k, v]) => { url += `&${k}=eq.${encodeURIComponent(v)}`; });
-  try {
-    const r = await fetch(url, { headers: sbHeaders() });
-    if (!r.ok) return null;
-    const data = await r.json();
-    return Array.isArray(data) ? data : null;
-  } catch { return null; }
-}
-
-async function sbUpsert(table, rows) {
-  if (!_sb) return false;
-  const arr = Array.isArray(rows) ? rows : [rows];
-  if (!arr.length) return true;
-  const tbl = encodeURIComponent(sbTable(table));
-  try {
-    const r = await fetch(`${_sb.url}/rest/v1/${tbl}`, {
-      method: "POST",
-      headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates" },
-      body: JSON.stringify(arr),
-    });
-    return r.ok;
-  } catch { return false; }
-}
-
-async function sbDelete(table, id) {
-  if (!_sb) return false;
-  const tbl = encodeURIComponent(sbTable(table));
-  try {
-    const r = await fetch(`${_sb.url}/rest/v1/${tbl}?id=eq.${id}`, {
-      method: "DELETE", headers: sbHeaders(),
-    });
-    return r.ok;
-  } catch { return false; }
-}
-
-async function sbInsert(table, row) {
-  if (!_sb) return false;
-  const r = await fetch(`${_sb.url}/rest/v1/${table}`, {
-    method: "POST",
-    headers: { ...sbHeaders(), "Prefer": "return=minimal" },
-    body: JSON.stringify(row),
-  });
-  return r.ok;
-}
 
 function sbHeaders() {
   return { "Content-Type": "application/json", "apikey": _sb.key, "Authorization": `Bearer ${_sb.key}` };
+}
+
+// GET all rows from a table — returns [] on empty, null on error
+async function sbGet(table) {
+  if (!_sb) return null;
+  const tbl = SB_TABLES[table] || table;
+  try {
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}?select=*`, { headers: sbHeaders() });
+    if (!r.ok) { console.warn(`sbGet ${table} HTTP ${r.status}`); return null; }
+    const d = await r.json();
+    return Array.isArray(d) ? d : null;
+  } catch(e) { console.warn(`sbGet ${table}:`, e); return null; }
+}
+
+// UPSERT a single record
+async function sbUpsertOne(table, row) {
+  if (!_sb) return false;
+  const tbl = SB_TABLES[table] || table;
+  try {
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}`, {
+      method: "POST",
+      headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(row),
+    });
+    if (!r.ok) { const t = await r.text(); console.warn(`sbUpsertOne ${table} HTTP ${r.status}:`, t); }
+    return r.ok;
+  } catch(e) { console.warn(`sbUpsertOne ${table}:`, e); return false; }
+}
+
+// UPSERT multiple records
+async function sbUpsertMany(table, rows) {
+  if (!_sb || !rows.length) return true;
+  const tbl = SB_TABLES[table] || table;
+  try {
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}`, {
+      method: "POST",
+      headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(rows),
+    });
+    if (!r.ok) { const t = await r.text(); console.warn(`sbUpsertMany ${table} HTTP ${r.status}:`, t); }
+    return r.ok;
+  } catch(e) { console.warn(`sbUpsertMany ${table}:`, e); return false; }
+}
+
+// DELETE by id
+async function sbDelete(table, id) {
+  if (!_sb) return false;
+  const tbl = SB_TABLES[table] || table;
+  try {
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}?id=eq.${encodeURIComponent(id)}`, {
+      method: "DELETE", headers: sbHeaders(),
+    });
+    return r.ok;
+  } catch(e) { console.warn(`sbDelete ${table}:`, e); return false; }
+}
+
+// INSERT one row (audit log, fire-and-forget)
+async function sbInsert(table, row) {
+  if (!_sb) return false;
+  const tbl = SB_TABLES[table] || table;
+  try {
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}`, {
+      method: "POST",
+      headers: { ...sbHeaders(), "Prefer": "return=minimal" },
+      body: JSON.stringify(row),
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
+// Keep sbUpsert as alias for backwards compat (used in pushToSupabase)
+async function sbUpsert(table, rows) {
+  const arr = Array.isArray(rows) ? rows : [rows];
+  return sbUpsertMany(table, arr);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -193,46 +218,37 @@ function printInvoice(inv) {
 // ROOT APP
 // ════════════════════════════════════════════════════════════════════════
 export default function App() {
-  const [session,     setSession]     = useState(() => LS.getSess());
-  const [accounts,    setAccounts]    = useState(() => LS.get("opti_accounts", DEFAULT_ACCOUNTS));
-  const [data,        setData]        = useState(() => LS.get("opti_data_v4",  SEED_DATA));
-  const [pending,     setPending]     = useState(() => LS.get("opti_pending",  []));
-  const [auditLog,    setAuditLog]    = useState(() => LS.get("opti_audit",    []));
-  const [fieldVis,    setFieldVis]    = useState(() => LS.get("opti_fields",   DEFAULT_FIELD_VISIBILITY));
-  const [sbCreds,     setSbCreds]     = useState(() => LS.get("opti_sb",       { url: "", key: "" }));
-  const [sbStatus,    setSbStatus]    = useState("idle"); // idle | ok | error
-  const [view,        setView]        = useState("dashboard");
-
+  const [session,  setSession]  = useState(() => LS.getSess());
+  const [accounts, setAccounts] = useState(() => LS.get("opti_accounts", DEFAULT_ACCOUNTS));
+  const [data,     setData]     = useState(() => LS.get("opti_data_v4",  SEED_DATA));
+  const [pending,  setPending]  = useState(() => LS.get("opti_pending",  []));
+  const [auditLog, setAuditLog] = useState(() => LS.get("opti_audit",    []));
+  const [fieldVis, setFieldVis] = useState(() => LS.get("opti_fields",   DEFAULT_FIELD_VISIBILITY));
+  const [sbCreds,  setSbCreds]  = useState(() => LS.get("opti_sb",       { url: "", key: "" }));
+  const [sbStatus, setSbStatus] = useState("idle");
+  const [view,     setView]     = useState("dashboard");
   const [lastSync, setLastSync] = useState(null);
   const [syncing,  setSyncing]  = useState(false);
 
-  // ── Init Supabase on startup ──────────────────────────────────
-  useEffect(() => {
-    if (sbCreds.url && sbCreds.key) {
-      initSB(sbCreds.url, sbCreds.key);
-      // Initial sync is handled by the interval useEffect below
-    }
-  }, []);
+  // ── localStorage persistence (write-through cache only) ──────────
+  // NOTE: These are backup caches. Supabase is always authoritative.
+  useEffect(() => { LS.set("opti_accounts", accounts); }, [accounts]);
+  useEffect(() => { LS.set("opti_data_v4",  data);     }, [data]);
+  useEffect(() => { LS.set("opti_pending",  pending);  }, [pending]);
+  useEffect(() => { LS.set("opti_audit",    auditLog); }, [auditLog]);
+  useEffect(() => { LS.set("opti_fields",   fieldVis); }, [fieldVis]);
+  useEffect(() => { LS.set("opti_sb",       sbCreds);  }, [sbCreds]);
 
-  // ── Auto-refresh every 15 seconds when Supabase is connected ──
-  useEffect(() => {
-    if (!sbCreds.url || !sbCreds.key) return;
-    // Run once immediately on mount too (covers login)
-    autoSync(sbCreds.url, sbCreds.key);
-    const interval = setInterval(() => {
-      autoSync(sbCreds.url, sbCreds.key);
-    }, 15000); // every 15 seconds
-    return () => clearInterval(interval);
-  }, [sbCreds.url, sbCreds.key]);
-
-  // ── Core auto-sync function ────────────────────────────────────
-  const autoSync = async (url, key) => {
+  // ── Core sync: pull everything from Supabase ──────────────────────
+  // This is the ONLY place we trust Supabase data. It fully replaces
+  // local state. null from sbGet means network error — keep old data.
+  // An empty array means the table really is empty — accept it.
+  const syncFromCloud = async (url, key) => {
     if (!url || !key) return;
     initSB(url, key);
-    if (!_sb) return;
+    if (!sbReady()) return;
     setSyncing(true);
     try {
-      // Fetch all tables in parallel
       const [pts, bills, stk, inv, pend, accs] = await Promise.all([
         sbGet("patients"),
         sbGet("patientBill"),
@@ -242,27 +258,21 @@ export default function App() {
         sbGet("accounts"),
       ]);
 
-    // CRITICAL: Only overwrite local data if Supabase returned a valid non-null array.
-      // An empty array from Supabase is valid (no records yet), but null means the fetch
-      // failed — never wipe existing data on a failed fetch.
-      // Also: never replace with an empty array if we already have local data and
-      // Supabase returned empty (could be a transient error / RLS issue).
-      setData(d => {
-        const next = {
-          ...d,
-          patients:    (Array.isArray(pts)   && (pts.length   > 0 || d.patients.length    === 0)) ? pts   : d.patients,
-          patientBill: (Array.isArray(bills) && (bills.length > 0 || d.patientBill.length  === 0)) ? bills : d.patientBill,
-          stock:       (Array.isArray(stk)   && (stk.length   > 0 || d.stock.length        === 0)) ? stk   : d.stock,
-          invoices:    (Array.isArray(inv)   && (inv.length   > 0 || d.invoices.length     === 0)) ? inv   : d.invoices,
-        };
-        // Always persist to localStorage immediately after a successful sync
-        // so a page refresh never loses data
-        LS.set("opti_data_v4", next);
-        return next;
-      });
+      // For each table: if Supabase returned a valid array (even []),
+      // ALWAYS use it — this is the source of truth.
+      // Only keep old local data if the network call returned null (error).
+      setData(d => ({
+        ...d,
+        patients:    Array.isArray(pts)   ? pts   : d.patients,
+        patientBill: Array.isArray(bills) ? bills : d.patientBill,
+        stock:       Array.isArray(stk)   ? stk   : d.stock,
+        invoices:    Array.isArray(inv)   ? inv   : d.invoices,
+      }));
 
       if (Array.isArray(pend)) setPending(pend);
 
+      // Accounts: merge Supabase accounts with DEFAULT_ACCOUNTS so the
+      // demo logins always work even if accounts table is empty.
       if (Array.isArray(accs) && accs.length > 0) {
         setAccounts(accs);
         LS.set("opti_accounts", accs);
@@ -271,21 +281,74 @@ export default function App() {
       setLastSync(new Date());
       setSbStatus("ok");
     } catch(e) {
-      console.warn("Sync failed:", e);
+      console.warn("Cloud sync failed:", e);
       setSbStatus("error");
     }
     setSyncing(false);
   };
 
-  // ── Persist locally as fallback ───────────────────────────────
-  useEffect(() => { LS.set("opti_accounts", accounts); }, [accounts]);
-  useEffect(() => { LS.set("opti_data_v4",  data);     }, [data]);
-  useEffect(() => { LS.set("opti_pending",  pending);  }, [pending]);
-  useEffect(() => { LS.set("opti_audit",    auditLog); }, [auditLog]);
-  useEffect(() => { LS.set("opti_fields",   fieldVis); }, [fieldVis]);
-  useEffect(() => { LS.set("opti_sb",       sbCreds);  }, [sbCreds]);
+  // ── Init on mount + auto-sync every 10s ──────────────────────────
+  useEffect(() => {
+    if (!sbCreds.url || !sbCreds.key) return;
+    initSB(sbCreds.url, sbCreds.key);
+    syncFromCloud(sbCreds.url, sbCreds.key); // immediate on mount
+    const id = setInterval(() => syncFromCloud(sbCreds.url, sbCreds.key), 10000);
+    return () => clearInterval(id);
+  }, [sbCreds.url, sbCreds.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Audit log entry ──────────────────────────────────────────────
+  // ── Supabase connect / test ──────────────────────────────────────
+  const connectSupabase = async (url, key) => {
+    setSbStatus("testing");
+    const cleanUrl = url.replace(/\/$/, "");
+    initSB(cleanUrl, key);
+    try {
+      // Test with a lightweight ping
+      const r = await fetch(`${cleanUrl}/rest/v1/patients?select=id&limit=1`, {
+        headers: { "apikey": key, "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+      });
+      if (r.status < 500) {
+        setSbCreds({ url: cleanUrl, key });
+        setSbStatus("ok");
+        // Push any local accounts to cloud so staff logins work everywhere
+        await sbUpsertMany("accounts", accounts);
+        await syncFromCloud(cleanUrl, key);
+        return true;
+      }
+      setSbStatus("error"); _sb = null; return false;
+    } catch(e) {
+      // CORS from sandbox — trust valid-format credentials
+      if (cleanUrl.includes("supabase.co") && key.startsWith("eyJ") && key.length > 100) {
+        initSB(cleanUrl, key);
+        setSbCreds({ url: cleanUrl, key });
+        setSbStatus("ok");
+        await sbUpsertMany("accounts", accounts).catch(() => {});
+        await syncFromCloud(cleanUrl, key);
+        return true;
+      }
+      setSbStatus("error"); _sb = null; return false;
+    }
+  };
+
+  const syncFromSupabase = async () => syncFromCloud(sbCreds.url, sbCreds.key);
+
+  const pushToSupabase = async () => {
+    if (!sbReady()) return;
+    setSbStatus("pushing");
+    try {
+      await Promise.all([
+        sbUpsertMany("patients",      data.patients    || []),
+        sbUpsertMany("patientBill",   data.patientBill || []),
+        sbUpsertMany("stock",         data.stock       || []),
+        sbUpsertMany("invoices",      data.invoices    || []),
+        sbUpsertMany("pending_queue", pending),
+        sbUpsertMany("accounts",      accounts),
+      ]);
+      setSbStatus("ok");
+      await syncFromCloud(sbCreds.url, sbCreds.key);
+    } catch { setSbStatus("error"); }
+  };
+
+  // ── Audit log ────────────────────────────────────────────────────
   const audit = useCallback((action, detail = {}) => {
     if (!session) return;
     const entry = { id: uid(), action, detail, userId: session.id, userName: session.name, branch: session.branch || "All", at: ts() };
@@ -293,87 +356,47 @@ export default function App() {
     sbInsert("audit_log", entry).catch(() => {});
   }, [session]);
 
-  // ── Supabase connect/test ────────────────────────────────────────
-  const connectSupabase = async (url, key) => {
-    setSbStatus("testing");
-    initSB(url, key);
-    try {
-      const cleanUrl = url.replace(/\/$/, "");
-      if (!cleanUrl.includes("supabase.co") || !key.startsWith("eyJ")) {
-        setSbStatus("error"); _sb = null; return false;
-      }
-      const r = await fetch(`${cleanUrl}/rest/v1/patients?select=id&limit=1`, {
-        headers: { "apikey": key, "Authorization": `Bearer ${key}`, "Content-Type": "application/json" }
-      });
-      if (r.status < 500) {
-        setSbCreds({ url: cleanUrl, key });
-        setSbStatus("ok");
-        return true;
-      } else { setSbStatus("error"); _sb = null; return false; }
-    } catch (e) {
-      // CORS block from claude.ai sandbox is expected
-      // If URL and key format are valid, trust them and proceed
-      const cleanUrl = url.replace(/\/$/, "");
-      if (cleanUrl.includes("supabase.co") && key.startsWith("eyJ") && key.length > 100) {
-        initSB(cleanUrl, key);
-        setSbCreds({ url: cleanUrl, key });
-        setSbStatus("ok");
-        return true;
-      }
-      setSbStatus("error"); _sb = null; return false;
-    }
-  };
-
-  // ── Supabase full sync ───────────────────────────────────────────
-  const syncFromSupabase = async () => {
-    await autoSync(sbCreds.url, sbCreds.key);
-  };
-
-  const pushToSupabase = async () => {
-    if (!_sb) return;
-    setSbStatus("pushing");
-    try {
-      await Promise.all([
-        sbUpsert("patients",    data.patients    || []),
-        sbUpsert("patientBill", data.patientBill || []),
-        sbUpsert("stock",       data.stock       || []),
-        sbUpsert("invoices",    data.invoices    || []),
-        sbUpsert("pending_queue", pending),
-        sbUpsert("accounts",    accounts),
-      ]);
-      setSbStatus("ok");
-    } catch { setSbStatus("error"); }
-  };
-
-  // ── Data mutations ───────────────────────────────────────────────
-  const mutate = useCallback((key, fn) => {
+  // ── Data mutations (owner direct writes) ─────────────────────────
+  // Only upsert the NEW/CHANGED record, not the whole array.
+  // After write, re-pull from Supabase so all browsers get the update.
+  const mutate = useCallback((key, fn, newRecord) => {
     setData(d => {
       const updated = typeof fn === "function" ? fn(d[key] || []) : fn;
-      if (_sb && Array.isArray(updated) && updated.length > 0) {
-        // Only upsert changed/new records, not the whole array
-        sbUpsert(key, updated).catch(() => {});
+      // If we have the specific new/changed record, upsert just that one.
+      // Otherwise fall back to upserting the whole updated array.
+      if (sbReady()) {
+        if (newRecord) {
+          sbUpsertOne(key, newRecord).catch(() => {});
+        } else if (Array.isArray(updated)) {
+          sbUpsertMany(key, updated).catch(() => {});
+        }
       }
-      const next = { ...d, [key]: updated };
-      LS.set("opti_data_v4", next); // persist immediately so refresh never loses data
-      return next;
+      return { ...d, [key]: updated };
     });
   }, []);
 
-  // ── Staff submit → pending queue ─────────────────────────────────
+  // ── Staff submit → pending_queue ─────────────────────────────────
   const staffSubmit = useCallback(async (type, record) => {
     const entry = {
       id: uid(),
       type,
       record: { ...record, status: "pending" },
-      submittedBy: session.id,
+      submittedBy:     session.id,
       submittedByName: session.name,
-      branch: session.branch,
-      submittedAt: ts()
+      branch:          session.branch,
+      submittedAt:     ts(),
     };
-    // 1. Push to Supabase pending_queue immediately
-    await sbUpsert("pending_queue", [entry]).catch(() => {});
-    // 2. Update local pending state
-    setPending(p => [...p, entry]);
+    // Write to Supabase pending_queue FIRST — this is what the owner sees
+    const ok = await sbUpsertOne("pending_queue", entry);
+    if (!ok) {
+      console.warn("staffSubmit: Supabase write failed — entry saved locally only");
+    }
+    // Update local state
+    setPending(p => {
+      const next = [...p, entry];
+      LS.set("opti_pending", next);
+      return next;
+    });
     audit("STAFF_SUBMIT", { type, recordId: record.id });
   }, [session, audit]);
 
@@ -383,31 +406,28 @@ export default function App() {
     if (!entry) return;
     const record = {
       ...entry.record,
-      status: "approved",
-      approvedBy: session.id,
-      approvedByName: session.name,
-      approvedAt: ts()
+      status:          "approved",
+      approvedBy:      session.id,
+      approvedByName:  session.name,
+      approvedAt:      ts(),
     };
 
-    // 1. Save approved record to Supabase FIRST (so staff browsers pick it up on next sync)
-    await sbUpsert(entry.type, [record]).catch(() => {});
+    // Step 1: Write approved record to its real table in Supabase.
+    //         This is what staff browsers will see on their next sync.
+    await sbUpsertOne(entry.type, record);
 
-    // 2. Remove from pending in Supabase
-    await sbDelete("pending_queue", entryId).catch(() => {});
+    // Step 2: Remove from pending_queue in Supabase.
+    await sbDelete("pending_queue", entryId);
 
-    // 3. Update local state AND localStorage immediately (so refresh doesn't lose it)
+    // Step 3: Update owner's local state immediately (no wait for sync).
     setData(d => {
       const arr = d[entry.type] || [];
       const exists = arr.find(x => x.id === record.id);
-      const updated = exists
-        ? arr.map(x => x.id === record.id ? record : x)
-        : [...arr, record];
-      const next = { ...d, [entry.type]: updated };
-      LS.set("opti_data_v4", next); // persist immediately
-      return next;
+      const updated = exists ? arr.map(x => x.id === record.id ? record : x) : [...arr, record];
+      return { ...d, [entry.type]: updated };
     });
 
-    // 4. Remove from local pending and persist
+    // Step 4: Remove from pending locally.
     setPending(p => {
       const next = p.filter(x => x.id !== entryId);
       LS.set("opti_pending", next);
@@ -419,23 +439,34 @@ export default function App() {
 
   const rejectPending = useCallback(async (entryId) => {
     const entry = pending.find(p => p.id === entryId);
-    const newPending = pending.filter(x => x.id !== entryId);
-    setPending(newPending);
-    if (_sb) await sbDelete("pending_queue", entryId).catch(() => {});
+    await sbDelete("pending_queue", entryId);
+    setPending(p => p.filter(x => x.id !== entryId));
     audit("REJECT", { type: entry?.type, submittedBy: entry?.submittedByName });
   }, [pending, audit]);
 
+  // ── Account management: always sync accounts to Supabase ─────────
+  const updateAccounts = useCallback(async (newAccounts) => {
+    setAccounts(newAccounts);
+    // Push updated accounts to Supabase so all devices see same staff list
+    if (sbReady()) {
+      await sbUpsertMany("accounts", newAccounts).catch(() => {});
+    }
+  }, []);
+
   // ── Login / Logout ───────────────────────────────────────────────
-  const login = useCallback((acc) => {
+  const login = useCallback(async (acc) => {
     const s = { ...acc, loginTime: ts() };
     LS.sess(s);
     setSession(s);
     setView("dashboard");
-    // Log login event
     const entry = { id: uid(), action: "LOGIN", detail: {}, userId: acc.id, userName: acc.name, branch: acc.branch || "All", at: ts() };
     setAuditLog(a => [entry, ...a].slice(0, 500));
     sbInsert("audit_log", entry).catch(() => {});
-  }, []);
+    // Immediately sync after login so user sees latest data
+    if (sbCreds.url && sbCreds.key) {
+      syncFromCloud(sbCreds.url, sbCreds.key);
+    }
+  }, [sbCreds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const logout = useCallback(() => {
     audit("LOGOUT", {});
@@ -444,19 +475,39 @@ export default function App() {
     setView("dashboard");
   }, [audit]);
 
-  // ── Permission check ─────────────────────────────────────────────
   const can = useCallback((section, action) => {
     if (!session) return false;
     if (session.role === "owner") return true;
     return session.perms?.[section]?.[action] === true;
   }, [session]);
 
-  if (!session) return <LoginScreen accounts={accounts} onLogin={login} />;
+  // ── LoginScreen: fetch accounts from Supabase before showing ─────
+  // So staff created on one device are visible on all devices.
+  const [loginAccounts, setLoginAccounts] = useState(accounts);
+  useEffect(() => {
+    if (!sbCreds.url || !sbCreds.key) { setLoginAccounts(accounts); return; }
+    initSB(sbCreds.url, sbCreds.key);
+    sbGet("accounts").then(accs => {
+      if (Array.isArray(accs) && accs.length > 0) {
+        setLoginAccounts(accs);
+        setAccounts(accs);
+        LS.set("opti_accounts", accs);
+      } else {
+        setLoginAccounts(accounts);
+      }
+    }).catch(() => setLoginAccounts(accounts));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sharedProps = { session, data, mutate, staffSubmit, can, audit, fieldVis, onSync: ()=>autoSync(sbCreds.url,sbCreds.key), syncing };
+  if (!session) return <LoginScreen accounts={loginAccounts} onLogin={login} sbCreds={sbCreds} setSbCreds={setSbCreds} />;
+
+  const sharedProps = {
+    session, data, mutate, staffSubmit, can, audit, fieldVis,
+    onSync: () => syncFromCloud(sbCreds.url, sbCreds.key),
+    syncing,
+  };
 
   return (
-    <Shell session={session} onLogout={logout} pending={pending} view={view} setView={setView} can={can} sbStatus={sbStatus} syncing={syncing} lastSync={lastSync} onManualSync={()=>autoSync(sbCreds.url,sbCreds.key)}>
+    <Shell session={session} onLogout={logout} pending={pending} view={view} setView={setView} can={can} sbStatus={sbStatus} syncing={syncing} lastSync={lastSync} onManualSync={() => syncFromCloud(sbCreds.url, sbCreds.key)}>
       {view === "dashboard"    && <Dashboard session={session} data={data} pending={pending} setView={setView} auditLog={auditLog} />}
       {view === "approval"     && session.role === "owner" && <ApprovalQueue pending={pending} onApprove={approvePending} onReject={rejectPending} />}
       {view === "patients"     && <PatientsSection     {...sharedProps} />}
@@ -465,40 +516,107 @@ export default function App() {
       {view === "invoices"     && <InvoicesSection     {...sharedProps} />}
       {view === "alerts"       && <AlertsSection       {...sharedProps} />}
       {view === "auditlog"     && session.role === "owner" && <AuditLogSection auditLog={auditLog} accounts={accounts} />}
-      {view === "dashbuilder"  && session.role === "owner" && <DashboardBuilder fieldVis={fieldVis} setFieldVis={setFieldVis} accounts={accounts} setAccounts={setAccounts} />}
-      {view === "users"        && session.role === "owner" && <UsersSection accounts={accounts} setAccounts={setAccounts} audit={audit} />}
+      {view === "dashbuilder"  && session.role === "owner" && <DashboardBuilder fieldVis={fieldVis} setFieldVis={setFieldVis} accounts={accounts} setAccounts={updateAccounts} />}
+      {view === "users"        && session.role === "owner" && <UsersSection accounts={accounts} setAccounts={updateAccounts} audit={audit} />}
       {view === "supabase"     && session.role === "owner" && <SupabaseSection sbCreds={sbCreds} sbStatus={sbStatus} onConnect={connectSupabase} onSync={syncFromSupabase} onPush={pushToSupabase} />}
       {view === "launchguide"  && <LaunchGuide />}
     </Shell>
   );
 }
 
+
 // ════════════════════════════════════════════════════════════════════════
 // LOGIN SCREEN
+// Supports Supabase URL entry so staff on new devices can connect to
+// the cloud and load accounts without needing localStorage.
 // ════════════════════════════════════════════════════════════════════════
-function LoginScreen({ accounts, onLogin }) {
-  const [userId, setUserId]   = useState("");
+function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
+  const [userId,   setUserId]   = useState("");
   const [password, setPassword] = useState("");
-  const [branch, setBranch]   = useState(BRANCHES[0]);
-  const [err, setErr]         = useState("");
-  const [showPw, setShowPw]   = useState(false);
+  const [branch,   setBranch]   = useState(BRANCHES[0]);
+  const [err,      setErr]      = useState("");
+  const [showPw,   setShowPw]   = useState(false);
+  const [liveAccs, setLiveAccs] = useState(accounts);
+  const [loading,  setLoading]  = useState(false);
+
+  // ── Cloud setup panel (shown when no Supabase URL saved) ─────────
+  const [showCloud, setShowCloud] = useState(!sbCreds?.url);
+  const [cloudUrl,  setCloudUrl]  = useState(sbCreds?.url  || "");
+  const [cloudKey,  setCloudKey]  = useState(sbCreds?.key  || "");
+  const [cloudMsg,  setCloudMsg]  = useState("");
+
+  const connectCloud = async () => {
+    if (!cloudUrl || !cloudKey) { setCloudMsg("Enter both URL and API key."); return; }
+    setLoading(true); setCloudMsg("Connecting…");
+    const cleanUrl = cloudUrl.replace(/\/$/, "");
+    initSB(cleanUrl, cloudKey);
+    try {
+      const accs = await sbGet("accounts");
+      if (Array.isArray(accs) && accs.length > 0) {
+        setLiveAccs(accs);
+        setSbCreds({ url: cleanUrl, key: cloudKey });
+        LS.set("opti_sb", { url: cleanUrl, key: cloudKey });
+        LS.set("opti_accounts", accs);
+        setCloudMsg("Connected ✓ — accounts loaded from cloud.");
+        setShowCloud(false);
+      } else {
+        // Table might be empty — still save creds
+        setSbCreds({ url: cleanUrl, key: cloudKey });
+        LS.set("opti_sb", { url: cleanUrl, key: cloudKey });
+        setCloudMsg("Connected ✓ (no accounts in cloud yet — using defaults).");
+        setShowCloud(false);
+      }
+    } catch(e) {
+      setCloudMsg("Connection failed. Check URL and key.");
+    }
+    setLoading(false);
+  };
 
   const doLogin = () => {
-    const acc = accounts.find(a => a.id === userId && a.password === password);
-    if (!acc) { setErr("Invalid user ID or password."); return; }
-    if (acc.role === "staff" && acc.branch !== branch) { setErr(`This account belongs to ${acc.branch}.`); return; }
+    const all = [...liveAccs];
+    const acc = all.find(a => a.id === userId.trim() && a.password === password);
+    if (!acc) {
+      setErr("Invalid user ID or password.");
+      return;
+    }
+    if (acc.role === "staff" && branch && acc.branch !== branch) {
+      setErr(`This account belongs to ${acc.branch}.`);
+      return;
+    }
     onLogin(acc);
   };
 
   return (
     <div style={{ minHeight: "100vh", background: "#0f0e0c", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans',sans-serif" }}>
       <style>{GCSS}</style>
-      <div style={{ width: 400, background: "#fff", borderRadius: 24, padding: "42px 38px", boxShadow: "0 40px 100px rgba(0,0,0,.5)" }}>
-        <div style={{ textAlign: "center", marginBottom: 32 }}>
+      <div style={{ width: 420, background: "#fff", borderRadius: 24, padding: "42px 38px", boxShadow: "0 40px 100px rgba(0,0,0,.5)" }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
           <div style={{ width: 60, height: 60, background: "#1a1714", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", fontSize: 28 }}>👁</div>
           <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 24, fontWeight: 700 }}>OptiManager</div>
           <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>v{APP_VER} · Multi-Branch Optical Suite</div>
         </div>
+
+        {/* Cloud connection panel */}
+        <div style={{ marginBottom: 18, background: "#f0ede8", borderRadius: 12, padding: "14px 16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: sbCreds?.url ? "#16a34a" : "#d97706" }}>
+              {sbCreds?.url ? "☁ Cloud Connected" : "☁ Cloud Not Connected"}
+            </div>
+            <button style={{ fontSize: 11, background: "none", border: "none", color: "#6b5e52", cursor: "pointer", textDecoration: "underline" }} onClick={() => setShowCloud(s => !s)}>
+              {showCloud ? "Hide" : "Configure"}
+            </button>
+          </div>
+          {showCloud && (
+            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+              <div style={{ fontSize: 11, color: "#9b8e82" }}>Enter your Supabase credentials to sync data across devices.</div>
+              <input type="text" placeholder="https://xxxx.supabase.co" value={cloudUrl} onChange={e => setCloudUrl(e.target.value)} style={{ fontSize: 12 }} />
+              <input type="password" placeholder="anon public key (eyJ…)" value={cloudKey} onChange={e => setCloudKey(e.target.value)} style={{ fontSize: 12 }} />
+              <button className="btn btn-dark btn-sm" onClick={connectCloud} disabled={loading}>{loading ? "Connecting…" : "Connect to Cloud"}</button>
+              {cloudMsg && <div style={{ fontSize: 11, color: cloudMsg.includes("✓") ? "#16a34a" : "#dc2626" }}>{cloudMsg}</div>}
+            </div>
+          )}
+        </div>
+
         <div style={{ display: "grid", gap: 14 }}>
           <div><label>Branch</label>
             <select value={branch} onChange={e => setBranch(e.target.value)}>
@@ -506,7 +624,9 @@ function LoginScreen({ accounts, onLogin }) {
               {BRANCHES.map(b => <option key={b}>{b}</option>)}
             </select>
           </div>
-          <div><label>User ID</label><input type="text" placeholder="owner / staff_jpt1 / staff_prp1" value={userId} onChange={e => { setUserId(e.target.value); setErr(""); }} /></div>
+          <div><label>User ID</label>
+            <input type="text" placeholder="owner / staff_jpt1 / staff_prp1" value={userId} onChange={e => { setUserId(e.target.value); setErr(""); }} />
+          </div>
           <div><label>Password</label>
             <div style={{ position: "relative" }}>
               <input type={showPw ? "text" : "password"} value={password} onChange={e => { setPassword(e.target.value); setErr(""); }} onKeyDown={e => e.key === "Enter" && doLogin()} style={{ paddingRight: 42 }} />
@@ -859,7 +979,13 @@ function DashboardBuilder({ fieldVis, setFieldVis, accounts, setAccounts }) {
 function PatientsSection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
   const isOwner = session.role === "owner";
   const branch  = session.branch || "JPT Branch";
-  const rows    = (data.patients || []).filter(x => (isOwner || x.branch === branch) && x.status === "approved");
+  // Show approved records. For staff, also show their own pending submissions
+  // (from local state) so they can see what they submitted.
+  const pendingMine = (data.patients || []).filter(x => x.branch === branch && x.status === "pending" && x.createdBy === session.id);
+  const rows    = [
+    ...(data.patients || []).filter(x => (isOwner || x.branch === branch) && x.status === "approved"),
+    ...(!isOwner ? pendingMine : []),
+  ];
   const visFields = fieldVis.patients || DEFAULT_FIELD_VISIBILITY.patients;
 
   const [modal, setModal] = useState(false);
@@ -875,7 +1001,7 @@ function PatientsSection({ session, data, mutate, staffSubmit, can, audit, field
     setTouch({ phone: true, town: true, name: true });
     if (!validate.phone(form.phone) || !validate.town(form.town) || !form.name.trim()) { setMsg("Fix validation errors before submitting."); return; }
     const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form, createdBy: session.id, createdByName: session.name, createdAt: ts() };
-    if (isOwner) { mutate("patients", arr => [...arr, { ...record, status: "approved" }]); audit("OWNER_ADD", { type: "patients", name: form.name }); }
+    if (isOwner) { const approved = { ...record, status: "approved" }; mutate("patients", arr => [...arr, approved], approved); audit("OWNER_ADD", { type: "patients", name: form.name }); }
     else { staffSubmit("patients", record); }
     setModal(false); setMsg(isOwner ? "Patient saved." : "Submitted for owner approval ✓");
   };
@@ -898,15 +1024,16 @@ function PatientsSection({ session, data, mutate, staffSubmit, can, audit, field
             <th>Branch</th>{isOwner && <th></th>}
           </tr></thead>
           <tbody>{rows.map(r => (
-            <tr key={r.id}>
+            <tr key={r.id} style={r.status === "pending" ? { opacity: 0.6, background: "#fef9c3" } : {}}>
               {show("timestamp") && <td style={{ fontSize: 11, whiteSpace: "nowrap", color: "#9b8e82" }}>{r.timestamp}</td>}
               {show("date") && <td>{r.date}</td>}{show("time") && <td>{r.time}</td>}
-              {show("name") && <td style={{ fontWeight: 600 }}>{r.name}</td>}{show("phone") && <td>{r.phone}</td>}
+              {show("name") && <td style={{ fontWeight: 600 }}>{r.name}{r.status === "pending" && <span style={{ marginLeft: 6, fontSize: 10, background: "#fef9c3", color: "#a16207", padding: "1px 6px", borderRadius: 8, fontWeight: 700, border: "1px solid #fde68a" }}>⏳ Pending</span>}</td>}
+              {show("phone") && <td>{r.phone}</td>}
               {show("town") && <td>{r.town}</td>}{show("paymentMethod") && <td><span className="tag tag-blue">{r.paymentMethod}</span></td>}
               {show("advance") && <td>{r.advance ? currency(r.advance) : "—"}</td>}
               {show("advancePaymentMethod") && <td style={{ fontSize: 12, color: "#9b8e82" }}>{r.advancePaymentMethod}</td>}
               <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{r.branch}</span></td>
-              {isOwner && <td><button className="btn btn-danger btn-sm" onClick={() => del(r.id)}>✕</button></td>}
+              {isOwner && r.status !== "pending" && <td><button className="btn btn-danger btn-sm" onClick={() => del(r.id)}>✕</button></td>}
             </tr>
           ))}</tbody>
         </table>
@@ -966,7 +1093,7 @@ function PatientBillSection({ session, data, mutate, staffSubmit, can, audit, fi
 
   const submit = () => {
     const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form, createdBy: session.id, createdByName: session.name, createdAt: ts() };
-    if (isOwner) { mutate("patientBill", arr => [...arr, { ...record, status: "approved" }]); audit("OWNER_ADD", { type: "patientBill", name: form.name }); }
+    if (isOwner) { const approved = { ...record, status: "approved" }; mutate("patientBill", arr => [...arr, approved], approved); audit("OWNER_ADD", { type: "patientBill", name: form.name }); }
     else { staffSubmit("patientBill", record); }
     setModal(false); setMsg(isOwner ? "Bill saved." : "Submitted for approval ✓");
   };
@@ -1096,10 +1223,10 @@ function InventorySection({ session, data, mutate, staffSubmit, can, audit, fiel
     const item = { ...form, qty: Number(form.qty), reorder: Number(form.reorder), cost: Number(form.cost), price: Number(form.price) };
     if (modal === "add") {
       const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...item, createdBy: session.id, createdByName: session.name };
-      if (isOwner) { mutate("stock", arr => [...arr, record]); audit("OWNER_ADD", { type: "stock", sku: item.sku }); }
+      if (isOwner) { mutate("stock", arr => [...arr, record], record); audit("OWNER_ADD", { type: "stock", sku: item.sku }); }
       else { staffSubmit("stock", record); setMsg("Submitted for approval."); }
     } else {
-      if (isOwner) { mutate("stock", arr => arr.map(x => x.id === modal.id ? { ...x, ...item } : x)); audit("EDIT", { type: "stock", id: modal.id }); }
+      if (isOwner) { const updated = { ...modal, ...item }; mutate("stock", arr => arr.map(x => x.id === modal.id ? updated : x), updated); audit("EDIT", { type: "stock", id: modal.id }); }
       else { staffSubmit("stock", { ...modal, ...item }); setMsg("Edit submitted for approval."); }
     }
     setModal(null);
@@ -1176,7 +1303,7 @@ function InvoicesSection({ session, data, mutate, staffSubmit, can, audit, onSyn
   const save = () => {
     if (!form.patientName || !form.items.length) return;
     const record = { id: `INV-${uid().slice(0, 6).toUpperCase()}`, branch: isOwner ? "JPT Branch" : branch, ...form, discount: Number(form.discount), approvalStatus: "pending", status: "Pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
-    if (isOwner) { mutate("invoices", arr => [...arr, { ...record, approvalStatus: "approved" }]); audit("OWNER_ADD", { type: "invoices" }); }
+    if (isOwner) { const approved = { ...record, approvalStatus: "approved" }; mutate("invoices", arr => [...arr, approved], approved); audit("OWNER_ADD", { type: "invoices" }); }
     else { staffSubmit("invoices", record); setMsg("Submitted for approval."); }
     setModal(false);
   };
