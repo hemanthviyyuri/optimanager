@@ -1,40 +1,70 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 // ════════════════════════════════════════════════════════════════════════
-// v4.0 — OptiManager  |  Supabase · Audit Logs · Dashboard Builder
+// v5.0 — OptiManager Pro Max | Enterprise Ophthalmology ERP Engine
 // ════════════════════════════════════════════════════════════════════════
-const APP_VER  = "4.0";
+const APP_VER = "5.0-ERP";
 const BRANCHES = ["JPT Branch", "PRP Branch"];
-const SECTIONS = ["patients","patientBill","inventory","invoices","alerts"];
-const SECTION_LABELS = { patients:"Patients", patientBill:"Patient Bill", inventory:"Inventory", invoices:"Sales & Invoices", alerts:"Low Stock Alerts" };
-const LENS_TYPES     = ["Single Vision","Bifocal","Progressive","Anti-Reflective","Photochromic","Blue Cut","UV400","Polarized","High Index 1.60","High Index 1.67","High Index 1.74","Trivex","Polycarbonate","Toric (Contact)","Multifocal (Contact)"];
-const DELIVERY_STATUS= ["Delivered","Not Ready","Fixing Completed But Not Delivered"];
-
-// ════════════════════════════════════════════════════════════════════════
-// DEFAULT ACCOUNTS
-// ════════════════════════════════════════════════════════════════════════
-const DEFAULT_ACCOUNTS = [
-  { id:"owner",      name:"Owner",       role:"owner", branch:"All",        password:"owner123", perms:{} },
-  { id:"staff_jpt1", name:"Ravi (JPT)",  role:"staff", branch:"JPT Branch", password:"jpt1234",
-    perms:{ patients:{view:true,add:true,edit:false}, patientBill:{view:true,add:true,edit:false}, inventory:{view:true,add:false,edit:false}, invoices:{view:true,add:false,edit:false}, alerts:{view:true,add:false,edit:false} }
-  },
-  { id:"staff_prp1", name:"Divya (PRP)", role:"staff", branch:"PRP Branch", password:"prp1234",
-    perms:{ patients:{view:true,add:true,edit:false}, patientBill:{view:true,add:true,edit:false}, inventory:{view:false,add:false,edit:false}, invoices:{view:false,add:false,edit:false}, alerts:{view:false,add:false,edit:false} }
-  },
+const DEPARTMENTS = [
+  "OP Registration", "K-Sheet Room", "Optometrist-1", "Optometrist-2",
+  "Ophthalmologist-1", "Ophthalmologist-2", "Counseling Room",
+  "Opticals Dept", "Pharmacy Dept", "Lens Stock Control", "Frame Stock Control",
+  "Surgery Department", "MD/Admin Dashboard"
 ];
 
-// Default visible fields per section (owner can toggle)
+const ROLES = ["owner", "staff"];
+
+// Default visible field schemas for fine-grained governance configuration
 const DEFAULT_FIELD_VISIBILITY = {
-  patients:    ["timestamp","date","time","name","phone","town","paymentMethod","advance","advancePaymentMethod"],
-  patientBill: ["timestamp","date","time","mrNo","name","phone","town","gender","age","complaint","pastHistory","reSpherAR","reCylAR","reAxisAR","leSpherAR","leCylAR","leAxisAR","reSpherSub","reCylSub","reAxisSub","leSpherSub","leCylSub","leAxisSub","add","eyelids","conjunctiva","cornea","anteriorChamber","iris","pupil","lens","ocularMovements","fundus","advice","optom","lensType","frameNo","advance","paymentMethod","deliveryStatus","balance"],
-  inventory:   ["sku","name","category","brand","qty","reorder","lensPower","lensType","boxNo","price","location"],
-  invoices:    ["id","date","patientName","items","discount","status"],
+  opRegistration: ["mrNo", "patientId", "name", "phone", "town", "gender", "age", "referral", "fee", "payMode"],
+  optometrist: ["visualAcuity", "retinoscopy", "arReading", "acceptance", "iop", "bp", "sugar", "dilatation"],
+  ophthalmologist: ["eyelids", "conjunctiva", "cornea", "anteriorChamber", "iris", "pupil", "lens", "fundus", "movements", "diagnosis", "prescription"],
+  opticals: ["frameSelected", "lensSelected", "totalAmount", "advance", "balance", "deliveryDate"],
+  inventory: ["sku", "name", "category", "brand", "qty", "reorder", "cost", "price", "expiryDate"]
+};
+
+// Default system master accounts mapped directly to dedicated clinical checkpoints
+const DEFAULT_ACCOUNTS = [
+  { id: "owner", name: "MD Admin Account", role: "owner", branch: "All", department: "MD/Admin Dashboard", password: "owner123", perms: {} },
+  { id: "op_staff", name: "Ravi (Front Desk)", role: "staff", branch: "JPT Branch", department: "OP Registration", password: "op123", perms: { opRegistration: { view: true, add: true, edit: true } } },
+  { id: "optom_staff", name: "Dr. Anjali (Optometrist)", role: "staff", branch: "JPT Branch", department: "Optometrist-1", password: "opt123", perms: { optometrist: { view: true, add: true, edit: true } } },
+  { id: "doctor_staff", name: "Dr. Vikram (Surgeon)", role: "staff", branch: "JPT Branch", department: "Ophthalmologist-1", password: "doc123", perms: { ophthalmologist: { view: true, add: true, edit: true } } },
+  { id: "optical_staff", name: "Kiran (Opticals Manager)", role: "staff", branch: "JPT Branch", department: "Opticals Dept", password: "optdept123", perms: { opticals: { view: true, add: true, edit: true } } }
+];
+
+// Seed baseline operational database structures
+const INITIAL_MASTER_DATA = {
+  patients: [
+    { mrNo: "MR-1001", patientId: "PID-92831", name: "Ramesh Kumar", phone: "9848022338", town: "Kakinada", gender: "Male", age: 54, referral: "Camp 02", branch: "JPT Branch", fee: 250, payMode: "Cash", txRef: "TXN-9921", remarks: "Complains of progressive distance blurring", patientType: "New Patient", timestamp: "15/06/2026 09:00:00", date: "2026-06-15", time: "09:00", visitCount: 1, currentStage: "Optometrist Room" }
+  ],
+  clinicalRecords: [
+    { id: "CR-1001", mrNo: "MR-1001", patientId: "PID-92831", chiefComplaint: "Diminished vision in both eyes since 6 months, worse in right eye.", medicalHistory: "DM (Controlled), HTN (Controlled)", htn: true, dm: true, cad: false, asthma: false, allergies: false, visionOD: "6/18", visionOS: "6/12", retinoscopyOD: "-1.50 DS", retinoscopyOS: "-1.00 DS", arSpherOD: "-1.75", arCylOD: "-0.50", arAxisOD: "90", arSpherOS: "-1.25", arCylOS: "-0.25", arAxisOS: "85", accSpherOD: "-1.50", accCylOD: "-0.50", accAxisOD: "90", accSpherOS: "-1.00", accCylOS: "", accAxisOS: "", nearOD: "N6", nearOS: "N6", addVal: "+2.00", iopOD: "16", iopOS: "15", bp: "130/80", sugar: "142 mg/dl", dilatation: "Dilated", eyelids: "Normal", conjunctiva: "Clear", cornea: "Clear", anteriorChamber: "Deep & Quiet", iris: "Normal Pattern", pupil: "Round, Reactive", lens: "NS Grade II (OD), NS Grade I (OS)", fundus: "Mild Non-Proliferative Diabetic Retinopathy (NPDR)", ocularMovements: "Full & Free", diagnosis: "Immature Senile Cataract OD > OS, Mild NPDR", advice: "Right Eye Cataract Phacoemulsification with MICS surgery recommended.", prescription: "Tab Vitamin C once daily, Lubricating eye drops 1 drop 4 times daily", treatmentPlan: "Scheduled for Counseling & Intraocular Lens (IOL) selection.", graphData: null, timestamp: "15/06/2026 10:15:00" }
+  ],
+  inventory: [
+    { id: "inv-1", sku: "LNS-SV-A1", name: "Single Vision Anti-Reflective", category: "Lenses", brand: "Essilor", qty: 45, reorder: 10, cost: 450, price: 1200, location: "Drawer A-1", lensPower: "-1.50", lensType: "Single Vision", boxNo: "B-02", expiryDate: "" },
+    { id: "inv-2", sku: "FRM-RB-G2", name: "Ray-Ban Aviator Matte Grey", category: "Frames", brand: "Ray-Ban", qty: 4, reorder: 5, cost: 1800, price: 4500, location: "Display Rack 1", model: "RB-3025", boxNo: "", expiryDate: "" },
+    { id: "inv-3", sku: "MED-MOX-01", name: "Moxifloxacin Eye Drops", category: "Medicines", brand: "Cipla", qty: 12, reorder: 15, cost: 45, price: 110, batchNo: "B-MX29", expiryDate: "2027-04-12" },
+    { id: "inv-4", sku: "CNS-IOL-05", name: "Hydrophobic Foldable IOL", category: "Surgical Consumables", brand: "Alcon", qty: 25, reorder: 8, cost: 3200, price: 8500, boxNo: "OT-Box 4", expiryDate: "2029-10-01" }
+  ],
+  opticalsSales: [
+    { id: "OPT-8273", mrNo: "MR-1001", patientId: "PID-92831", name: "Ramesh Kumar", phone: "9848022338", address: "Kakinada", acceptedPower: "OD: -1.50/-0.50x90, OS: -1.00 DS, Add: +2.00", frameSelected: "Ray-Ban Aviator Matte Grey", lensSelected: "Single Vision Anti-Reflective", totalAmount: 5700, advance: 1500, payMethod: "UPI", txId: "TXN-OPT-881", balance: 4200, deliveryDate: "2026-06-18", representative: "Kiran", status: "Not Ready", date: "2026-06-15" }
+  ],
+  counseling: [
+    { id: "CNSL-01", mrNo: "MR-1001", treatmentRecommended: "Phacoemulsification with Hydrophobic IOL", opticalCounseling: "Progressive Lenses advised", costEstimate: 28000, patientDecision: "Agreed", remarks: "Patient chose premium hydrophobic lens option. Scheduled surgery for tomorrow morning.", nextFollowUp: "2026-06-22", surgeryDate: "2026-06-16" }
+  ],
+  surgeries: [
+    { id: "SURG-4401", mrNo: "MR-1001", patientId: "PID-92831", name: "Ramesh Kumar", age: 54, gender: "Male", phone: "9848022338", surgeryType: "Phacoemulsification + IOL (OD)", surgeon: "Dr. Vikram", scheduledDate: "2026-06-16", status: "Scheduled", otNotes: "Prepare for premium foldable IOL implantation.", followUpDate: "2026-06-17", remarks: "Ensure cardiac fitness clearance is attached." }
+  ],
+  reminders: [
+    { id: "rem-1", mrNo: "MR-1001", type: "Surgery Reminder", date: "2026-06-16", channel: "WhatsApp", status: "Pending", text: "Reminder: Your cataract surgery is scheduled for tomorrow at 08:00 AM." }
+  ],
+  tasks: [
+    { id: "tsk-1", title: "Sterilize OT Equipment (Phaco Set)", priority: "High", deadline: "2026-06-15", assignedTo: "doctor_staff", status: "In Progress", createdBy: "owner" }
+  ]
 };
 
 // ════════════════════════════════════════════════════════════════════════
-// SUPABASE CLIENT
-// Supabase is the SINGLE SOURCE OF TRUTH.
-// localStorage is only a display-cache — ALWAYS overwritten by Supabase.
+// DATABASE CONNECTION INTERACTION SCHEMAS (SUPABASE SYNC INTERFACES)
 // ════════════════════════════════════════════════════════════════════════
 let _sb = null;
 function initSB(url, key) {
@@ -42,602 +72,227 @@ function initSB(url, key) {
   _sb = { url: url.replace(/\/$/, ""), key };
   return true;
 }
-function sbReady() { return _sb !== null; }
-
 const SB_TABLES = {
-  patients:      "patients",
-  patientBill:   "patientBill",
-  stock:         "stock",
-  invoices:      "invoices",
-  pending_queue: "pending_queue",
-  accounts:      "accounts",
-  audit_log:     "audit_log",
+  patients: "hms_patients",
+  clinicalRecords: "hms_clinical_records",
+  inventory: "hms_inventory",
+  opticalsSales: "hms_opticals_sales",
+  counseling: "hms_counseling",
+  surgeries: "hms_surgeries",
+  reminders: "hms_reminders",
+  tasks: "hms_tasks",
+  accounts: "hms_accounts",
+  audit_log: "hms_audit_log"
 };
 
 function sbHeaders() {
   return { "Content-Type": "application/json", "apikey": _sb.key, "Authorization": `Bearer ${_sb.key}` };
 }
 
-// GET all rows from a table — returns [] on empty, null on error
 async function sbGet(table) {
   if (!_sb) return null;
-  const tbl = SB_TABLES[table] || table;
   try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}?select=*`, { headers: sbHeaders() });
-    if (!r.ok) { console.warn(`sbGet ${table} HTTP ${r.status}`); return null; }
-    const d = await r.json();
-    return Array.isArray(d) ? d : null;
-  } catch(e) { console.warn(`sbGet ${table}:`, e); return null; }
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}?select=*`, { headers: sbHeaders() });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
 }
 
-// UPSERT a single record
 async function sbUpsertOne(table, row) {
   if (!_sb) return false;
-  const tbl = SB_TABLES[table] || table;
   try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}`, {
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}`, {
       method: "POST",
       headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify(row),
-    });
-    if (!r.ok) { const t = await r.text(); console.warn(`sbUpsertOne ${table} HTTP ${r.status}:`, t); }
-    return r.ok;
-  } catch(e) { console.warn(`sbUpsertOne ${table}:`, e); return false; }
-}
-
-// UPSERT multiple records
-async function sbUpsertMany(table, rows) {
-  if (!_sb || !rows.length) return true;
-  const tbl = SB_TABLES[table] || table;
-  try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}`, {
-      method: "POST",
-      headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify(rows),
-    });
-    if (!r.ok) { const t = await r.text(); console.warn(`sbUpsertMany ${table} HTTP ${r.status}:`, t); }
-    return r.ok;
-  } catch(e) { console.warn(`sbUpsertMany ${table}:`, e); return false; }
-}
-
-// DELETE by id
-async function sbDelete(table, id) {
-  if (!_sb) return false;
-  const tbl = SB_TABLES[table] || table;
-  try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}?id=eq.${encodeURIComponent(id)}`, {
-      method: "DELETE", headers: sbHeaders(),
-    });
-    return r.ok;
-  } catch(e) { console.warn(`sbDelete ${table}:`, e); return false; }
-}
-
-// INSERT one row (audit log, fire-and-forget)
-async function sbInsert(table, row) {
-  if (!_sb) return false;
-  const tbl = SB_TABLES[table] || table;
-  try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}`, {
-      method: "POST",
-      headers: { ...sbHeaders(), "Prefer": "return=minimal" },
       body: JSON.stringify(row),
     });
     return r.ok;
   } catch { return false; }
 }
 
-// Keep sbUpsert as alias for backwards compat (used in pushToSupabase)
-async function sbUpsert(table, rows) {
-  const arr = Array.isArray(rows) ? rows : [rows];
-  return sbUpsertMany(table, arr);
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// HELPERS
-// ════════════════════════════════════════════════════════════════════════
-const now      = () => new Date();
-const ts       = (d = now()) => `${d.toLocaleDateString("en-IN")} ${d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
-const todayStr = () => now().toISOString().split("T")[0];
-const timeStr  = () => now().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-const currency = (n) => `₹${Number(n || 0).toFixed(2)}`;
-const uid      = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-
-function exportCSV(rows, filename) {
-  if (!rows.length) return;
-  const keys = Object.keys(rows[0]);
-  const csv  = [keys.join(","), ...rows.map(r => keys.map(k => `"${String(r[k] ?? "").replace(/"/g, '""')}"`).join(","))].join("\n");
-  Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: filename }).click();
-}
-
-// Validators
-const validate = {
-  phone:     v => { const s = String(v || "").trim(); return s.length === 10 && s[0] !== "0" && /^\d+$/.test(s); },
-  town:      v => { const s = String(v || "").trim(); return s.length > 0 && !/\d/.test(s); },
-  sphereCyl: v => { const n = parseFloat(v); return !isNaN(n) && n >= -6 && n <= 6 && Math.round(Math.abs(n) * 100) % 25 === 0; },
-  axis:      v => { const n = parseFloat(v); return !isNaN(n) && n >= 0 && n <= 180 && n === Math.round(n); },
-  add:       v => { const n = parseFloat(v); if (isNaN(n)) return false; if (n === 0) return true; return n >= 0.75 && n <= 3.00 && Math.round(n * 100) % 25 === 0; },
-};
-
-const vStyle = (val, fn, touched) => !touched ? {} : fn(val) ? { borderColor: "#16a34a" } : { borderColor: "#dc2626" };
-const vMsg   = (val, fn, touched, msg) => (!touched || fn(val)) ? null : <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{msg}</div>;
-
-// ════════════════════════════════════════════════════════════════════════
-// LOCAL PERSISTENCE  (fallback when Supabase not configured)
-// ════════════════════════════════════════════════════════════════════════
 const LS = {
-  get:  (k, def) => { try { return JSON.parse(localStorage.getItem(k)) ?? def; } catch { return def; } },
-  set:  (k, v)   => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
-  sess: (v)      => { try { if (v) sessionStorage.setItem("opti_sess", JSON.stringify(v)); else sessionStorage.removeItem("opti_sess"); } catch {} },
-  getSess: ()    => { try { return JSON.parse(sessionStorage.getItem("opti_sess")); } catch { return null; } },
+  get: (k, def) => { try { return JSON.parse(localStorage.getItem(k)) ?? def; } catch { return def; } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  sess: (v) => { try { if (v) sessionStorage.setItem("opti_hms_sess", JSON.stringify(v)); else sessionStorage.removeItem("opti_hms_sess"); } catch {} },
+  getSess: () => { try { return JSON.parse(sessionStorage.getItem("opti_hms_sess")); } catch { return null; } },
 };
 
-const SEED_DATA = {
-  patients: [
-    { id:"p1", branch:"JPT Branch", timestamp:"29/05/2026 09:00:00", date:"2026-05-29", time:"09:00", name:"Sarah Mitchell", phone:"9876543210", town:"Kakinada", paymentMethod:"Cash", advance:200, advancePaymentMethod:"Cash", status:"approved", createdBy:"owner", createdByName:"Owner" },
-  ],
-  patientBill: [
-    { id:"b1", branch:"JPT Branch", timestamp:"29/05/2026 09:15:00", date:"2026-05-29", time:"09:15", mrNo:"MR-001", name:"Sarah Mitchell", phone:"9876543210", town:"Kakinada", gender:"Female", age:41, complaint:"Blurred vision", pastHistory:"Hypertension", reSpherAR:"-2.50", reCylAR:"-0.75", reAxisAR:180, leSpherAR:"-2.25", leCylAR:"-0.50", leAxisAR:175, reSpherSub:"-2.50", reCylSub:"-0.75", reAxisSub:180, leSpherSub:"-2.25", leCylSub:"-0.50", leAxisSub:175, add:"1.50", eyelids:"Normal", conjunctiva:"Clear", cornea:"Clear", anteriorChamber:"Deep", iris:"Normal", pupil:"RAPD-", lens:"Clear", ocularMovements:"Full", fundus:"Normal", advice:"Progressive lenses", optom:"Dr. Priya", lensType:"Progressive", frameNo:"FR-A12", advance:500, paymentMethod:"Cash", deliveryStatus:"Not Ready", balance:3200, status:"approved", createdBy:"owner", createdByName:"Owner" },
-  ],
-  stock: [
-    { id:"s1", branch:"JPT Branch", sku:"FR-001", name:"Ray-Ban Aviator Gold", category:"Frames",        brand:"Ray-Ban",  qty:8,  reorder:5,  cost:2000, price:8000,  location:"A1", lensPower:"",     lensType:"",              boxNo:"",     createdBy:"owner", createdByName:"Owner" },
-    { id:"s2", branch:"JPT Branch", sku:"LN-001", name:"Essilor Varilux",      category:"Lenses",        brand:"Essilor", qty:15, reorder:6,  cost:2500, price:9000,  location:"D1", lensPower:"-2.50", lensType:"Progressive",    boxNo:"B-14", createdBy:"owner", createdByName:"Owner" },
-    { id:"s3", branch:"PRP Branch", sku:"FR-002", name:"Oakley Half Jacket",   category:"Frames",        brand:"Oakley",  qty:3,  reorder:5,  cost:2200, price:9500,  location:"A2", lensPower:"",     lensType:"",              boxNo:"",     createdBy:"owner", createdByName:"Owner" },
-    { id:"s4", branch:"PRP Branch", sku:"LN-002", name:"Zeiss DriveSafe",      category:"Lenses",        brand:"Zeiss",   qty:1,  reorder:4,  cost:3500, price:12000, location:"D2", lensPower:"-1.75", lensType:"Anti-Reflective", boxNo:"B-07", createdBy:"owner", createdByName:"Owner" },
-  ],
-  invoices: [
-    { id:"INV-001", branch:"JPT Branch", date:"2026-05-29", patientName:"Sarah Mitchell", items:[{name:"Essilor Varilux",qty:1,price:9000}], discount:500, status:"Paid", approvalStatus:"approved", createdBy:"owner", createdByName:"Owner" },
-  ],
-};
+const ts = () => `${new Date().toLocaleDateString("en-IN")} ${new Date().toLocaleTimeString("en-IN")}`;
+const currency = (n) => `₹${Number(n || 0).toFixed(2)}`;
+const uid = () => "ID" + Math.random().toString(36).substring(2, 7).toUpperCase();
 
 // ════════════════════════════════════════════════════════════════════════
-// PRINT HELPERS  (preserved from v3)
-// ════════════════════════════════════════════════════════════════════════
-function printInvoice(inv) {
-  const total = (inv.items || []).reduce((s, i) => s + i.qty * i.price, 0) - (inv.discount || 0);
-  const win = window.open("", "_blank", "width=800,height=900");
-  win.document.write(`<!DOCTYPE html><html><head><title>Invoice ${inv.id}</title>
-  <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:sans-serif;padding:48px;max-width:700px;margin:0 auto}
-  .hdr{display:flex;justify-content:space-between;padding-bottom:20px;border-bottom:2px solid #1a1714;margin-bottom:28px}
-  table{width:100%;border-collapse:collapse}th{text-align:left;padding:10px;font-size:11px;text-transform:uppercase;color:#9b8e82;border-bottom:2px solid #e8e2db}
-  td{padding:10px;border-bottom:1px solid #f0ede8;font-size:13px}.tot{font-weight:700;border-top:2px solid #1a1714}
-  .foot{margin-top:40px;font-size:11px;color:#9b8e82;text-align:center}@media print{body{padding:24px}}</style></head><body>
-  <div class="hdr"><div><h2>👁 OptiManager</h2><div style="color:#9b8e82">${inv.branch}</div></div>
-  <div style="text-align:right"><h3>${inv.id}</h3><div>Date: ${inv.date}</div><div style="margin-top:6px;background:${inv.status === "Paid" ? "#dcfce7" : "#fef9c3"};color:${inv.status === "Paid" ? "#16a34a" : "#a16207"};display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700">${inv.status}</div></div></div>
-  <p style="margin-bottom:20px"><strong>Billed To:</strong> ${inv.patientName}</p>
-  <table><thead><tr><th>Item</th><th>Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Amount</th></tr></thead><tbody>
-  ${(inv.items || []).map(i => `<tr><td>${i.name}</td><td>${i.qty}</td><td style="text-align:right">₹${Number(i.price).toFixed(2)}</td><td style="text-align:right">₹${(i.qty * i.price).toFixed(2)}</td></tr>`).join("")}
-  ${inv.discount > 0 ? `<tr><td colspan="3" style="text-align:right;color:#9b8e82">Discount</td><td style="text-align:right;color:#dc2626">-₹${Number(inv.discount).toFixed(2)}</td></tr>` : ""}
-  <tr class="tot"><td colspan="3" style="text-align:right">Total</td><td style="text-align:right">₹${Number(total).toFixed(2)}</td></tr>
-  </tbody></table>
-  <div class="foot">OptiManager · ${inv.branch} · Generated ${new Date().toLocaleString("en-IN")}</div>
-  <script>window.onload=()=>{window.print()}<\/script></body></html>`);
-  win.document.close();
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// ROOT APP
+// CORE ROOT COMPONENT ENTRYPOINT
 // ════════════════════════════════════════════════════════════════════════
 export default function App() {
-  const [session,  setSession]  = useState(() => LS.getSess());
-  const [accounts, setAccounts] = useState(() => LS.get("opti_accounts", DEFAULT_ACCOUNTS));
-  const [data,     setData]     = useState(() => LS.get("opti_data_v4",  SEED_DATA));
-  const [pending,  setPending]  = useState(() => LS.get("opti_pending",  []));
-  const [auditLog, setAuditLog] = useState(() => LS.get("opti_audit",    []));
-  const [fieldVis, setFieldVis] = useState(() => LS.get("opti_fields",   DEFAULT_FIELD_VISIBILITY));
-  const [sbCreds,  setSbCreds]  = useState(() => LS.get("opti_sb",       { url: "", key: "" }));
+  const [session, setSession] = useState(() => LS.getSess());
+  const [accounts, setAccounts] = useState(() => LS.get("hms_accounts", DEFAULT_ACCOUNTS));
+  const [db, setDb] = useState(() => LS.get("hms_master_db", INITIAL_MASTER_DATA));
+  const [auditLog, setAuditLog] = useState(() => LS.get("hms_audit", []));
+  const [fieldVis, setFieldVis] = useState(() => LS.get("hms_fields", DEFAULT_FIELD_VISIBILITY));
+  const [sbCreds, setSbCreds] = useState(() => LS.get("hms_sb_creds", { url: "", key: "" }));
   const [sbStatus, setSbStatus] = useState("idle");
-  const [view,     setView]     = useState("dashboard");
-  const [lastSync, setLastSync] = useState(null);
-  const [syncing,  setSyncing]  = useState(false);
+  const [view, setView] = useState("dashboard");
+  const [branding, setBranding] = useState(() => LS.get("hms_branding", { name: "OptiManager HMS Pro", logo: "👁", theme: "#1a1714" }));
 
-  // ── localStorage persistence (write-through cache only) ──────────
-  // NOTE: These are backup caches. Supabase is always authoritative.
-  useEffect(() => { LS.set("opti_accounts", accounts); }, [accounts]);
-  useEffect(() => { LS.set("opti_data_v4",  data);     }, [data]);
-  useEffect(() => { LS.set("opti_pending",  pending);  }, [pending]);
-  useEffect(() => { LS.set("opti_audit",    auditLog); }, [auditLog]);
-  useEffect(() => { LS.set("opti_fields",   fieldVis); }, [fieldVis]);
-  useEffect(() => { LS.set("opti_sb",       sbCreds);  }, [sbCreds]);
+  useEffect(() => { LS.set("hms_accounts", accounts); }, [accounts]);
+  useEffect(() => { LS.set("hms_master_db", db); }, [db]);
+  useEffect(() => { LS.set("hms_audit", auditLog); }, [auditLog]);
+  useEffect(() => { LS.set("hms_fields", fieldVis); }, [fieldVis]);
+  useEffect(() => { LS.set("hms_sb_creds", sbCreds); }, [sbCreds]);
+  useEffect(() => { LS.set("hms_branding", branding); }, [branding]);
 
-  // ── Core sync: pull everything from Supabase ──────────────────────
-  // This is the ONLY place we trust Supabase data. It fully replaces
-  // local state. null from sbGet means network error — keep old data.
-  // An empty array means the table really is empty — accept it.
-  const syncFromCloud = async (url, key) => {
-    if (!url || !key) return;
-    initSB(url, key);
-    if (!sbReady()) return;
-    setSyncing(true);
-    try {
-      const [pts, bills, stk, inv, pend, accs] = await Promise.all([
-        sbGet("patients"),
-        sbGet("patientBill"),
-        sbGet("stock"),
-        sbGet("invoices"),
-        sbGet("pending_queue"),
-        sbGet("accounts"),
-      ]);
-
-      // For each table: if Supabase returned a valid array (even []),
-      // ALWAYS use it — this is the source of truth.
-      // Only keep old local data if the network call returned null (error).
-      setData(d => ({
-        ...d,
-        patients:    Array.isArray(pts)   ? pts   : d.patients,
-        patientBill: Array.isArray(bills) ? bills : d.patientBill,
-        stock:       Array.isArray(stk)   ? stk   : d.stock,
-        invoices:    Array.isArray(inv)   ? inv   : d.invoices,
-      }));
-
-      if (Array.isArray(pend)) setPending(pend);
-
-      // Accounts: merge Supabase accounts with DEFAULT_ACCOUNTS so the
-      // demo logins always work even if accounts table is empty.
-      if (Array.isArray(accs) && accs.length > 0) {
-        setAccounts(accs);
-        LS.set("opti_accounts", accs);
-      }
-
-      setLastSync(new Date());
-      setSbStatus("ok");
-    } catch(e) {
-      console.warn("Cloud sync failed:", e);
-      setSbStatus("error");
-    }
-    setSyncing(false);
-  };
-
-  // ── Init on mount + auto-sync every 10s ──────────────────────────
-  useEffect(() => {
-    if (!sbCreds.url || !sbCreds.key) return;
-    initSB(sbCreds.url, sbCreds.key);
-    syncFromCloud(sbCreds.url, sbCreds.key); // immediate on mount
-    const id = setInterval(() => syncFromCloud(sbCreds.url, sbCreds.key), 10000);
-    return () => clearInterval(id);
-  }, [sbCreds.url, sbCreds.key]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Supabase connect / test ──────────────────────────────────────
-  const connectSupabase = async (url, key) => {
-    setSbStatus("testing");
-    const cleanUrl = url.replace(/\/$/, "");
-    initSB(cleanUrl, key);
-    try {
-      // Test with a lightweight ping
-      const r = await fetch(`${cleanUrl}/rest/v1/patients?select=id&limit=1`, {
-        headers: { "apikey": key, "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-      });
-      if (r.status < 500) {
-        setSbCreds({ url: cleanUrl, key });
-        setSbStatus("ok");
-        // Push any local accounts to cloud so staff logins work everywhere
-        await sbUpsertMany("accounts", accounts);
-        await syncFromCloud(cleanUrl, key);
-        return true;
-      }
-      setSbStatus("error"); _sb = null; return false;
-    } catch(e) {
-      // CORS from sandbox — trust valid-format credentials
-      if (cleanUrl.includes("supabase.co") && key.startsWith("eyJ") && key.length > 100) {
-        initSB(cleanUrl, key);
-        setSbCreds({ url: cleanUrl, key });
-        setSbStatus("ok");
-        await sbUpsertMany("accounts", accounts).catch(() => {});
-        await syncFromCloud(cleanUrl, key);
-        return true;
-      }
-      setSbStatus("error"); _sb = null; return false;
-    }
-  };
-
-  const syncFromSupabase = async () => syncFromCloud(sbCreds.url, sbCreds.key);
-
-  const pushToSupabase = async () => {
-    if (!sbReady()) return;
-    setSbStatus("pushing");
-    try {
-      await Promise.all([
-        sbUpsertMany("patients",      data.patients    || []),
-        sbUpsertMany("patientBill",   data.patientBill || []),
-        sbUpsertMany("stock",         data.stock       || []),
-        sbUpsertMany("invoices",      data.invoices    || []),
-        sbUpsertMany("pending_queue", pending),
-        sbUpsertMany("accounts",      accounts),
-      ]);
-      setSbStatus("ok");
-      await syncFromCloud(sbCreds.url, sbCreds.key);
-    } catch { setSbStatus("error"); }
-  };
-
-  // ── Audit log ────────────────────────────────────────────────────
   const audit = useCallback((action, detail = {}) => {
     if (!session) return;
-    const entry = { id: uid(), action, detail, userId: session.id, userName: session.name, branch: session.branch || "All", at: ts() };
-    setAuditLog(a => [entry, ...a].slice(0, 500));
-    sbInsert("audit_log", entry).catch(() => {});
+    const log = { id: uid(), action, detail, userId: session.id, userName: session.name, dept: session.department, at: ts() };
+    setAuditLog(a => [log, ...a].slice(0, 500));
   }, [session]);
 
-  // ── Data mutations (owner direct writes) ─────────────────────────
-  // Only upsert the NEW/CHANGED record, not the whole array.
-  // After write, re-pull from Supabase so all browsers get the update.
-  const mutate = useCallback((key, fn, newRecord) => {
-    setData(d => {
-      const updated = typeof fn === "function" ? fn(d[key] || []) : fn;
-      // If we have the specific new/changed record, upsert just that one.
-      // Otherwise fall back to upserting the whole updated array.
-      if (sbReady()) {
-        if (newRecord) {
-          sbUpsertOne(key, newRecord).catch(() => {});
-        } else if (Array.isArray(updated)) {
-          sbUpsertMany(key, updated).catch(() => {});
-        }
-      }
-      return { ...d, [key]: updated };
-    });
-  }, []);
-
-  // ── Staff submit → pending_queue ─────────────────────────────────
-  const staffSubmit = useCallback(async (type, record) => {
-    const entry = {
-      id: uid(),
-      type,
-      record: { ...record, status: "pending" },
-      submittedBy:     session.id,
-      submittedByName: session.name,
-      branch:          session.branch,
-      submittedAt:     ts(),
-    };
-    // Write to Supabase pending_queue FIRST — this is what the owner sees
-    const ok = await sbUpsertOne("pending_queue", entry);
-    if (!ok) {
-      console.warn("staffSubmit: Supabase write failed — entry saved locally only");
-    }
-    // Update local state
-    setPending(p => {
-      const next = [...p, entry];
-      LS.set("opti_pending", next);
-      return next;
-    });
-    audit("STAFF_SUBMIT", { type, recordId: record.id });
-  }, [session, audit]);
-
-  // ── Owner approve ────────────────────────────────────────────────
-  const approvePending = useCallback(async (entryId) => {
-    const entry = pending.find(p => p.id === entryId);
-    if (!entry) return;
-    const record = {
-      ...entry.record,
-      status:          "approved",
-      approvedBy:      session.id,
-      approvedByName:  session.name,
-      approvedAt:      ts(),
-    };
-
-    // Step 1: Write approved record to its real table in Supabase.
-    //         This is what staff browsers will see on their next sync.
-    await sbUpsertOne(entry.type, record);
-
-    // Step 2: Remove from pending_queue in Supabase.
-    await sbDelete("pending_queue", entryId);
-
-    // Step 3: Update owner's local state immediately (no wait for sync).
-    setData(d => {
-      const arr = d[entry.type] || [];
-      const exists = arr.find(x => x.id === record.id);
-      const updated = exists ? arr.map(x => x.id === record.id ? record : x) : [...arr, record];
-      return { ...d, [entry.type]: updated };
-    });
-
-    // Step 4: Remove from pending locally.
-    setPending(p => {
-      const next = p.filter(x => x.id !== entryId);
-      LS.set("opti_pending", next);
-      return next;
-    });
-
-    audit("APPROVE", { type: entry.type, recordId: record.id, submittedBy: entry.submittedByName });
-  }, [pending, session, audit]);
-
-  const rejectPending = useCallback(async (entryId) => {
-    const entry = pending.find(p => p.id === entryId);
-    await sbDelete("pending_queue", entryId);
-    setPending(p => p.filter(x => x.id !== entryId));
-    audit("REJECT", { type: entry?.type, submittedBy: entry?.submittedByName });
-  }, [pending, audit]);
-
-  // ── Account management: always sync accounts to Supabase ─────────
-  const updateAccounts = useCallback(async (newAccounts) => {
-    setAccounts(newAccounts);
-    // Push updated accounts to Supabase so all devices see same staff list
-    if (sbReady()) {
-      await sbUpsertMany("accounts", newAccounts).catch(() => {});
+  const mutate = useCallback((key, updatedArray, mutatedRecord = null) => {
+    setDb(prev => ({ ...prev, [key]: updatedArray }));
+    if (_sb && mutatedRecord) {
+      sbUpsertOne(key, mutatedRecord).catch(() => {});
     }
   }, []);
 
-  // ── Login / Logout ───────────────────────────────────────────────
-  const login = useCallback(async (acc) => {
-    const s = { ...acc, loginTime: ts() };
+  const login = useCallback((acc, branchOverride) => {
+    const s = { ...acc, branch: branchOverride || acc.branch, loginTime: ts() };
     LS.sess(s);
     setSession(s);
     setView("dashboard");
-    const entry = { id: uid(), action: "LOGIN", detail: {}, userId: acc.id, userName: acc.name, branch: acc.branch || "All", at: ts() };
-    setAuditLog(a => [entry, ...a].slice(0, 500));
-    sbInsert("audit_log", entry).catch(() => {});
-    // Immediately sync after login so user sees latest data
-    if (sbCreds.url && sbCreds.key) {
-      syncFromCloud(sbCreds.url, sbCreds.key);
-    }
-  }, [sbCreds]); // eslint-disable-line react-hooks/exhaustive-deps
+    const log = { id: uid(), action: "USER_LOGIN", detail: { department: acc.department }, userId: acc.id, userName: acc.name, dept: acc.department, at: ts() };
+    setAuditLog(a => [log, ...a]);
+  }, []);
 
   const logout = useCallback(() => {
-    audit("LOGOUT", {});
+    audit("USER_LOGOUT");
     LS.sess(null);
     setSession(null);
-    setView("dashboard");
   }, [audit]);
 
-  const can = useCallback((section, action) => {
-    if (!session) return false;
-    if (session.role === "owner") return true;
-    return session.perms?.[section]?.[action] === true;
-  }, [session]);
-
-  // ── LoginScreen: fetch accounts from Supabase before showing ─────
-  // So staff created on one device are visible on all devices.
-  const [loginAccounts, setLoginAccounts] = useState(accounts);
-  useEffect(() => {
-    if (!sbCreds.url || !sbCreds.key) { setLoginAccounts(accounts); return; }
-    initSB(sbCreds.url, sbCreds.key);
-    sbGet("accounts").then(accs => {
-      if (Array.isArray(accs) && accs.length > 0) {
-        setLoginAccounts(accs);
-        setAccounts(accs);
-        LS.set("opti_accounts", accs);
-      } else {
-        setLoginAccounts(accounts);
-      }
-    }).catch(() => setLoginAccounts(accounts));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (!session) return <LoginScreen accounts={loginAccounts} onLogin={login} sbCreds={sbCreds} setSbCreds={setSbCreds} />;
-
-  const sharedProps = {
-    session, data, mutate, staffSubmit, can, audit, fieldVis,
-    onSync: () => syncFromCloud(sbCreds.url, sbCreds.key),
-    syncing,
-  };
+  if (!session) return <LoginScreen accounts={accounts} onLogin={login} branding={branding} />;
 
   return (
-    <Shell session={session} onLogout={logout} pending={pending} view={view} setView={setView} can={can} sbStatus={sbStatus} syncing={syncing} lastSync={lastSync} onManualSync={() => syncFromCloud(sbCreds.url, sbCreds.key)}>
-      {view === "dashboard"    && <Dashboard session={session} data={data} pending={pending} setView={setView} auditLog={auditLog} />}
-      {view === "approval"     && session.role === "owner" && <ApprovalQueue pending={pending} onApprove={approvePending} onReject={rejectPending} />}
-      {view === "patients"     && <PatientsSection     {...sharedProps} />}
-      {view === "patientBill"  && <PatientBillSection  {...sharedProps} />}
-      {view === "inventory"    && <InventorySection    {...sharedProps} />}
-      {view === "invoices"     && <InvoicesSection     {...sharedProps} />}
-      {view === "alerts"       && <AlertsSection       {...sharedProps} />}
-      {view === "auditlog"     && session.role === "owner" && <AuditLogSection auditLog={auditLog} accounts={accounts} />}
-      {view === "dashbuilder"  && session.role === "owner" && <DashboardBuilder fieldVis={fieldVis} setFieldVis={setFieldVis} accounts={accounts} setAccounts={updateAccounts} />}
-      {view === "users"        && session.role === "owner" && <UsersSection accounts={accounts} setAccounts={updateAccounts} audit={audit} />}
-      {view === "supabase"     && session.role === "owner" && <SupabaseSection sbCreds={sbCreds} sbStatus={sbStatus} onConnect={connectSupabase} onSync={syncFromSupabase} onPush={pushToSupabase} />}
-      {view === "launchguide"  && <LaunchGuide />}
-    </Shell>
+    <DashboardShell session={session} onLogout={logout} view={view} setView={setView} branding={branding}>
+      {view === "dashboard" && <AnalyticsDashboard db={db} auditLog={auditLog} session={session} />}
+      {view === "opRegistration" && <OpRegistrationModule db={db} mutate={mutate} session={session} audit={audit} />}
+      {view === "kSheet" && <KSheetModule db={db} mutate={mutate} session={session} audit={audit} />}
+      {view === "optometrist" && <OptometristModule db={db} mutate={mutate} session={session} audit={audit} fieldVis={fieldVis.optometrist} />}
+      {view === "ophthalmologist" && <OphthalmologistModule db={db} mutate={mutate} session={session} audit={audit} fieldVis={fieldVis.ophthalmologist} />}
+      {view === "counseling" && <CounselingModule db={db} mutate={mutate} session={session} audit={audit} />}
+      {view === "opticals" && <OpticalsModule db={db} mutate={mutate} session={session} audit={audit} />}
+      {view === "inventory" && <InventoryModule db={db} mutate={mutate} session={session} audit={audit} />}
+      {view === "surgery" && <SurgeryModule db={db} mutate={mutate} session={session} audit={audit} />}
+      {view === "reminders" && <ReminderSystem db={db} mutate={mutate} session={session} audit={audit} />}
+      {view === "tasks" && <TaskManagement db={db} mutate={mutate} session={session} audit={audit} accounts={accounts} />}
+      {view === "governance" && session.role === "owner" && (
+        <MDGovernanceSection
+          accounts={accounts} setAccounts={setAccounts}
+          fieldVis={fieldVis} setFieldVis={setFieldVis}
+          branding={branding} setBranding={setBranding}
+          auditLog={auditLog}
+        />
+      )}
+    </DashboardShell>
   );
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// MASTER WRAPPER/NAVIGATION SHELL FRAMEWORK
+// ════════════════════════════════════════════════════════════════════════
+function DashboardShell({ session, onLogout, view, setView, branding, children }) {
+  const menuItems = [
+    { id: "dashboard", label: "Dashboard Hub", icon: "📊", show: true },
+    { id: "opRegistration", label: "OP Registration", icon: "📝", show: session.role === "owner" || session.department === "OP Registration" },
+    { id: "kSheet", label: "K-Sheet Records", icon: "📋", show: session.role === "owner" || ["K-Sheet Room", "Optometrist-1", "Optometrist-2"].includes(session.department) },
+    { id: "optometrist", label: "Optometrist Exam", icon: "👁️", show: session.role === "owner" || session.department.startsWith("Optometrist") },
+    { id: "ophthalmologist", label: "Ophthalmologist Pro", icon: "🩺", show: session.role === "owner" || session.department.startsWith("Ophthalmologist") },
+    { id: "counseling", label: "Counseling Suite", icon: "🤝", show: session.role === "owner" || session.department === "Counseling Room" },
+    { id: "opticals", label: "Opticals & Billing", icon: "👓", show: session.role === "owner" || session.department === "Opticals Dept" },
+    { id: "inventory", label: "HMS Central Inventory", icon: "📦", show: session.role === "owner" || ["Lens Stock Control", "Frame Stock Control", "Pharmacy Dept"].includes(session.department) },
+    { id: "surgery", label: "Surgery & OT Control", icon: "✂️", show: session.role === "owner" || session.department === "Surgery Department" },
+    { id: "reminders", label: "Reminders & Alerts", icon: "🔔", show: true },
+    { id: "tasks", label: "Operational Tasks", icon: "✅", show: true },
+    { id: "governance", label: "MD Control Center", icon: "🛡️", show: session.role === "owner" },
+  ];
+
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", background: "#f8f9fa", fontFamily: "system-ui, sans-serif" }}>
+      <style>{SHELL_CSS}</style>
+      <aside style={{ width: 260, background: branding.theme, color: "#fff", display: "flex", flexDirection: "column", padding: "16px 12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, paddingBottom: 16, borderBottom: "1px solid rgba(255,255,255,0.15)", marginBottom: 16 }}>
+          <span style={{ fontSize: 24 }}>{branding.logo}</span>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 16 }}>{branding.name}</div>
+            <div style={{ fontSize: 11, opacity: 0.7 }}>v{APP_VER} ERP Platform</div>
+          </div>
+        </div>
+
+        <div style={{ padding: "8px 12px", background: "rgba(255,255,255,0.1)", borderRadius: 8, marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>{session.name}</div>
+          <div style={{ fontSize: 11, opacity: 0.75, marginTop: 2 }}>{session.department}</div>
+          <div style={{ fontSize: 10, color: "#a3cfbb", marginTop: 4 }}>📍 {session.branch}</div>
+        </div>
+
+        <nav style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+          {menuItems.filter(m => m.show).map(m => (
+            <button key={m.id} className={`sidebar-btn ${view === m.id ? "active" : ""}`} onClick={() => setView(m.id)}>
+              <span style={{ marginRight: 8 }}>{m.icon}</span> {m.label}
+            </button>
+          ))}
+        </nav>
+
+        <button className="logout-btn" onClick={onLogout} style={{ marginTop: "auto" }}>🔒 Terminate Session</button>
+      </aside>
+      <main style={{ flex: 1, padding: 24, overflowY: "auto", maxWidth: "calc(100vw - 260px)" }}>{children}</main>
+    </div>
+  );
+}
 
 // ════════════════════════════════════════════════════════════════════════
-// LOGIN SCREEN
-// Supports Supabase URL entry so staff on new devices can connect to
-// the cloud and load accounts without needing localStorage.
+// CLINICAL ENGINE COMPONENT FOR SYSTEM LOGIN
 // ════════════════════════════════════════════════════════════════════════
-function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
-  const [userId,   setUserId]   = useState("");
-  const [password, setPassword] = useState("");
-  const [branch,   setBranch]   = useState(BRANCHES[0]);
-  const [err,      setErr]      = useState("");
-  const [showPw,   setShowPw]   = useState(false);
-  const [liveAccs, setLiveAccs] = useState(accounts);
-  const [loading,  setLoading]  = useState(false);
+function LoginScreen({ accounts, onLogin, branding }) {
+  const [uidStr, setUidStr] = useState("");
+  const [pwd, setPwd] = useState("");
+  const [branch, setBranch] = useState(BRANCHES[0]);
+  const [error, setError] = useState("");
 
-  // ── Cloud setup panel (shown when no Supabase URL saved) ─────────
-  const [showCloud, setShowCloud] = useState(!sbCreds?.url);
-  const [cloudUrl,  setCloudUrl]  = useState(sbCreds?.url  || "");
-  const [cloudKey,  setCloudKey]  = useState(sbCreds?.key  || "");
-  const [cloudMsg,  setCloudMsg]  = useState("");
-
-  const connectCloud = async () => {
-    if (!cloudUrl || !cloudKey) { setCloudMsg("Enter both URL and API key."); return; }
-    setLoading(true); setCloudMsg("Connecting…");
-    const cleanUrl = cloudUrl.replace(/\/$/, "");
-    initSB(cleanUrl, cloudKey);
-    try {
-      const accs = await sbGet("accounts");
-      if (Array.isArray(accs) && accs.length > 0) {
-        setLiveAccs(accs);
-        setSbCreds({ url: cleanUrl, key: cloudKey });
-        LS.set("opti_sb", { url: cleanUrl, key: cloudKey });
-        LS.set("opti_accounts", accs);
-        setCloudMsg("Connected ✓ — accounts loaded from cloud.");
-        setShowCloud(false);
-      } else {
-        // Table might be empty — still save creds
-        setSbCreds({ url: cleanUrl, key: cloudKey });
-        LS.set("opti_sb", { url: cleanUrl, key: cloudKey });
-        setCloudMsg("Connected ✓ (no accounts in cloud yet — using defaults).");
-        setShowCloud(false);
-      }
-    } catch(e) {
-      setCloudMsg("Connection failed. Check URL and key.");
-    }
-    setLoading(false);
-  };
-
-  const doLogin = () => {
-    const all = [...liveAccs];
-    const acc = all.find(a => a.id === userId.trim() && a.password === password);
-    if (!acc) {
-      setErr("Invalid user ID or password.");
+  const executeLogin = () => {
+    const matched = accounts.find(a => a.id === uidStr.trim() && a.password === pwd);
+    if (!matched) {
+      setError("Invalid Access System ID or Encryption Key Pathway.");
       return;
     }
-    if (acc.role === "staff" && branch && acc.branch !== branch) {
-      setErr(`This account belongs to ${acc.branch}.`);
-      return;
-    }
-    onLogin(acc);
+    onLogin(matched, matched.role === "owner" ? "All Branches" : branch);
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#0f0e0c", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans',sans-serif" }}>
-      <style>{GCSS}</style>
-      <div style={{ width: 420, background: "#fff", borderRadius: 24, padding: "42px 38px", boxShadow: "0 40px 100px rgba(0,0,0,.5)" }}>
-        <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ width: 60, height: 60, background: "#1a1714", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", fontSize: 28 }}>👁</div>
-          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 24, fontWeight: 700 }}>OptiManager</div>
-          <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>v{APP_VER} · Multi-Branch Optical Suite</div>
+    <div style={{ minHeight: "100vh", background: "#111827", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ width: 400, background: "#fff", borderRadius: 16, padding: 32, boxShadow: "0 20px 25px -5px rgba(0,0,0,0.3)" }}>
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ fontSize: 40, marginBottom: 8 }}>{branding.logo}</div>
+          <h2 style={{ margin: 0, fontSize: 22, color: "#1f2937" }}>{branding.name}</h2>
+          <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6b7280" }}>Terminal Node Gateway Authentication</p>
         </div>
 
-        {/* Cloud connection panel */}
-        <div style={{ marginBottom: 18, background: "#f0ede8", borderRadius: 12, padding: "14px 16px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: sbCreds?.url ? "#16a34a" : "#d97706" }}>
-              {sbCreds?.url ? "☁ Cloud Connected" : "☁ Cloud Not Connected"}
-            </div>
-            <button style={{ fontSize: 11, background: "none", border: "none", color: "#6b5e52", cursor: "pointer", textDecoration: "underline" }} onClick={() => setShowCloud(s => !s)}>
-              {showCloud ? "Hide" : "Configure"}
-            </button>
-          </div>
-          {showCloud && (
-            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-              <div style={{ fontSize: 11, color: "#9b8e82" }}>Enter your Supabase credentials to sync data across devices.</div>
-              <input type="text" placeholder="https://xxxx.supabase.co" value={cloudUrl} onChange={e => setCloudUrl(e.target.value)} style={{ fontSize: 12 }} />
-              <input type="password" placeholder="anon public key (eyJ…)" value={cloudKey} onChange={e => setCloudKey(e.target.value)} style={{ fontSize: 12 }} />
-              <button className="btn btn-dark btn-sm" onClick={connectCloud} disabled={loading}>{loading ? "Connecting…" : "Connect to Cloud"}</button>
-              {cloudMsg && <div style={{ fontSize: 11, color: cloudMsg.includes("✓") ? "#16a34a" : "#dc2626" }}>{cloudMsg}</div>}
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: "grid", gap: 14 }}>
-          <div><label>Branch</label>
-            <select value={branch} onChange={e => setBranch(e.target.value)}>
-              <option value="">— Owner Login (no branch) —</option>
-              {BRANCHES.map(b => <option key={b}>{b}</option>)}
+        <div style={{ display: "grid", gap: 16 }}>
+          <div>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#4b5563", marginBottom: 4 }}>Operational Branch Base</label>
+            <select value={branch} onChange={e => setBranch(e.target.value)} style={{ width: "100%", padding: "8px 12px", border: "1px solid #d1d5db", borderRadius: 8 }}>
+              {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
           </div>
-          <div><label>User ID</label>
-            <input type="text" placeholder="owner / staff_jpt1 / staff_prp1" value={userId} onChange={e => { setUserId(e.target.value); setErr(""); }} />
+          <div>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#4b5563", marginBottom: 4 }}>Operator System ID ID</label>
+            <input type="text" value={uidStr} onChange={e => setUidStr(e.target.value)} placeholder="e.g. op_staff" style={{ width: "100%", padding: "8px 12px", border: "1px solid #d1d5db", borderRadius: 8 }} />
           </div>
-          <div><label>Password</label>
-            <div style={{ position: "relative" }}>
-              <input type={showPw ? "text" : "password"} value={password} onChange={e => { setPassword(e.target.value); setErr(""); }} onKeyDown={e => e.key === "Enter" && doLogin()} style={{ paddingRight: 42 }} />
-              <button onClick={() => setShowPw(s => !s)} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#9b8e82", fontSize: 16 }}>{showPw ? "🙈" : "👁"}</button>
-            </div>
+          <div>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#4b5563", marginBottom: 4 }}>Security Passkey Credentials</label>
+            <input type="password" value={pwd} onChange={e => setPwd(e.target.value)} placeholder="••••••••" style={{ width: "100%", padding: "8px 12px", border: "1px solid #d1d5db", borderRadius: 8 }} onKeyDown={e => e.key === "Enter" && executeLogin()} />
           </div>
-        </div>
-        {err && <div style={{ marginTop: 10, fontSize: 12, color: "#dc2626", background: "#fee2e2", padding: "8px 12px", borderRadius: 8 }}>{err}</div>}
-        <button className="btn btn-dark" style={{ width: "100%", marginTop: 18, padding: 12 }} onClick={doLogin}>Login</button>
-        <div style={{ marginTop: 18, background: "#faf9f7", borderRadius: 10, padding: "12px 16px", fontSize: 12, color: "#9b8e82", lineHeight: 1.9 }}>
-          <strong style={{ color: "#6b5e52" }}>Demo:</strong> <code style={CS}>owner</code>/<code style={CS}>owner123</code> · <code style={CS}>staff_jpt1</code>/<code style={CS}>jpt1234</code> · <code style={CS}>staff_prp1</code>/<code style={CS}>prp1234</code>
+          {error && <div style={{ color: "#dc2626", fontSize: 12, background: "#fee2e2", padding: "8px 12px", borderRadius: 6 }}>{error}</div>}
+          <button onClick={executeLogin} style={{ background: branding.theme, color: "#fff", border: "none", padding: "12px", borderRadius: 8, fontWeight: 600, cursor: "pointer", width: "100%" }}>Verify Node Credentials</button>
         </div>
       </div>
     </div>
@@ -645,225 +300,217 @@ function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// SHELL
+// ANALYTICS & EXECUTIVE INSIGHTS MODULE
 // ════════════════════════════════════════════════════════════════════════
-function Shell({ session, onLogout, pending, view, setView, can, sbStatus, syncing, lastSync, onManualSync, children }) {
-  const isOwner = session.role === "owner";
-  const NAV = [
-    { id: "dashboard",   label: "Dashboard",        icon: "⬡", show: true },
-    { id: "approval",    label: "Approval Queue",   icon: "✅", show: isOwner, badge: pending.length, badgeColor: "#16a34a" },
-    { id: "patients",    label: "Patients",         icon: "◉", show: can("patients", "view") },
-    { id: "patientBill", label: "Patient Bill",     icon: "🧾", show: can("patientBill", "view") },
-    { id: "inventory",   label: "Inventory",        icon: "▦", show: can("inventory", "view") },
-    { id: "invoices",    label: "Sales & Invoices", icon: "◆", show: can("invoices", "view") },
-    { id: "alerts",      label: "Low Stock Alerts", icon: "▲", show: can("alerts", "view") },
-    { id: "divider" },
-    { id: "auditlog",    label: "Audit Log",        icon: "📋", show: isOwner },
-    { id: "dashbuilder", label: "Dashboard Builder",icon: "🏗", show: isOwner },
-    { id: "users",       label: "Manage Staff",     icon: "👥", show: isOwner },
-    { id: "supabase",    label: "Cloud Sync",       icon: "☁", show: isOwner, badge: sbStatus === "error" ? "!" : 0, badgeColor: "#dc2626" },
-    { id: "launchguide", label: "Launch Guide",     icon: "🚀", show: true },
-  ];
+function AnalyticsDashboard({ db, auditLog, session }) {
+  const filterByBranch = (arr) => session.role === "owner" ? arr : arr.filter(x => x.branch === session.branch);
 
-  const sbDot = { ok: "#16a34a", error: "#dc2626", testing: "#d97706", pushing: "#d97706", syncing: "#d97706" }[sbStatus] || "#9b8e82";
+  const activePatients = filterByBranch(db.patients);
+  const matchedSales = filterByBranch(db.opticalsSales);
+  const activeSurg = filterByBranch(db.surgeries);
 
-  return (
-    <div style={{ display: "flex", minHeight: "100vh", fontFamily: "'DM Sans',sans-serif", background: "#f0ede8", color: "#1a1714" }}>
-      <style>{GCSS}</style>
-      <aside style={{ width: 236, background: "#fff", borderRight: "1px solid #e8e2db", padding: "18px 10px", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh", flexShrink: 0, overflowY: "auto" }}>
-        <div style={{ padding: "0 8px 14px", borderBottom: "1px solid #f0ede8", marginBottom: 10 }}>
-          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 16, fontWeight: 700 }}>👁 OptiManager</div>
-          <div style={{ fontSize: 10, color: "#9b8e82", marginTop: 1, display: "flex", alignItems: "center", gap: 5 }}>
-            v{APP_VER} <span style={{ width: 7, height: 7, borderRadius: "50%", background: sbDot, display: "inline-block" }} title={`Supabase: ${sbStatus}`} />
-          </div>
-        </div>
-        <div style={{ margin: "0 4px 12px", background: "#f0ede8", borderRadius: 10, padding: "9px 12px" }}>
-          <div style={{ fontSize: 13, fontWeight: 700 }}>{session.name}</div>
-          <div style={{ fontSize: 11, color: "#9b8e82", marginTop: 2 }}>{isOwner ? "Owner · All Branches" : session.branch}</div>
-          {isOwner && <span style={{ display: "inline-block", marginTop: 4, background: "#1a1714", color: "#f0ede8", borderRadius: 20, fontSize: 10, padding: "1px 8px", fontWeight: 700 }}>OWNER</span>}
-        </div>
-        {NAV.filter(n => n.id === "divider" || n.show).map(n =>
-          n.id === "divider"
-            ? <div key="div" style={{ margin: "6px 8px", borderTop: "1px solid #f0ede8" }} />
-            : <button key={n.id} className={`nav-item ${view === n.id ? "active" : ""}`} onClick={() => setView(n.id)}>
-                <span style={{ fontSize: 13 }}>{n.icon}</span>{n.label}
-                {n.badge > 0 && <span className="badge" style={{ marginLeft: "auto", background: n.badgeColor || "#e55e3a" }}>{n.badge}</span>}
-              </button>
-        )}
-        <div style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px solid #f0ede8" }}>
-          <button className="btn btn-outline btn-sm" style={{ width: "100%", marginBottom: 8 }} onClick={onManualSync} disabled={syncing}>
-            {syncing ? "⟳ Syncing…" : "⟳ Sync Now"}
-          </button>
-          {lastSync && <div style={{ fontSize: 10, color: "#b5a99e", textAlign: "center", marginBottom: 8 }}>
-            Last sync: {lastSync.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-          </div>}
-          <button className="btn btn-outline btn-sm" style={{ width: "100%" }} onClick={onLogout}>🔒 Logout</button>
-        </div>
-      </aside>
-      <main style={{ flex: 1, padding: "26px 30px", overflowY: "auto", maxWidth: "calc(100vw - 236px)" }}>{children}</main>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// DASHBOARD
-// ════════════════════════════════════════════════════════════════════════
-function Dashboard({ session, data, pending, setView, auditLog }) {
-  const isOwner = session.role === "owner";
-  const myBranch = session.branch;
-  const flt = arr => isOwner ? arr : arr.filter(x => x.branch === myBranch);
-
-  const pts   = flt(data.patients    || []).filter(x => x.status === "approved");
-  const bills = flt(data.patientBill || []).filter(x => x.status === "approved");
-  const invs  = flt(data.invoices    || []).filter(x => x.approvalStatus === "approved" && x.status === "Paid");
-  const rev   = invs.reduce((s, i) => s + (i.items || []).reduce((a, x) => a + x.qty * x.price, 0) - (i.discount || 0), 0);
-
-  const stats = [
-    { label: "Patients",          value: pts.length,    color: "#1a1714" },
-    { label: "Patient Bills",     value: bills.length,  color: "#1d4ed8" },
-    { label: "Revenue (Paid)",    value: currency(rev), color: "#16a34a" },
-    { label: "Pending Approvals", value: pending.length, color: "#d97706", action: isOwner ? () => setView("approval") : null },
-  ];
-
-  const recentAudit = auditLog.slice(0, 8);
+  const opCount = activePatients.length;
+  const totalRev = matchedSales.reduce((acc, current) => acc + current.totalAmount, 0);
+  const outstandingBal = matchedSales.reduce((acc, current) => acc + current.balance, 0);
+  const pipelineSurg = activeSurg.filter(s => s.status === "Scheduled").length;
+  const lowStockCount = db.inventory.filter(i => i.qty <= i.reorder).length;
 
   return (
     <div>
-      <div style={{ marginBottom: 22 }}>
-        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 26, fontWeight: 700 }}>Welcome, {session.name} 👋</div>
-        <div style={{ fontSize: 13, color: "#9b8e82", marginTop: 3 }}>{isOwner ? "All Branches" : myBranch} · {ts()}</div>
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: "#111827" }}>Operational Command Center</h1>
+        <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: 14 }}>Real-time core hospital dashboard visualization matrix.</p>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 22 }}>
-        {stats.map(s => (
-          <div key={s.label} className="stat-card" onClick={s.action} style={{ cursor: s.action ? "pointer" : "default" }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#9b8e82", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 6 }}>{s.label}</div>
-            <div className="stat-num" style={{ color: s.color }}>{s.value}</div>
-          </div>
-        ))}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 24 }}>
+        <div className="analytics-card">
+          <div className="title">Today's Active Patient Intake</div>
+          <div className="value">{opCount} Patients</div>
+        </div>
+        <div className="analytics-card" style={{ borderLeft: "4px solid #16a34a" }}>
+          <div className="title">Total Opticals Volume Revenue</div>
+          <div className="value">{currency(totalRev)}</div>
+        </div>
+        <div className="analytics-card" style={{ borderLeft: "4px solid #dc2626" }}>
+          <div className="title">Outstanding Patient Balances</div>
+          <div className="value">{currency(outstandingBal)}</div>
+        </div>
+        <div className="analytics-card" style={{ borderLeft: "4px solid #9333ea" }}>
+          <div className="title">Pending Scheduled Surgeries</div>
+          <div className="value">{pipelineSurg} Cases</div>
+        </div>
+        <div className="analytics-card" style={{ borderLeft: "4px solid #ea580c" }}>
+          <div className="title">Critical Low Stock SKU Warnings</div>
+          <div className="value">{lowStockCount} Alerts</div>
+        </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: isOwner ? "1fr 1fr" : "1fr", gap: 18 }}>
-        {isOwner && (
-          <div className="card">
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Branch Overview</div>
-            {BRANCHES.map(br => {
-              const bPts   = (data.patients    || []).filter(x => x.branch === br && x.status === "approved");
-              const bBills = (data.patientBill || []).filter(x => x.branch === br && x.status === "approved");
-              const bPend  = pending.filter(x => x.branch === br);
-              return (
-                <div key={br} style={{ padding: "10px 0", borderBottom: "1px solid #f0ede8" }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{br}</div>
-                  <div style={{ display: "flex", gap: 10 }}>
-                    {[["Patients", bPts.length, "#1a1714"], ["Bills", bBills.length, "#1d4ed8"], ["Pending", bPend.length, "#d97706"]].map(([l, v, c]) => (
-                      <div key={l} style={{ flex: 1, background: "#f0ede8", borderRadius: 8, padding: "8px 10px" }}>
-                        <div style={{ fontSize: 10, color: "#9b8e82", fontWeight: 600 }}>{l}</div>
-                        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 700, color: c }}>{v}</div>
-                      </div>
-                    ))}
-                  </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
+        <div style={{ background: "#fff", padding: 20, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+          <h3 style={{ margin: "0 0 16px" }}>Clinical Patient Processing Queue Trace</h3>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ textAlign: "left", background: "#f3f4f6" }}>
+                <th style={{ padding: 10 }}>MR Number</th>
+                <th style={{ padding: 10 }}>Patient Identity</th>
+                <th style={{ padding: 10 }}>Branch Station</th>
+                <th style={{ padding: 10 }}>Current Triage Assignment Location</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activePatients.slice(-5).reverse().map(p => (
+                <tr key={p.mrNo} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  <td style={{ padding: 10, fontWeight: 700 }}>{p.mrNo}</td>
+                  <td style={{ padding: 10 }}>{p.name} ({p.age}/{p.gender})</td>
+                  <td style={{ padding: 10 }}>{p.branch}</td>
+                  <td style={{ padding: 10 }}><span style={{ padding: "2px 8px", background: "#dbeafe", color: "#1e40af", borderRadius: 12, fontSize: 11 }}>{p.currentStage || "OP Registration"}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ background: "#fff", padding: 20, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+          <h3 style={{ margin: "0 0 16px" }}>Security System Audit Pipeline Stream</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: 300, overflowY: "auto" }}>
+            {auditLog.slice(0, 10).map(l => (
+              <div key={l.id} style={{ fontSize: 12, borderBottom: "1px solid #f3f4f6", paddingBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600 }}>
+                  <span>{l.action}</span>
+                  <span style={{ color: "#9ca3af", fontWeight: 400 }}>{l.at.split(" ")[1]}</span>
                 </div>
-              );
-            })}
-          </div>
-        )}
-        {isOwner && (
-          <div className="card">
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Recent Activity</div>
-            {recentAudit.length === 0 && <div style={{ fontSize: 13, color: "#9b8e82" }}>No activity yet.</div>}
-            {recentAudit.map(a => (
-              <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f0ede8", fontSize: 12 }}>
-                <div>
-                  <span style={{ fontWeight: 700, marginRight: 6, color: { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", APPROVE: "#16a34a", REJECT: "#dc2626", STAFF_SUBMIT: "#d97706" }[a.action] || "#1a1714" }}>{a.action}</span>
-                  <span style={{ color: "#6b5e52" }}>{a.userName}</span>
-                  {a.branch !== "All" && <span style={{ color: "#b5a99e", marginLeft: 5 }}>· {a.branch}</span>}
-                </div>
-                <div style={{ color: "#b5a99e", fontSize: 11 }}>{a.at}</div>
+                <div style={{ color: "#4b5563" }}>User: {l.userName} ({l.dept})</div>
               </div>
             ))}
           </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// APPROVAL QUEUE
-// ════════════════════════════════════════════════════════════════════════
-function ApprovalQueue({ pending, onApprove, onReject }) {
-  const [detail, setDetail] = useState(null);
-  const colors = { patients: "#1d4ed8", patientBill: "#7c3aed", inventory: "#16a34a", invoices: "#a16207" };
-  return (
-    <div>
-      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Approval Queue</div>
-      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 22 }}>Review staff submissions before they are saved to the database.</div>
-      {pending.length === 0
-        ? <div className="card" style={{ textAlign: "center", padding: 48, color: "#9b8e82" }}><div style={{ fontSize: 36, marginBottom: 10 }}>✅</div><div style={{ fontWeight: 600 }}>No pending approvals</div></div>
-        : pending.map(entry => (
-          <div key={entry.id} style={{ background: "#fff", borderRadius: 14, padding: "14px 18px", marginBottom: 10, boxShadow: "0 1px 4px rgba(0,0,0,.06)", borderLeft: `4px solid ${colors[entry.type] || "#1a1714"}` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
-              <div>
-                <span style={{ background: `${colors[entry.type]}20`, color: colors[entry.type] || "#1a1714", borderRadius: 20, fontSize: 11, padding: "2px 10px", fontWeight: 700, marginRight: 8 }}>{SECTION_LABELS[entry.type] || entry.type}</span>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>{entry.record?.name || entry.record?.sku || entry.id}</span>
-                <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 4 }}>By <strong>{entry.submittedByName}</strong> · {entry.branch} · {entry.submittedAt}</div>
-              </div>
-              <div style={{ display: "flex", gap: 7 }}>
-                <button className="btn btn-sm btn-outline" onClick={() => setDetail(detail?.id === entry.id ? null : entry)}>{detail?.id === entry.id ? "Hide" : "View"}</button>
-                <button className="btn btn-sm" style={{ background: "#dcfce7", color: "#16a34a", border: "none", fontWeight: 700 }} onClick={() => onApprove(entry.id)}>✓ Accept</button>
-                <button className="btn btn-sm btn-danger" onClick={() => onReject(entry.id)}>✕ Reject</button>
-              </div>
-            </div>
-            {detail?.id === entry.id && (
-              <div style={{ marginTop: 12, background: "#f0ede8", borderRadius: 10, padding: "10px 14px", fontSize: 12, fontFamily: "monospace", lineHeight: 1.9, maxHeight: 280, overflowY: "auto" }}>
-                {Object.entries(entry.record).filter(([k]) => k !== "status").map(([k, v]) => <div key={k}><strong>{k}:</strong> {String(v ?? "—")}</div>)}
-              </div>
-            )}
-          </div>
-        ))
-      }
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// AUDIT LOG  (Owner only)
-// ════════════════════════════════════════════════════════════════════════
-function AuditLogSection({ auditLog, accounts }) {
-  const [filter, setFilter] = useState("ALL");
-  const [userF,  setUserF]  = useState("ALL");
-  const actions = ["ALL", "LOGIN", "LOGOUT", "STAFF_SUBMIT", "APPROVE", "REJECT"];
-  const filtered = auditLog
-    .filter(a => filter === "ALL" || a.action === filter)
-    .filter(a => userF  === "ALL" || a.userId === userF);
-
-  const actionColor = { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", APPROVE: "#16a34a", REJECT: "#dc2626", STAFF_SUBMIT: "#d97706" };
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div className="section-title">Audit Log</div>
-        <button className="btn btn-outline btn-sm" onClick={() => exportCSV(filtered.map(({ id, ...r }) => r), "audit_log.csv")}>⬇ CSV</button>
-      </div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {actions.map(a => <button key={a} className={`btn btn-sm ${filter === a ? "btn-dark" : "btn-outline"}`} onClick={() => setFilter(a)}>{a}</button>)}
         </div>
-        <select value={userF} onChange={e => setUserF(e.target.value)} style={{ maxWidth: 200 }}>
-          <option value="ALL">All Users</option>
-          {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
       </div>
-      <div className="card" style={{ overflowX: "auto" }}>
-        <table>
-          <thead><tr><th>Time</th><th>Action</th><th>User</th><th>Branch</th><th>Detail</th></tr></thead>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// OP REGISTRATION MODULE (WITH ADVANCED MULTI-FIELD DUPLICATE SAFEGUARDS)
+// ════════════════════════════════════════════════════════════════════════
+function OpRegistrationModule({ db, mutate, session, audit }) {
+  const [formData, setFormData] = useState({
+    name: "", phone: "", address: "", gender: "Male", age: "", referral: "", fee: "250", payMode: "Cash", txRef: "", remarks: "", patientType: "New Patient"
+  });
+  const [duplicateWarning, setDuplicateWarning] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const handleRegistrationSubmit = (bypassDuplicateCheck = false) => {
+    if (!formData.name || !formData.phone || !formData.age) {
+      alert("Error: Missing mandatory identity metrics parameters.");
+      return;
+    }
+
+    if (!bypassDuplicateCheck) {
+      const matchFound = db.patients.find(p => 
+        p.phone === formData.phone || 
+        (p.name.toLowerCase() === formData.name.toLowerCase() && Number(p.age) === Number(formData.age))
+      );
+      if (matchFound) {
+        setDuplicateWarning(matchFound);
+        return;
+      }
+    }
+
+    const calculatedMrNo = `MR-${1000 + db.patients.length + 1}`;
+    const calculatedPid = `PID-${Math.floor(10000 + Math.random() * 90000)}`;
+    const newPatient = {
+      ...formData,
+      mrNo: calculatedMrNo,
+      patientId: calculatedPid,
+      branch: session.branch === "All" ? "JPT Branch" : session.branch,
+      timestamp: ts(),
+      date: new Date().toISOString().split("T")[0],
+      time: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+      visitCount: 1,
+      currentStage: "K-Sheet Room"
+    };
+
+    const nextPatientCollection = [...db.patients, newPatient];
+    mutate("patients", nextPatientCollection, newPatient);
+    audit("PATIENT_REGISTRATION_RECORDED", { mrNo: calculatedMrNo, name: formData.name });
+    alert(`Success: Patient Registered under Master ID Record ${calculatedMrNo}`);
+    setFormData({ name: "", phone: "", address: "", gender: "Male", age: "", referral: "", fee: "250", payMode: "Cash", txRef: "", remarks: "", patientType: "New Patient" });
+    setDuplicateWarning(null);
+  };
+
+  const processExistingPatientRecurrence = (matchedRecord) => {
+    const nextPatients = db.patients.map(p => {
+      if (p.mrNo === matchedRecord.mrNo) {
+        return { ...p, visitCount: (p.visitCount || 1) + 1, currentStage: "K-Sheet Room", timestamp: ts() };
+      }
+      return p;
+    });
+    mutate("patients", nextPatients, { ...matchedRecord, visitCount: (matchedRecord.visitCount || 1) + 1, currentStage: "K-Sheet Room", timestamp: ts() });
+    audit("PATIENT_REVISIT_LOGGED", { mrNo: matchedRecord.mrNo });
+    alert(`Revisit Registered: Tracking loop incremented for ${matchedRecord.mrNo}`);
+    setDuplicateWarning(null);
+  };
+
+  const filteredPatients = db.patients.filter(p => 
+    p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.phone.includes(searchQuery) || p.mrNo.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  return (
+    <div style={{ display: "grid", gap: 20 }}>
+      <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+        <h2 style={{ margin: "0 0 16px" }}>OP Demographic Patient Onboarding Registration</h2>
+        
+        {duplicateWarning && (
+          <div style={{ background: "#fff7ed", border: "1px solid #ffedd5", padding: 16, borderRadius: 8, marginBottom: 16 }}>
+            <h4 style={{ color: "#ea580c", margin: "0 0 8px" }}>⚠️ CRITICAL DUPLICATE INTEGRITY ALERT: MATCHING RECORD DETECTED</h4>
+            <p style={{ margin: "0 0 12px", fontSize: 13 }}>An existing database match correlates with identity parameter targets: <strong>{duplicateWarning.name} ({duplicateWarning.mrNo})</strong>, Mobile: {duplicateWarning.phone}</p>
+            <div style={{ display: "flex", gap: 12 }}>
+              <button onClick={() => processExistingPatientRecurrence(duplicateWarning)} style={{ background: "#ea580c", color: "#fff", padding: "6px 12px", border: "none", borderRadius: 6, cursor: "pointer" }}>Log Revisit & Track Under Same MR No</button>
+              <button onClick={() => handleRegistrationSubmit(true)} style={{ background: "#4b5563", color: "#fff", padding: "6px 12px", border: "none", borderRadius: 6, cursor: "pointer" }}>Bypass Check & Force Independent Entry</button>
+              <button onClick={() => setDuplicateWarning(null)} style={{ background: "#e5e7eb", color: "#1f2937", padding: "6px 12px", border: "none", borderRadius: 6, cursor: "pointer" }}>Cancel Process</button>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+          <div><label style={LBL}>Patient Full Legal Name *</label><input type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} style={INP} /></div>
+          <div><label style={LBL}>Contact Mobile Sequence *</label><input type="text" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} style={INP} /></div>
+          <div><label style={LBL}>Demographic Age Check *</label><input type="number" value={formData.age} onChange={e => setFormData({...formData, age: e.target.value})} style={INP} /></div>
+          <div><label style={LBL}>Biological Gender</label><select value={formData.gender} onChange={e => setFormData({...formData, gender: e.target.value})} style={INP}><option>Male</option><option>Female</option><option>Other</option></select></div>
+          <div><label style={LBL}>Geographic Address / Town</label><input type="text" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} style={INP} /></div>
+          <div><label style={LBL}>Referral Conduit Pipeline</label><input type="text" value={formData.referral} onChange={e => setFormData({...formData, referral: e.target.value})} placeholder="e.g. Free Camp, Eye Screening Drive" style={INP} /></div>
+          <div><label style={LBL}>Collection Fee Assessed</label><input type="number" value={formData.fee} onChange={e => setFormData({...formData, fee: e.target.value})} style={INP} /></div>
+          <div><label style={LBL}>Assessed Payment Gateway Modality</label><select value={formData.payMode} onChange={e => setFormData({...formData, payMode: e.target.value})} style={INP}><option>Cash</option><option>UPI Payment Network</option><option>Corporate Waiver / Free</option></select></div>
+          <div><label style={LBL}>Transaction Reference Identification Trace</label><input type="text" value={formData.txRef} onChange={e => setFormData({...formData, txRef: e.target.value})} style={INP} /></div>
+        </div>
+        <button onClick={() => handleRegistrationSubmit(false)} style={{ marginTop: 16, background: "#111827", color: "#fff", padding: "10px 20px", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}>Commit Complete Patient Registration Record</button>
+      </div>
+
+      <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+          <h3 style={{ margin: 0 }}>Registered Core Intake Patient Roster</h3>
+          <input type="text" placeholder="Filter roster index via search..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{ padding: "6px 12px", border: "1px solid #ccc", borderRadius: 6 }} />
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ textAlign: "left", background: "#f3f4f6" }}>
+              <th style={{ padding: 10 }}>Master MR No</th>
+              <th style={{ padding: 10 }}>System Patient ID</th>
+              <th style={{ padding: 10 }}>Demographic Roster Metrics</th>
+              <th style={{ padding: 10 }}>Contact Link</th>
+              <th style={{ padding: 10 }}>Visit Metric Iteration</th>
+              <th style={{ padding: 10 }}>Current Triage Hub Location</th>
+            </tr>
+          </thead>
           <tbody>
-            {filtered.length === 0 && <tr><td colSpan={5} style={{ color: "#9b8e82", textAlign: "center", padding: 24 }}>No entries.</td></tr>}
-            {filtered.map(a => (
-              <tr key={a.id}>
-                <td style={{ fontSize: 11, whiteSpace: "nowrap", color: "#9b8e82" }}>{a.at}</td>
-                <td><span style={{ background: `${actionColor[a.action] || "#9b8e82"}20`, color: actionColor[a.action] || "#9b8e82", borderRadius: 20, fontSize: 11, padding: "2px 9px", fontWeight: 700 }}>{a.action}</span></td>
-                <td style={{ fontWeight: 600 }}>{a.userName}</td>
-                <td style={{ fontSize: 12, color: "#9b8e82" }}>{a.branch}</td>
-                <td style={{ fontSize: 12, color: "#6b5e52" }}>{Object.entries(a.detail || {}).map(([k, v]) => `${k}: ${v}`).join(" · ") || "—"}</td>
+            {filteredPatients.map(p => (
+              <tr key={p.mrNo} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                <td style={{ padding: 10, fontWeight: 700, color: "#1e40af" }}>{p.mrNo}</td>
+                <td style={{ padding: 10, fontFamily: "monospace" }}>{p.patientId}</td>
+                <td style={{ padding: 10 }}>{p.name} ({p.age}/{p.gender})</td>
+                <td style={{ padding: 10 }}>{p.phone}</td>
+                <td style={{ padding: 10 }}><span style={{ padding: "2px 8px", background: "#f3f4f6", borderRadius: 10, fontWeight: 600 }}>{p.visitCount || 1} Visits</span></td>
+                <td style={{ padding: 10 }}><span style={{ padding: "4px 8px", background: "#e0f2fe", color: "#0369a1", borderRadius: 6, fontSize: 12, fontWeight: 500 }}>{p.currentStage}</span></td>
               </tr>
             ))}
           </tbody>
@@ -874,940 +521,980 @@ function AuditLogSection({ auditLog, accounts }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// DASHBOARD BUILDER  (Owner controls field visibility + staff perms)
+// CLINICAL TRIAGE K-SHEET REGISTRATION MODULE
 // ════════════════════════════════════════════════════════════════════════
-function DashboardBuilder({ fieldVis, setFieldVis, accounts, setAccounts }) {
-  const [tab, setTab] = useState("fields");
-  const [section, setSection] = useState("patients");
+function KSheetModule({ db, mutate, session, audit }) {
+  const [selectedMr, setSelectedMr] = useState("");
+  const [kData, setKData] = useState({ chiefComplaint: "", medicalHistory: "", notes: "" });
 
-  const ALL_FIELDS = {
-    patients:    ["timestamp","date","time","name","phone","town","paymentMethod","advance","advancePaymentMethod"],
-    patientBill: ["timestamp","date","time","mrNo","name","phone","town","gender","age","complaint","pastHistory","reSpherAR","reCylAR","reAxisAR","leSpherAR","leCylAR","leAxisAR","reSpherSub","reCylSub","reAxisSub","leSpherSub","leCylSub","leAxisSub","add","eyelids","conjunctiva","cornea","anteriorChamber","iris","pupil","lens","ocularMovements","fundus","advice","optom","lensType","frameNo","advance","paymentMethod","deliveryStatus","balance"],
-    inventory:   ["sku","name","category","brand","qty","reorder","lensPower","lensType","boxNo","cost","price","location"],
-    invoices:    ["id","date","patientName","items","discount","status"],
-  };
+  const activeTargetPatient = db.patients.find(p => p.mrNo === selectedMr);
 
-  const toggleField = (sec, field) => {
-    setFieldVis(fv => {
-      const cur = fv[sec] || [];
-      return { ...fv, [sec]: cur.includes(field) ? cur.filter(f => f !== field) : [...cur, field] };
-    });
-  };
+  const saveKSheetTriage = () => {
+    if (!selectedMr) return;
+    const existingClinicalIndex = db.clinicalRecords.findIndex(c => c.mrNo === selectedMr);
+    const newRecordPayload = {
+      id: `CR-${1000 + db.clinicalRecords.length + 1}`,
+      mrNo: selectedMr,
+      patientId: activeTargetPatient.patientId,
+      chiefComplaint: kData.chiefComplaint,
+      pastMedicalHistory: kData.medicalHistory,
+      timestamp: ts()
+    };
 
-  const staff = accounts.filter(a => a.role === "staff");
-  const togglePerm = (id, sec, action) => {
-    setAccounts(prev => prev.map(a => {
-      if (a.id !== id) return a;
-      return { ...a, perms: { ...a.perms, [sec]: { ...a.perms[sec], [action]: !a.perms[sec]?.[action] } } };
-    }));
+    let updatedClinicalCollection = [...db.clinicalRecords];
+    if (existingClinicalIndex > -1) {
+      updatedClinicalCollection[existingClinicalIndex] = { ...updatedClinicalCollection[existingClinicalIndex], ...newRecordPayload };
+    } else {
+      updatedClinicalCollection.push(newRecordPayload);
+    }
+
+    // Advance triage progression stage mapping to Optometrist Module
+    const adjustedPatients = db.patients.map(p => p.mrNo === selectedMr ? { ...p, currentStage: "Optometrist Room" } : p);
+    
+    mutate("clinicalRecords", updatedClinicalCollection, newRecordPayload);
+    mutate("patients", adjustedPatients, { ...activeTargetPatient, currentStage: "Optometrist Room" });
+    
+    audit("K_SHEET_TRIAGE_SAVED", { mrNo: selectedMr });
+    alert("K-Sheet Triage Matrix successfully recorded; patient shifted to Optometrist workflow.");
+    setSelectedMr("");
+    setKData({ chiefComplaint: "", medicalHistory: "", notes: "" });
   };
 
   return (
-    <div>
-      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Dashboard Builder</div>
-      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 20 }}>Control which fields and sections each staff member can access.</div>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 22 }}>
-        {[{ id: "fields", label: "🔲 Field Visibility" }, { id: "perms", label: "🔐 Staff Permissions" }].map(t => (
-          <button key={t.id} className={`btn btn-sm ${tab === t.id ? "btn-dark" : "btn-outline"}`} onClick={() => setTab(t.id)}>{t.label}</button>
-        ))}
+    <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+      <h2 style={{ margin: "0 0 16px" }}>Digital Clinical Triage K-Sheet Execution Node</h2>
+      <div style={{ marginBottom: 16 }}>
+        <label style={LBL}>Select Target Processing Patient (Awaiting Triage)</label>
+        <select value={selectedMr} onChange={e => {
+          setSelectedMr(e.target.value);
+          const historicalClinical = db.clinicalRecords.find(c => c.mrNo === e.target.value);
+          if (historicalClinical) {
+            setKData({ chiefComplaint: historicalClinical.chiefComplaint || "", medicalHistory: historicalClinical.pastMedicalHistory || "", notes: "" });
+          }
+        }} style={INP}>
+          <option value="">-- Click to query patient triage vector pool --</option>
+          {db.patients.filter(p => p.currentStage === "K-Sheet Room").map(p => (
+            <option key={p.mrNo} value={p.mrNo}>{p.mrNo} - {p.name} ({p.phone})</option>
+          ))}
+        </select>
       </div>
 
-      {tab === "fields" && (
-        <div className="card">
-          <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
-            {Object.keys(ALL_FIELDS).map(s => <button key={s} className={`btn btn-sm ${section === s ? "btn-dark" : "btn-outline"}`} onClick={() => setSection(s)}>{SECTION_LABELS[s]}</button>)}
+      {activeTargetPatient && (
+        <div style={{ borderTop: "2px solid #e5e7eb", paddingTop: 16, display: "grid", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", background: "#f9fafb", padding: 12, borderRadius: 8 }}>
+            <div><strong>MR Number:</strong> {activeTargetPatient.mrNo}</div>
+            <div><strong>Patient Identity:</strong> {activeTargetPatient.name}</div>
+            <div><strong>Age/Gender:</strong> {activeTargetPatient.age} Yrs / {activeTargetPatient.gender}</div>
+            <div><strong>Visit Iteration:</strong> Loop #{activeTargetPatient.visitCount || 1}</div>
           </div>
-          <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 14 }}>Toggle which fields are <strong>visible in forms and tables</strong> for the <strong>{SECTION_LABELS[section]}</strong> section. Disabled fields are hidden from staff.</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px,1fr))", gap: 10 }}>
-            {(ALL_FIELDS[section] || []).map(field => {
-              const on = (fieldVis[section] || []).includes(field);
-              return (
-                <div key={field} onClick={() => toggleField(section, field)}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${on ? "#1a1714" : "#e2ddd8"}`, background: on ? "#1a1714" : "#fff", cursor: "pointer", transition: "all .15s" }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: on ? "#f0ede8" : "#1a1714" }}>{field}</span>
-                  <span style={{ fontSize: 18 }}>{on ? "✓" : "○"}</span>
+
+          <div>
+            <label style={LBL}>Patient Chief Complaints Manifestation Description</label>
+            <textarea value={kData.chiefComplaint} onChange={e => setKData({...kData, chiefComplaint: e.target.value})} rows={3} style={INP} placeholder="Document physical ophthalmic symptomatology trajectory..." />
+          </div>
+
+          <div>
+            <label style={LBL}>Past Systematic Illness / Medical History Parameters</label>
+            <textarea value={kData.medicalHistory} onChange={e => setKData({...kData, medicalHistory: e.target.value})} rows={2} style={INP} placeholder="Hypertension, Metabolic Dysregulation, Myocardial Infarction indicators..." />
+          </div>
+
+          <button onClick={saveKSheetTriage} style={{ background: "#2563eb", color: "#fff", border: "none", padding: "10px 20px", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}>Commit Triage Routing Configuration</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// CLINICAL TRIAGE OPTOMETRIST REFRACTION ENGINE
+// ════════════════════════════════════════════════════════════════════════
+function OptometristModule({ db, mutate, session, audit, fieldVis }) {
+  const [selectedMr, setSelectedMr] = useState("");
+  const [optomData, setOptomData] = useState({
+    htn: false, dm: false, cad: false, asthma: false, allergies: false, visionOD: "", visionOS: "", retinoscopyOD: "", retinoscopyOS: "",
+    arSpherOD: "", arCylOD: "", arAxisOD: "", arSpherOS: "", arCylOS: "", arAxisOS: "", accSpherOD: "", accCylOD: "", accAxisOD: "",
+    accSpherOS: "", accCylOS: "", accAxisOS: "", nearOD: "", nearOS: "", addVal: "", iopOD: "", iopOS: "", bp: "", sugar: "", dilatation: "Not Dilated"
+  });
+
+  const activePatient = db.patients.find(p => p.mrNo === selectedMr);
+
+  const saveOptometristMetrics = () => {
+    if (!selectedMr) return;
+    const records = [...db.clinicalRecords];
+    const idx = records.findIndex(c => c.mrNo === selectedMr);
+    const updatedRecord = {
+      ...(idx > -1 ? records[idx] : {}),
+      ...optomData,
+      mrNo: selectedMr,
+      patientId: activePatient.patientId,
+      timestamp: ts()
+    };
+
+    if (idx > -1) records[idx] = updatedRecord;
+    else records.push(updatedRecord);
+
+    const changedPatients = db.patients.map(p => p.mrNo === selectedMr ? { ...p, currentStage: "Ophthalmologist Consultation" } : p);
+    
+    mutate("clinicalRecords", records, updatedRecord);
+    mutate("patients", changedPatients, { ...activePatient, currentStage: "Ophthalmologist Consultation" });
+    
+    audit("OPTOMETRIST_REFRACTION_RECORDED", { mrNo: selectedMr });
+    alert("Refraction matrix synced. Patient state advanced to Ophthalmologist consulting node.");
+    setSelectedMr("");
+  };
+
+  return (
+    <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+      <h2 style={{ margin: "0 0 16px" }}>Comprehensive Advanced Optometrist Diagnostics Engine</h2>
+      <div style={{ marginBottom: 16 }}>
+        <label style={LBL}>Query Triage Vector Pool for Awaiting Refraction Patients</label>
+        <select value={selectedMr} onChange={e => {
+          setSelectedMr(e.target.value);
+          const rec = db.clinicalRecords.find(c => c.mrNo === e.target.value);
+          if (rec) setOptomData(prev => ({ ...prev, ...rec }));
+        }} style={INP}>
+          <option value="">-- Query incoming refraction target array --</option>
+          {db.patients.filter(p => p.currentStage === "Optometrist Room").map(p => (
+            <option key={p.mrNo} value={p.mrNo}>{p.mrNo} - {p.name} ({p.phone})</option>
+          ))}
+        </select>
+      </div>
+
+      {activePatient && (
+        <div style={{ display: "grid", gap: 20, borderTop: "1px solid #e5e7eb", paddingTop: 16 }}>
+          <div style={{ background: "#f3f4f6", padding: 12, borderRadius: 8, fontSize: 13 }}>
+            <strong>Demographic Profiling Node Context:</strong> {activePatient.name} | Age: {activePatient.age} | Sex: {activePatient.gender}
+          </div>
+
+          <div style={{ display: "flex", gap: 16, background: "#fcf8f2", padding: 12, borderRadius: 8 }}>
+            <div style={{ fontWeight: 700, minWidth: 150 }}>Medical History Co-morbidities Checklist:</div>
+            {["htn", "dm", "cad", "asthma", "allergies"].map(f => (
+              <label key={f} style={{ display: "flex", alignItems: "center", gap: 6, textTransform: "uppercase", fontSize: 12, fontWeight: 600 }}>
+                <input type="checkbox" checked={optomData[f]} onChange={e => setOptomData({ ...optomData, [f]: e.target.checked })} /> {f}
+              </label>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+            <div style={SECT_BOX}>
+              <h4 style={SECT_TTL}>Visual Acuity Mapping Profile (Uncorrected/Pin-Hole)</h4>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div><label style={LBL}>Oculus Dexter (OD / Right Eye)</label><input type="text" value={optomData.visionOD} onChange={e => setOptomData({ ...optomData, visionOD: e.target.value })} style={INP} /></div>
+                <div><label style={LBL}>Oculus Sinister (OS / Left Eye)</label><input type="text" value={optomData.visionOS} onChange={e => setOptomData({ ...optomData, visionOS: e.target.value })} style={INP} /></div>
+              </div>
+            </div>
+
+            <div style={SECT_BOX}>
+              <h4 style={SECT_TTL}>Retinoscopy Assessment Diagnostics</h4>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div><label style={LBL}>Retinoscopy OD Grid Matrix</label><input type="text" value={optomData.retinoscopyOD} onChange={e => setOptomData({ ...optomData, retinoscopyOD: e.target.value })} style={INP} /></div>
+                <div><label style={LBL}>Retinoscopy OS Grid Matrix</label><input type="text" value={optomData.retinoscopyOS} onChange={e => setOptomData({ ...optomData, retinoscopyOS: e.target.value })} style={INP} /></div>
+              </div>
+            </div>
+          </div>
+
+          <div style={SECT_BOX}>
+            <h4 style={SECT_TTL}>Automated Refraction (AR) Objective Data Stream</h4>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+              <div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#1e3a8a" }}>RIGHT EYE (OD) AR MATRIX BLOCK</span>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 4 }}>
+                  <input type="text" placeholder="Sphere" value={optomData.arSpherOD} onChange={e => setOptomData({ ...optomData, arSpherOD: e.target.value })} style={INP} />
+                  <input type="text" placeholder="Cylinder" value={optomData.arCylOD} onChange={e => setOptomData({ ...optomData, arCylOD: e.target.value })} style={INP} />
+                  <input type="text" placeholder="Axis Orientation" value={optomData.arAxisOD} onChange={e => setOptomData({ ...optomData, arAxisOD: e.target.value })} style={INP} />
                 </div>
-              );
-            })}
+              </div>
+              <div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#1e3a8a" }}>LEFT EYE (OS) AR MATRIX BLOCK</span>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 4 }}>
+                  <input type="text" placeholder="Sphere" value={optomData.arSpherOS} onChange={e => setOptomData({ ...optomData, arSpherOS: e.target.value })} style={INP} />
+                  <input type="text" placeholder="Cylinder" value={optomData.arCylOS} onChange={e => setOptomData({ ...optomData, arCylOS: e.target.value })} style={INP} />
+                  <input type="text" placeholder="Axis Orientation" value={optomData.arAxisOS} onChange={e => setOptomData({ ...optomData, arAxisOS: e.target.value })} style={INP} />
+                </div>
+              </div>
+            </div>
           </div>
+
+          <div style={SECT_BOX}>
+            <h4 style={SECT_TTL}>Subjective Acceptance & Vision Trial Core Values</h4>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginBottom: 12 }}>
+              <div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#065f46" }}>SUBJECTIVE ACCEPTANCE VECTOR - OD</span>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 4 }}>
+                  <input type="text" placeholder="Sphere" value={optomData.accSpherOD} onChange={e => setOptomData({ ...optomData, accSpherOD: e.target.value })} style={INP} />
+                  <input type="text" placeholder="Cylinder" value={optomData.accCylOD} onChange={e => setOptomData({ ...optomData, accCylOD: e.target.value })} style={INP} />
+                  <input type="text" placeholder="Axis" value={optomData.accAxisOD} onChange={e => setOptomData({ ...optomData, accAxisOD: e.target.value })} style={INP} />
+                </div>
+              </div>
+              <div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#065f46" }}>SUBJECTIVE ACCEPTANCE VECTOR - OS</span>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 4 }}>
+                  <input type="text" placeholder="Sphere" value={optomData.accSpherOS} onChange={e => setOptomData({ ...optomData, accSpherOS: e.target.value })} style={INP} />
+                  <input type="text" placeholder="Cylinder" value={optomData.accCylOS} onChange={e => setOptomData({ ...optomData, accCylOS: e.target.value })} style={INP} />
+                  <input type="text" placeholder="Axis" value={optomData.accAxisOS} onChange={e => setOptomData({ ...optomData, accAxisOS: e.target.value })} style={INP} />
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+              <div><label style={LBL}>Near Vision Index OD</label><input type="text" value={optomData.nearOD} onChange={e => setOptomData({ ...optomData, nearOD: e.target.value })} style={INP} /></div>
+              <div><label style={LBL}>Near Vision Index OS</label><input type="text" value={optomData.nearOS} onChange={e => setOptomData({ ...optomData, nearOS: e.target.value })} style={INP} /></div>
+              <div><label style={LBL}>Reading ADD Factor Value</label><input type="text" value={optomData.addVal} onChange={e => setOptomData({ ...optomData, addVal: e.target.value })} style={INP} /></div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+            <div><label style={LBL}>Intraocular Pressure (IOP) OD</label><input type="text" placeholder="mmHg" value={optomData.iopOD} onChange={e => setOptomData({ ...optomData, iopOD: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Intraocular Pressure (IOP) OS</label><input type="text" placeholder="mmHg" value={optomData.iopOS} onChange={e => setOptomData({ ...optomData, iopOS: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Systemic Blood Pressure Metrics</label><input type="text" value={optomData.bp} onChange={e => setOptomData({ ...optomData, bp: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Random Blood Sugar Parameters</label><input type="text" value={optomData.sugar} onChange={e => setOptomData({ ...optomData, sugar: e.target.value })} style={INP} /></div>
+          </div>
+
+          <div>
+            <label style={LBL}>Pupillary Mydriasis Dilatation Tracking Loop</label>
+            <select value={optomData.dilatation} onChange={e => setOptomData({ ...optomData, dilatation: e.target.value })} style={INP}>
+              <option>Not Dilated</option>
+              <option>Dilated (Tropicamide 1% Matrix Protocol)</option>
+              <option>Dilated (Phenylephrine Co-infusion Scheme)</option>
+            </select>
+          </div>
+
+          <button onClick={saveOptometristMetrics} style={{ background: "#059669", color: "#fff", border: "none", padding: "12px", borderRadius: 8, fontWeight: 700, cursor: "pointer" }}>Authorize and Route Refraction Parameters to Master File</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// CLINICAL OPHTHALMOLOGIST CONSULTATION MODULE
+// ════════════════════════════════════════════════════════════════════════
+function OphthalmologistModule({ db, mutate, session, audit, fieldVis }) {
+  const [selectedMr, setSelectedMr] = useState("");
+  const [ophData, setOphData] = useState({
+    eyelids: "Normal", conjunctiva: "Clear", cornea: "Clear", anteriorChamber: "Normal Depth", iris: "Normal Pattern", pupil: "Reactive", lens: "Clear", fundus: "Normal Disc & Macula", ocularMovements: "Full", diagnosis: "", advice: "", prescription: "", treatmentPlan: ""
+  });
+  const canvasRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+
+  const activePatient = db.patients.find(p => p.mrNo === selectedMr);
+  const matchedClinicalProfile = db.clinicalRecords.find(c => c.mrNo === selectedMr);
+
+  useEffect(() => {
+    if (selectedMr && canvasRef.current) {
+      const ctx = canvasRef.current.getContext("2d");
+      ctx.clearRect(0, 0, 400, 150);
+      // Render anatomical reference schema
+      ctx.strokeStyle = "#9ca3af";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(100, 75, 45, 0, Math.PI * 2); ctx.stroke(); // OD Circle
+      ctx.beginPath(); ctx.arc(300, 75, 45, 0, Math.PI * 2); ctx.stroke(); // OS Circle
+      ctx.fillStyle = "#4b5563";
+      ctx.font = "12px sans-serif";
+      ctx.fillText("Oculus Dexter (OD)", 50, 140);
+      ctx.fillText("Oculus Sinister (OS)", 250, 140);
+    }
+  }, [selectedMr]);
+
+  const triggerStrokeStart = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const ctx = canvas.getContext("2d");
+    ctx.strokeStyle = "#dc2626";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+    setIsDrawing(true);
+  };
+
+  const drawStrokeSegment = (e) => {
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const ctx = canvas.getContext("2d");
+    ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+    ctx.stroke();
+  };
+
+  const saveOphthalmologistConsultation = () => {
+    if (!selectedMr) return;
+    const records = [...db.clinicalRecords];
+    const idx = records.findIndex(c => c.mrNo === selectedMr);
+    
+    const annotationDataUrl = canvasRef.current ? canvasRef.current.toDataURL() : null;
+
+    const updatedRecord = {
+      ...(idx > -1 ? records[idx] : {}),
+      ...ophData,
+      graphData: annotationDataUrl,
+      timestamp: ts()
+    };
+
+    if (idx > -1) records[idx] = updatedRecord;
+    else records.push(updatedRecord);
+
+    const updatedPatients = db.patients.map(p => p.mrNo === selectedMr ? { ...p, currentStage: "Counseling Suite Corridor" } : p);
+
+    mutate("clinicalRecords", records, updatedRecord);
+    mutate("patients", updatedPatients, { ...activePatient, currentStage: "Counseling Suite Corridor" });
+    
+    audit("OPHTHALMOLOGIST_EXAM_COMMITTED", { mrNo: selectedMr, diagnosis: ophData.diagnosis });
+    alert("Consultation files logged to central patient database structure.");
+    setSelectedMr("");
+  };
+
+  return (
+    <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+      <h2 style={{ margin: "0 0 16px" }}>MD Ophthalmologist High-Definition Examination Station</h2>
+      <div style={{ marginBottom: 16 }}>
+        <label style={LBL}>Query Consultation Array for Active Refracted Cases</label>
+        <select value={selectedMr} onChange={e => {
+          setSelectedMr(e.target.value);
+          const exist = db.clinicalRecords.find(c => c.mrNo === e.target.value);
+          if (exist) setOphData(prev => ({ ...prev, ...exist }));
+        }} style={INP}>
+          <option value="">-- Click to fetch triage candidates --</option>
+          {db.patients.filter(p => p.currentStage === "Ophthalmologist Consultation").map(p => (
+            <option key={p.mrNo} value={p.mrNo}>{p.mrNo} - {p.name} (Triage Vis: {db.clinicalRecords.find(c => c.mrNo === p.mrNo)?.visionOD || "N/A"})</option>
+          ))}
+        </select>
+      </div>
+
+      {activePatient && (
+        <div style={{ display: "grid", gap: 20, borderTop: "2px solid #e5e7eb", paddingTop: 16 }}>
+          {matchedClinicalProfile && (
+            <div style={{ background: "#eff6ff", padding: 14, borderRadius: 8, fontSize: 13, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <div>
+                <strong>Triaged Refraction Baseline Data Parameters:</strong>
+                <div>OD visual field acuity line metric: {matchedClinicalProfile.visionOD} | Subjective Acceptance: {matchedClinicalProfile.accSpherOD} {matchedClinicalProfile.accCylOD}</div>
+                <div>OS visual field acuity line metric: {matchedClinicalProfile.visionOS} | Subjective Acceptance: {matchedClinicalProfile.accSpherOS} {matchedClinicalProfile.accCylOS}</div>
+              </div>
+              <div>
+                <strong>Vitals Track:</strong> IOP OD/OS: {matchedClinicalProfile.iopOD || "—"}/{matchedClinicalProfile.iopOS || "—"} mmHg | Systemic BP: {matchedClinicalProfile.bp || "—"} | Sugar status: {matchedClinicalProfile.sugar || "—"}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+            <div style={SECT_BOX}>
+              <h4 style={SECT_TTL}>Anterior Segment Structure Biomicroscopy Slit-Lamp Trace</h4>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {["eyelids", "conjunctiva", "cornea", "anteriorChamber", "iris", "pupil", "lens"].map(f => (
+                  <div key={f}><label style={LBL}>{f}</label><input type="text" value={ophData[f]} onChange={e => setOphData({ ...ophData, [f]: e.target.value })} style={INP} /></div>
+                ))}
+              </div>
+            </div>
+
+            <div style={SECT_BOX}>
+              <h4 style={SECT_TTL}>Anatomical Sketchpad & Ophthalmic Vector Marker Engine</h4>
+              <div style={{ background: "#f3f4f6", borderRadius: 8, padding: 8, display: "flex", justifyContent: "center" }}>
+                <canvas ref={canvasRef} width={400} height={150} onMouseDown={triggerStrokeStart} onMouseMove={drawStrokeSegment} onMouseUp={() => setIsDrawing(false)} onMouseLeave={() => setIsDrawing(false)} style={{ background: "#fff", border: "1px dashed #9ca3af", cursor: "crosshair" }} />
+              </div>
+              <p style={{ fontSize: 11, color: "#6b7280", margin: "4px 0 0" }}>Interact using mouse/stylus parameter overlays to generate precise spatial descriptions of clinical pathology markings directly on eye diagrams.</p>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div><label style={LBL}>Posterior Segment Ophthalmoscopy (Fundus Macula/Disc Metrics)</label><input type="text" value={ophData.fundus} onChange={e => setOphData({ ...ophData, fundus: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Functional Assessment Extraocular Movements</label><input type="text" value={ophData.ocularMovements} onChange={e => setOphData({ ...ophData, ocularMovements: e.target.value })} style={INP} /></div>
+          </div>
+
+          <div style={{ borderTop: "1px dashed #ccc", paddingTop: 12 }}>
+            <label style={{ fontSize: 13, fontWeight: 700, color: "#991b1b" }}>Primary Diagnostic Summary Assessment *</label>
+            <input type="text" value={ophData.diagnosis} onChange={e => setOphData({ ...ophData, diagnosis: e.target.value })} placeholder="e.g. Nuclear Sclerotic Grade III Cataract with Macular Edema trace..." style={INP} />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div><label style={LBL}>Clinical Advice Protocol / Surgical Invocations</label><textarea value={ophData.advice} onChange={e => setOphData({ ...ophData, advice: e.target.value })} rows={3} style={INP} /></div>
+            <div><label style={LBL}>Rx Pharmaceutical Prescription Sheet</label><textarea value={ophData.prescription} onChange={e => setOphData({ ...ophData, prescription: e.target.value })} rows={3} style={INP} placeholder="Specify drug nomenclature, concentrations, dosing intervals..." /></div>
+          </div>
+
+          <button onClick={saveOphthalmologistConsultation} style={{ background: "#991b1b", color: "#fff", border: "none", padding: "14px", borderRadius: 8, fontWeight: 700, cursor: "pointer" }}>Authorize Clinical Consultation Sign-off & Lock Files</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// CLINICAL SURGERY COUNSELING ENGINE
+// ════════════════════════════════════════════════════════════════════════
+function CounselingModule({ db, mutate, session, audit }) {
+  const [selectedMr, setSelectedMr] = useState("");
+  const [counsel, setCounsel] = useState({ treatmentRecommended: "", opticalCounseling: "", costEstimate: "", patientDecision: "Agreed", remarks: "", nextFollowUp: "", surgeryDate: "" });
+
+  const activePatient = db.patients.find(p => p.mrNo === selectedMr);
+
+  const saveCounselingRecord = () => {
+    if (!selectedMr) return;
+    const currentCounselingEntries = [...db.counseling];
+    const newEntry = {
+      id: `CNSL-${Math.floor(100 + Math.random() * 900)}`,
+      mrNo: selectedMr,
+      ...counsel,
+      costEstimate: Number(counsel.costEstimate)
+    };
+    currentCounselingEntries.push(newEntry);
+
+    let updatedSurgeries = [...db.surgeries];
+    if (counsel.patientDecision === "Agreed" && counsel.surgeryDate) {
+      updatedSurgeries.push({
+        id: `SURG-${Math.floor(1000 + Math.random() * 9000)}`,
+        mrNo: selectedMr,
+        patientId: activePatient.patientId,
+        name: activePatient.name,
+        age: activePatient.age,
+        gender: activePatient.gender,
+        phone: activePatient.phone,
+        surgeryType: counsel.treatmentRecommended || "Ophthalmic Surgery Case",
+        surgeon: "Unassigned Staff",
+        scheduledDate: counsel.surgeryDate,
+        status: "Scheduled",
+        otNotes: counsel.remarks,
+        followUpDate: counsel.nextFollowUp
+      });
+    }
+
+    const modifiedPatients = db.patients.map(p => p.mrNo === selectedMr ? { ...p, currentStage: "Opticals/Pharmacy Routing Hub" } : p);
+
+    mutate("counseling", currentCounselingEntries, newEntry);
+    mutate("surgeries", updatedSurgeries, updatedSurgeries[updatedSurgeries.length - 1]);
+    mutate("patients", modifiedPatients, { ...activePatient, currentStage: "Opticals/Pharmacy Routing Hub" });
+
+    audit("COUNSELING_DISPOSITION_ARRIVED", { mrNo: selectedMr, decision: counsel.patientDecision });
+    alert("Counseling data committed. Surgery pipelines instantiated where applicable.");
+    setSelectedMr("");
+  };
+
+  return (
+    <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+      <h2>Ophthalmology Financial Counseling & Surgical Planning Module</h2>
+      <div style={{ marginBottom: 16 }}>
+        <label style={LBL}>Query Post-Consultation Pipeline Array</label>
+        <select value={selectedMr} onChange={e => {
+          setSelectedMr(e.target.value);
+          const clinical = db.clinicalRecords.find(c => c.mrNo === e.target.value);
+          if (clinical) setCounsel(prev => ({ ...prev, treatmentRecommended: clinical.advice || "" }));
+        }} style={INP}>
+          <option value="">-- Fetch patient financial scheduling nodes --</option>
+          {db.patients.filter(p => p.currentStage === "Counseling Suite Corridor").map(p => (
+            <option key={p.mrNo} value={p.mrNo}>{p.mrNo} - {p.name} ({p.phone})</option>
+          ))}
+        </select>
+      </div>
+
+      {activePatient && (
+        <div style={{ display: "grid", gap: 16, borderTop: "1px solid #eee", paddingTop: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div><label style={LBL}>Surgical Procedure Interventions Overview</label><input type="text" value={counsel.treatmentRecommended} onChange={e => setCounsel({ ...counsel, treatmentRecommended: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Refractive Optical Counseling Strategy</label><input type="text" value={counsel.opticalCounseling} onChange={e => setCounsel({ ...counsel, opticalCounseling: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Total Estimated Cost Structure Fee (INR)</label><input type="number" value={counsel.costEstimate} onChange={e => setCounsel({ ...counsel, costEstimate: e.target.value })} style={INP} /></div>
+            <div>
+              <label style={LBL}>Patient Financial Disposition Decision</label>
+              <select value={counsel.patientDecision} onChange={e => setCounsel({ ...counsel, patientDecision: e.target.value })} style={INP}>
+                <option>Agreed</option>
+                <option>Under Consideration / Deferred</option>
+                <option>Declined Financial Terms</option>
+              </select>
+            </div>
+          </div>
+
+          {counsel.patientDecision === "Agreed" && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, background: "#f0fdf4", padding: 12, borderRadius: 8 }}>
+              <div><label style={LBL}>Target Scheduled Surgery Date</label><input type="date" value={counsel.surgeryDate} onChange={e => setCounsel({ ...counsel, surgeryDate: e.target.value })} style={INP} /></div>
+              <div><label style={LBL}>Post-Operative Follow-Up Vector Date</label><input type="date" value={counsel.nextFollowUp} onChange={e => setCounsel({ ...counsel, nextFollowUp: e.target.value })} style={INP} /></div>
+            </div>
+          )}
+
+          <div><label style={LBL}>Counseling Documentation Remarks</label><textarea value={counsel.remarks} onChange={e => setCounsel({ ...counsel, remarks: e.target.value })} rows={2} style={INP} /></div>
+          <button onClick={saveCounselingRecord} style={{ background: "#7c3aed", color: "#fff", border: "none", padding: "10px 20px", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}>Finalize Financial Counselor Sign-off Matrix</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// OPTICALS INTERACTIVE DISPENSING & BILLING ENGINE
+// ════════════════════════════════════════════════════════════════════════
+function OpticalsModule({ db, mutate, session, audit }) {
+  const [selectedMr, setSelectedMr] = useState("");
+  const [sale, setSale] = useState({ frameSelected: "", lensSelected: "", totalAmount: "", advance: "", payMethod: "UPI", txId: "", deliveryDate: "" });
+
+  const activePatient = db.patients.find(p => p.mrNo === selectedMr);
+  const refractionProfile = db.clinicalRecords.find(c => c.mrNo === selectedMr);
+
+  const executeOpticalBilling = () => {
+    if (!selectedMr || !sale.totalAmount) return;
+    const calculatedBalance = Number(sale.totalAmount) - Number(sale.advance || 0);
+    const newInvoice = {
+      id: `OPT-${Math.floor(1000 + Math.random() * 9000)}`,
+      mrNo: selectedMr,
+      patientId: activePatient.patientId,
+      name: activePatient.name,
+      phone: activePatient.phone,
+      address: activePatient.address,
+      acceptedPower: refractionProfile ? `OD: ${refractionProfile.accSpherOD || "0"} Sph / ${refractionProfile.accCylOD || "0"} Cyl x ${refractionProfile.accAxisOD || "0"}, OS: ${refractionProfile.accSpherOS || "0"} Sph / ${refractionProfile.accCylOS || "0"} Cyl x ${refractionProfile.accAxisOS || "0"} [Add: ${refractionProfile.addVal || "None"}]` : "Baseline Verification Pending",
+      ...sale,
+      totalAmount: Number(sale.totalAmount),
+      advance: Number(sale.advance || 0),
+      balance: calculatedBalance,
+      representative: session.name,
+      status: "Not Ready",
+      date: new Date().toISOString().split("T")[0]
+    };
+
+    const nextSalesRecords = [...db.opticalsSales, newInvoice];
+    mutate("opticalsSales", nextSalesRecords, newInvoice);
+    audit("OPTICAL_SALE_INVOICED", { invoiceId: newInvoice.id, mrNo: selectedMr });
+    alert(`Success: Invoice Generated ${newInvoice.id}. Due Balance: INR ${calculatedBalance}`);
+    setSelectedMr("");
+  };
+
+  return (
+    <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+      <h2>Point of Sale (POS) Opticals Dispensing & Refraction Invoicing</h2>
+      <div style={{ marginBottom: 16 }}>
+        <label style={LBL}>Fetch Active Optical Routing Channel Candidates</label>
+        <select value={selectedMr} onChange={e => {
+          setSelectedMr(e.target.value);
+        }} style={INP}>
+          <option value="">-- Match patient database indices --</option>
+          {db.patients.map(p => (
+            <option key={p.mrNo} value={p.mrNo}>{p.mrNo} - {p.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {activePatient && (
+        <div style={{ display: "grid", gap: 16, borderTop: "1px solid #eee", paddingTop: 16 }}>
+          {refractionProfile && (
+            <div style={{ background: "#fffbeb", padding: 12, borderRadius: 8, fontSize: 13, borderLeft: "4px solid #d97706" }}>
+              <strong>Auto-Fetched Refraction Lens Power Vectors:</strong>
+              <div>OD Acceptance Sphere/Cylinder/Axis Parameters: <span style={{ fontWeight: 700 }}>{refractionProfile.accSpherOD || "0.00"} DS / {refractionProfile.accCylOD || "0.00"} DC x {refractionProfile.accAxisOD || "0"}°</span> (Near: {refractionProfile.nearOD || "—"})</div>
+              <div>OS Acceptance Sphere/Cylinder/Axis Parameters: <span style={{ fontWeight: 700 }}>{refractionProfile.accSpherOS || "0.00"} DS / {refractionProfile.accCylOS || "0.00"} DC x {refractionProfile.accAxisOS || "0"}°</span> (Near: {refractionProfile.nearOS || "—"})</div>
+              {refractionProfile.addVal && <div>Reading Addition Assessment Metric: <span style={{ color: "#b45309", fontWeight: 700 }}>{refractionProfile.addVal} DS</span></div>}
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div><label style={LBL}>Dispensed Frame SKU Matrix Selection</label><input type="text" value={sale.frameSelected} onChange={e => setSale({ ...sale, frameSelected: e.target.value })} placeholder="Query frame stock catalog..." style={INP} /></div>
+            <div><label style={LBL}>Dispensed Lens Core Treatment Attribute Profile</label><input type="text" value={sale.lensSelected} onChange={e => setSale({ ...sale, lensSelected: e.target.value })} placeholder="Progressive, Polycarbonate, Blue-Cut, etc." style={INP} /></div>
+            <div><label style={LBL}>Gross Transaction Bill Amount (INR) *</label><input type="number" value={sale.totalAmount} onChange={e => setSale({ ...sale, totalAmount: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Advance Security Deposit Deposited (INR)</label><input type="number" value={sale.advance} onChange={e => setSale({ ...sale, advance: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Payment Mode</label><select value={sale.payMethod} onChange={e => setSale({ ...sale, payMethod: e.target.value })} style={INP}><option>UPI</option><option>Cash Transaction</option><option>Credit/Debit Card Terminal</option></select></div>
+            <div><label style={LBL}>Gateway Transaction Identification ID Hash</label><input type="text" value={sale.txId} onChange={e => setSale({ ...sale, txId: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Target Delivery Full Commitment Date</label><input type="date" value={sale.deliveryDate} onChange={e => setSale({ ...sale, deliveryDate: e.target.value })} style={INP} /></div>
+          </div>
+
+          <button onClick={executeOpticalBilling} style={{ background: "#d97706", color: "#fff", border: "none", padding: "12px", borderRadius: 8, fontWeight: 700, cursor: "pointer" }}>Lock Invoicing Parameters and Terminate POS Sale</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// ENTERPRISE MULTIPHASE CENTRAL INVENTORY ENGINE
+// ════════════════════════════════════════════════════════════════════════
+function InventoryModule({ db, mutate, session, audit }) {
+  const [newItem, setNewItem] = useState({ sku: "", name: "", category: "Lenses", brand: "", qty: "", reorder: "5", cost: "", price: "", expiryDate: "" });
+  const [filterCategory, setFilterCategory] = useState("All");
+
+  const registerNewSkuItem = () => {
+    if (session.role !== "owner") {
+      alert("Security Violation: Inventory architecture modifications restricted to MD Admin Authority Level.");
+      return;
+    }
+    if (!newItem.sku || !newItem.name || !newItem.price) return;
+    const updatedCollection = [...db.inventory, {
+      ...newItem,
+      id: `inv-${Date.now()}`,
+      qty: Number(newItem.qty || 0),
+      reorder: Number(newItem.reorder || 5),
+      cost: Number(newItem.cost || 0),
+      price: Number(newItem.price || 0)
+    }];
+    mutate("inventory", updatedCollection, updatedCollection[updatedCollection.length - 1]);
+    audit("INVENTORY_SKU_ADDED", { sku: newItem.sku, name: newItem.name });
+    setNewItem({ sku: "", name: "", category: "Lenses", brand: "", qty: "", reorder: "5", cost: "", price: "", expiryDate: "" });
+  };
+
+  const executeRestockIncrement = (id, amount = 10) => {
+    const nextInv = db.inventory.map(item => item.id === id ? { ...item, qty: item.qty + amount } : item);
+    mutate("inventory", nextInv, nextInv.find(i => i.id === id));
+    audit("INVENTORY_SKU_INCREMENTED", { itemId: id, added: amount });
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 20 }}>
+      {session.role === "owner" && (
+        <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+          <h3 style={{ margin: "0 0 16px" }}>MD Admin Inventory Supply Chain Ingestion Pipeline</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+            <div><label style={LBL}>Unique Item Code SKU *</label><input type="text" value={newItem.sku} onChange={e => setNewItem({ ...newItem, sku: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Asset Descriptive Name *</label><input type="text" value={newItem.name} onChange={e => setNewItem({ ...newItem, name: e.target.value })} style={INP} /></div>
+            <div>
+              <label style={LBL}>Inventory Matrix Category</label>
+              <select value={newItem.category} onChange={e => setNewItem({ ...newItem, category: e.target.value })} style={INP}>
+                <option>Lenses</option><option>Frames</option><option>Medicines</option><option>Surgical Consumables</option>
+              </select>
+            </div>
+            <div><label style={LBL}>Manufacturer Brand Identity</label><input type="text" value={newItem.brand} onChange={e => setNewItem({ ...newItem, brand: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Ingested Stock Volume</label><input type="number" value={newItem.qty} onChange={e => setNewItem({ ...newItem, qty: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Reorder Threshold Bound</label><input type="number" value={newItem.reorder} onChange={e => setNewItem({ ...newItem, reorder: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Unit Purchase Cost (INR)</label><input type="number" value={newItem.cost} onChange={e => setNewItem({ ...newItem, cost: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Unit Base Sales Price (INR)</label><input type="number" value={newItem.price} onChange={e => setNewItem({ ...newItem, price: e.target.value })} style={INP} /></div>
+            <div><label style={LBL}>Pharmaceutical Expiry</label><input type="date" value={newItem.expiryDate} onChange={e => setNewItem({ ...newItem, expiryDate: e.target.value })} style={INP} /></div>
+          </div>
+          <button onClick={registerNewSkuItem} style={{ marginTop: 12, background: "#1e40af", color: "#fff", padding: "10px 16px", border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>Commit Asset Allocation Vector to Warehousing Matrix</button>
         </div>
       )}
 
-      {tab === "perms" && (
-        <div>
-          {staff.length === 0 && <div className="card" style={{ color: "#9b8e82", textAlign: "center", padding: 32 }}>No staff accounts yet. Add staff in Manage Staff.</div>}
-          {staff.map(acc => (
-            <div key={acc.id} className="card" style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name}</div>
-                  <div style={{ fontSize: 12, color: "#9b8e82" }}>{acc.id} · {acc.branch}</div>
-                </div>
+      <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+          <h3 style={{ margin: 0 }}>Central Hospital Stock Ledger Index</h3>
+          <div style={{ display: "flex", gap: 8 }}>
+            {["All", "Lenses", "Frames", "Medicines", "Surgical Consumables"].map(cat => (
+              <button key={cat} onClick={() => setFilterCategory(cat)} style={{ padding: "6px 12px", background: filterCategory === cat ? "#1f2937" : "#e5e7eb", color: filterCategory === cat ? "#fff" : "#1f2937", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{cat}</button>
+            ))}
+          </div>
+        </div>
+
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "#f3f4f6", textAlign: "left" }}>
+              <th style={{ padding: 10 }}>Unique SKU Code</th>
+              <th style={{ padding: 10 }}>Asset Name / Descriptor</th>
+              <th style={{ padding: 10 }}>Category Node</th>
+              <th style={{ padding: 10 }}>On-Hand Quantity</th>
+              <th style={{ padding: 10 }}>Unit Price Valuation</th>
+              <th style={{ padding: 10 }}>Expiry Lifecycle Monitor</th>
+              <th style={{ padding: 10 }}>Management Control Hooks</th>
+            </tr>
+          </thead>
+          <tbody>
+            {db.inventory.filter(i => filterCategory === "All" || i.category === filterCategory).map(item => {
+              const requiresReorderTrigger = item.qty <= item.reorder;
+              return (
+                <tr key={item.id} style={{ borderBottom: "1px solid #e5e7eb", background: requiresReorderTrigger ? "#fef2f2" : "transparent" }}>
+                  <td style={{ padding: 10, fontFamily: "monospace", fontWeight: 700 }}>{item.sku}</td>
+                  <td style={{ padding: 10 }}><div>{item.name}</div><span style={{ fontSize: 11, color: "#6b7280" }}>Brand: {item.brand || "Generic Baseline"}</span></td>
+                  <td style={{ padding: 10 }}><span style={{ fontSize: 11, background: "#e2e8f0", padding: "2px 6px", borderRadius: 4 }}>{item.category}</span></td>
+                  <td style={{ padding: 10, fontWeight: 700, color: requiresReorderTrigger ? "#dc2626" : "#16a34a" }}>{item.qty} units {requiresReorderTrigger && <span style={{ fontSize: 10, background: "#fee2e2", color: "#b91c1c", padding: "2px 4px", borderRadius: 4 }}>LOW STOCK THRESHOLD</span>}</td>
+                  <td style={{ padding: 10 }}>{currency(item.price)}</td>
+                  <td style={{ padding: 10, color: item.expiryDate ? "#b45309" : "#6b7280" }}>{item.expiryDate || "Indefinite Structural Lifecycle"}</td>
+                  <td style={{ padding: 10 }}><button onClick={() => executeRestockIncrement(item.id, 25)} style={{ background: "#10b981", color: "#fff", border: "none", padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>⚡ Fast Replenish (+25)</button></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// CLINICAL SURGERY SCHEDULING & OT LOGGER
+// ════════════════════════════════════════════════════════════════════════
+function SurgeryModule({ db, mutate, session, audit }) {
+  const updateSurgeryStateCode = (id, nextStatus) => {
+    const list = db.surgeries.map(s => s.id === id ? { ...s, status: nextStatus } : s);
+    mutate("surgeries", list, list.find(s => s.id === id));
+    audit("SURGERY_STATUS_MUTATED", { surgeryId: id, state: nextStatus });
+  };
+
+  const writeOtNotes = (id, notesText) => {
+    const list = db.surgeries.map(s => s.id === id ? { ...s, otNotes: notesText } : s);
+    mutate("surgeries", list, list.find(s => s.id === id));
+  };
+
+  return (
+    <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+      <h2>Operating Theater (OT) Core Surgical Scheduler Engine</h2>
+      <p style={{ fontSize: 14, color: "#4b5563", marginBottom: 16 }}>Track real-time perioperative workflows for cataract extraction, vitrectomies, and refractive surgeries.</p>
+      
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ background: "#f3f4f6", textAlign: "left" }}>
+            <th style={{ padding: 10 }}>Surgical Case ID</th>
+            <th style={{ padding: 10 }}>Master MR No Reference</th>
+            <th style={{ padding: 10 }}>Patient Demographics</th>
+            <th style={{ padding: 10 }}>Procedure Target Context</th>
+            <th style={{ padding: 10 }}>Target Execution Date</th>
+            <th style={{ padding: 10 }}>Operating Room Notes Documentation Log</th>
+            <th style={{ padding: 10 }}>Workflow Status Vector State</th>
+          </tr>
+        </thead>
+        <tbody>
+          {db.surgeries.map(s => (
+            <tr key={s.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+              <td style={{ padding: 10, fontWeight: 700, fontFamily: "monospace" }}>{s.id}</td>
+              <td style={{ padding: 10, fontWeight: 700, color: "#1e40af" }}>{s.mrNo}</td>
+              <td style={{ padding: 10 }}>{s.name} ({s.age}Yrs/{s.gender})</td>
+              <td style={{ padding: 10, fontWeight: 600, color: "#7c3aed" }}>{s.surgeryType}</td>
+              <td style={{ padding: 10 }}>{s.scheduledDate}</td>
+              <td style={{ padding: 10 }}>
+                <textarea value={s.otNotes || ""} onChange={e => writeOtNotes(s.id, e.target.value)} placeholder="Append post-operative surgical observation parameters..." rows={1} style={{ ...INP, width: 200, fontSize: 12 }} />
+              </td>
+              <td style={{ padding: 10 }}>
+                <select value={s.status} onChange={e => updateSurgeryStateCode(s.id, e.target.value)} style={{ padding: "4px 8px", borderRadius: 6, fontSize: 12, border: "1px solid #ccc", fontWeight: 600 }}>
+                  <option>Scheduled</option><option>Confirmed Ready</option><option>Completed Successful</option><option>Postponed Case</option><option>Cancelled Structural Deviation</option>
+                </select>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// REMINDER MODALITY ENGINE & COMMUNICATION INTEGRATION STREAMS
+// ════════════════════════════════════════════════════════════════════════
+function ReminderSystem({ db, mutate, session, audit }) {
+  const [rem, setRem] = useState({ mrNo: "", type: "Follow-Up Visit", date: "", channel: "WhatsApp", text: "" });
+
+  const buildReminderObject = () => {
+    if (!rem.mrNo || !rem.date || !rem.text) return;
+    const targets = [...db.reminders, { ...rem, id: uid(), status: "Pending" }];
+    mutate("reminders", targets, targets[targets.length - 1]);
+    audit("COMMUNICATION_REMINDER_PIPELINED", { targetPatient: rem.mrNo, classification: rem.type });
+    setRem({ mrNo: "", type: "Follow-Up Visit", date: "", channel: "WhatsApp", text: "" });
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 20 }}>
+      <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+        <h3>Queue Automation Outbound Notification</h3>
+        <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+          <div><label style={LBL}>Patient MR Key Link *</label><input type="text" value={rem.mrNo} onChange={e => setRem({ ...rem, mrNo: e.target.value })} placeholder="e.g. MR-1001" style={INP} /></div>
+          <div>
+            <label style={LBL}>Notification Category Trigger</label>
+            <select value={rem.type} onChange={e => setRem({ ...rem, type: e.target.value })} style={INP}>
+              <option>Follow-Up Visit</option><option>Surgery Reminder</option><option>Optical Delivery Availability</option><option>Review Visit</option>
+            </select>
+          </div>
+          <div><label style={LBL}>Scheduled Delivery Date</label><input type="date" value={rem.date} onChange={e => setRem({ ...rem, date: e.target.value })} style={INP} /></div>
+          <div>
+            <label style={LBL}>Outbound Channel API Vector</label>
+            <select value={rem.channel} onChange={e => setRem({ ...rem, channel: e.target.value })} style={INP}>
+              <option>WhatsApp Ready API Endpoint</option><option>SMS Gateways Pathway</option><option>Email SMTP Relay Node</option>
+            </select>
+          </div>
+          <div><label style={LBL}>Notification Interfacing Message Text Payload</label><textarea value={rem.text} onChange={e => setRem({ ...rem, text: e.target.value })} rows={3} style={INP} /></div>
+          <button onClick={buildReminderObject} style={{ background: "#0284c7", color: "#fff", padding: "10px", border: "none", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>Inject Communication Matrix Notification</button>
+        </div>
+      </div>
+
+      <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+        <h3>Outbound Structural Dispatch Log</h3>
+        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 12 }}>
+          <thead>
+            <tr style={{ background: "#f3f4f6", textAlign: "left" }}>
+              <th style={{ padding: 8 }}>Target Patient</th>
+              <th style={{ padding: 8 }}>Classification</th>
+              <th style={{ padding: 8 }}>Gateway Channel</th>
+              <th style={{ padding: 8 }}>Payload Summary Block</th>
+              <th style={{ padding: 8 }}>Status Route</th>
+            </tr>
+          </thead>
+          <tbody>
+            {db.reminders.map(r => (
+              <tr key={r.id} style={{ borderBottom: "1px solid #eee", fontSize: 13 }}>
+                <td style={{ padding: 8, fontWeight: 700 }}>{r.mrNo}</td>
+                <td style={{ padding: 8 }}>{r.type}</td>
+                <td style={{ padding: 8 }}><span style={{ fontSize: 11, background: "#e0f2fe", color: "#0369a1", padding: "2px 6px", borderRadius: 4 }}>{r.channel}</span></td>
+                <td style={{ padding: 8, color: "#4b5563" }}>{r.text}</td>
+                <td style={{ padding: 8 }}><span style={{ color: "#059669", fontWeight: 700 }}>✓ API_STABLE_{r.status.toUpperCase()}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// INTERNAL CLINICAL WORK TASK ALLOCATION ENGINE
+// ════════════════════════════════════════════════════════════════════════
+function TaskManagement({ db, mutate, session, audit, accounts }) {
+  const [taskForm, setTaskForm] = useState({ title: "", priority: "Medium", deadline: "", assignedTo: "" });
+
+  const allocateOperationalTask = () => {
+    if (!taskForm.title || !taskForm.assignedTo) return;
+    const taskSet = [...db.tasks, { ...taskForm, id: uid(), status: "Pending", createdBy: session.id }];
+    mutate("tasks", taskSet, taskSet[taskSet.length - 1]);
+    audit("OPERATIONAL_TASK_INJECTED", { title: taskForm.title, recipient: taskForm.assignedTo });
+    setTaskForm({ title: "", priority: "Medium", deadline: "", assignedTo: "" });
+  };
+
+  const cycleStateIndex = (id) => {
+    const list = db.tasks.map(t => t.id === id ? { ...t, status: t.status === "Pending" ? "In Progress" : t.status === "In Progress" ? "Completed" : "Pending" } : t);
+    mutate("tasks", list, list.find(t => t.id === id));
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 20 }}>
+      <div style={{ background: "#fff", padding: 20, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+        <h3>Instantiate Task Mandate</h3>
+        <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+          <div><label style={LBL}>Task Action Mandate Statement *</label><input type="text" value={taskForm.title} onChange={e => setTaskForm({ ...taskForm, title: e.target.value })} style={INP} /></div>
+          <div>
+            <label style={LBL}>Recipient Operational User Profile Node</label>
+            <select value={taskForm.assignedTo} onChange={e => setTaskForm({ ...taskForm, assignedTo: e.target.value })} style={INP}>
+              <option value="">-- Associate clinical identity node --</option>
+              {accounts.map(a => <option key={a.id} value={a.id}>{a.name} ({a.department})</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={LBL}>Priority Level Mapping</label>
+            <select value={taskForm.priority} onChange={e => setTaskForm({ ...taskForm, priority: e.target.value })} style={INP}><option>Low</option><option>Medium</option><option>High</option><option>Critical Urgency</option></select>
+          </div>
+          <div><label style={LBL}>Target Timeline Deadline</label><input type="date" value={taskForm.deadline} onChange={e => setTaskForm({ ...taskForm, deadline: e.target.value })} style={INP} /></div>
+          <button onClick={allocateOperationalTask} style={{ background: "#111827", color: "#fff", padding: 10, border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>Delegate Mandate Vector</button>
+        </div>
+      </div>
+
+      <div style={{ background: "#fff", padding: 20, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+        <h3>Clinical Task Matrix Stream</h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
+          {db.tasks.map(t => (
+            <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb", padding: 12, borderRadius: 8, borderLeft: `4px solid ${t.priority === "High" || t.priority === "Critical Urgency" ? "#dc2626" : "#cbd5e1"}` }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{t.title}</div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>Assigned To Node Instance: <strong>{accounts.find(a => a.id === t.assignedTo)?.name || t.assignedTo}</strong> | Deadline: {t.deadline || "Indefinite Timeline"}</div>
               </div>
-              <div style={{ overflowX: "auto" }}>
-                <table>
-                  <thead><tr><th>Section</th><th style={{ textAlign: "center" }}>👁 View</th><th style={{ textAlign: "center" }}>➕ Add</th><th style={{ textAlign: "center" }}>✏️ Edit</th></tr></thead>
-                  <tbody>
-                    {SECTIONS.map(sec => (
-                      <tr key={sec}>
-                        <td style={{ fontWeight: 600 }}>{SECTION_LABELS[sec]}</td>
-                        {["view", "add", "edit"].map(action => (
-                          <td key={action} style={{ textAlign: "center" }}>
-                            <button onClick={() => togglePerm(acc.id, sec, action)}
-                              style={{ width: 36, height: 28, borderRadius: 6, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13, background: acc.perms?.[sec]?.[action] ? "#dcfce7" : "#fee2e2", color: acc.perms?.[sec]?.[action] ? "#16a34a" : "#dc2626" }}>
-                              {acc.perms?.[sec]?.[action] ? "✓" : "✗"}
-                            </button>
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <button onClick={() => cycleStateIndex(t.id)} style={{ padding: "6px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 700, background: t.status === "Completed" ? "#d1fae5" : t.status === "In Progress" ? "#fef3c7" : "#e5e7eb", color: t.status === "Completed" ? "#065f46" : t.status === "In Progress" ? "#92400e" : "#374151" }}>
+                Status Token: {t.status.toUpperCase()}
+              </button>
             </div>
           ))}
         </div>
-      )}
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// PATIENTS SECTION
-// ════════════════════════════════════════════════════════════════════════
-function PatientsSection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
-  const isOwner = session.role === "owner";
-  const branch  = session.branch || "JPT Branch";
-  // Show approved records. For staff, also show their own pending submissions
-  // (from local state) so they can see what they submitted.
-  const pendingMine = (data.patients || []).filter(x => x.branch === branch && x.status === "pending" && x.createdBy === session.id);
-  const rows    = [
-    ...(data.patients || []).filter(x => (isOwner || x.branch === branch) && x.status === "approved"),
-    ...(!isOwner ? pendingMine : []),
-  ];
-  const visFields = fieldVis.patients || DEFAULT_FIELD_VISIBILITY.patients;
-
-  const [modal, setModal] = useState(false);
-  const [form,  setForm]  = useState({});
-  const [touch, setTouch] = useState({});
-  const [msg,   setMsg]   = useState("");
-
-  const blank = () => ({ timestamp: ts(), date: todayStr(), time: timeStr(), name: "", phone: "", town: "", paymentMethod: "Cash", advance: "", advancePaymentMethod: "Cash" });
-  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
-  const T = k => () => setTouch(t => ({ ...t, [k]: true }));
-
-  const submit = () => {
-    setTouch({ phone: true, town: true, name: true });
-    if (!validate.phone(form.phone) || !validate.town(form.town) || !form.name.trim()) { setMsg("Fix validation errors before submitting."); return; }
-    const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form, createdBy: session.id, createdByName: session.name, createdAt: ts() };
-    if (isOwner) { const approved = { ...record, status: "approved" }; mutate("patients", arr => [...arr, approved], approved); audit("OWNER_ADD", { type: "patients", name: form.name }); }
-    else { staffSubmit("patients", record); }
-    setModal(false); setMsg(isOwner ? "Patient saved." : "Submitted for owner approval ✓");
-  };
-
-  const del = id => { if (confirm("Delete patient?")) { mutate("patients", arr => arr.filter(x => x.id !== id)); audit("DELETE", { type: "patients", id }); } };
-
-  const show = f => visFields.includes(f);
-
-  return (
-    <div>
-      <SectionHeader title="Patients" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "patients.csv")} onAdd={can("patients", "add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setModal(true); } : null} msg={msg} />
-      <div className="card" style={{ overflowX: "auto" }}>
-        <table>
-          <thead><tr>
-            {show("timestamp") && <th>Timestamp</th>}
-            {show("date") && <th>Date</th>}{show("time") && <th>Time</th>}
-            {show("name") && <th>Name</th>}{show("phone") && <th>Phone</th>}
-            {show("town") && <th>Town</th>}{show("paymentMethod") && <th>Payment</th>}
-            {show("advance") && <th>Advance</th>}{show("advancePaymentMethod") && <th>Adv.Method</th>}
-            <th>Branch</th>{isOwner && <th></th>}
-          </tr></thead>
-          <tbody>{rows.map(r => (
-            <tr key={r.id} style={r.status === "pending" ? { opacity: 0.6, background: "#fef9c3" } : {}}>
-              {show("timestamp") && <td style={{ fontSize: 11, whiteSpace: "nowrap", color: "#9b8e82" }}>{r.timestamp}</td>}
-              {show("date") && <td>{r.date}</td>}{show("time") && <td>{r.time}</td>}
-              {show("name") && <td style={{ fontWeight: 600 }}>{r.name}{r.status === "pending" && <span style={{ marginLeft: 6, fontSize: 10, background: "#fef9c3", color: "#a16207", padding: "1px 6px", borderRadius: 8, fontWeight: 700, border: "1px solid #fde68a" }}>⏳ Pending</span>}</td>}
-              {show("phone") && <td>{r.phone}</td>}
-              {show("town") && <td>{r.town}</td>}{show("paymentMethod") && <td><span className="tag tag-blue">{r.paymentMethod}</span></td>}
-              {show("advance") && <td>{r.advance ? currency(r.advance) : "—"}</td>}
-              {show("advancePaymentMethod") && <td style={{ fontSize: 12, color: "#9b8e82" }}>{r.advancePaymentMethod}</td>}
-              <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{r.branch}</span></td>
-              {isOwner && r.status !== "pending" && <td><button className="btn btn-danger btn-sm" onClick={() => del(r.id)}>✕</button></td>}
-            </tr>
-          ))}</tbody>
-        </table>
       </div>
-      {modal && (
-        <Modal title="Add Patient" onClose={() => setModal(false)} onSave={submit} saveLabel={isOwner ? "Save" : "Submit for Approval"} wide>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-            <div><label>Timestamp (auto)</label><input type="text" value={form.timestamp} readOnly style={{ background: "#f0ede8", color: "#9b8e82" }} /></div>
-            <div><label>Date</label><input type="date" value={form.date} onChange={F("date")} /></div>
-            <div><label>Time</label><input type="time" value={form.time} onChange={F("time")} /></div>
-            <div style={{ gridColumn: "1/-1" }}><label>Name *</label><input type="text" value={form.name} onChange={F("name")} onBlur={T("name")} style={vStyle(form.name, v => v.trim().length > 0, touch.name)} />{vMsg(form.name, v => v.trim().length > 0, touch.name, "Required.")}</div>
-            <div><label>Phone * (10 digits, not starting 0)</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} onBlur={T("phone")} style={vStyle(form.phone, validate.phone, touch.phone)} />{vMsg(form.phone, validate.phone, touch.phone, "10 digits, not starting with 0.")}</div>
-            <div><label>Town * (letters only)</label><input type="text" value={form.town} onChange={F("town")} onBlur={T("town")} style={vStyle(form.town, validate.town, touch.town)} />{vMsg(form.town, validate.town, touch.town, "Letters only, no numbers.")}</div>
-            <div><label>Payment Method</label><select value={form.paymentMethod} onChange={F("paymentMethod")}>{["Cash", "UPI", "Free"].map(m => <option key={m}>{m}</option>)}</select></div>
-            <div><label>Advance (₹)</label><input type="number" value={form.advance} onChange={F("advance")} /></div>
-            <div><label>Advance Payment Method</label><select value={form.advancePaymentMethod} onChange={F("advancePaymentMethod")}>{["Cash", "UPI", "NA"].map(m => <option key={m}>{m}</option>)}</select></div>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// PATIENT BILL
+// MD CONTROL CENTER & SYSTEM GOVERNANCE PANEL (RBAC ENGINE)
 // ════════════════════════════════════════════════════════════════════════
-function PatientBillSection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
-  const isOwner = session.role === "owner";
-  const branch  = session.branch || "JPT Branch";
-  const rows    = (data.patientBill || []).filter(x => (isOwner || x.branch === branch) && x.status === "approved");
+function MDGovernanceSection({ accounts, setAccounts, fieldVis, setFieldVis, branding, setBranding, auditLog }) {
+  const [operator, setOperator] = useState({ id: "", name: "", role: "staff", branch: "JPT Branch", department: "OP Registration", password: "" });
 
-  const [modal, setModal] = useState(false);
-  const [form,  setForm]  = useState({});
-  const [touch, setTouch] = useState({});
-  const [tab,   setTab]   = useState("basic");
-  const [msg,   setMsg]   = useState("");
-
-  const blank = () => ({
-    timestamp: ts(), date: todayStr(), time: timeStr(),
-    mrNo: `MR-${String((rows.length || 0) + 1).padStart(3, "0")}`,
-    name: "", phone: "", town: "", gender: "Male", age: "", complaint: "", pastHistory: "",
-    reSpherAR: "", reCylAR: "", reAxisAR: "", leSpherAR: "", leCylAR: "", leAxisAR: "",
-    reSpherSub: "", reCylSub: "", reAxisSub: "", leSpherSub: "", leCylSub: "", leAxisSub: "",
-    add: "", eyelids: "", conjunctiva: "", cornea: "", anteriorChamber: "", iris: "", pupil: "", lens: "", ocularMovements: "", fundus: "",
-    advice: "", optom: "", lensType: "Single Vision", frameNo: "", advance: "", paymentMethod: "Cash",
-    deliveryStatus: "Not Ready", balance: ""
-  });
-
-  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
-  const T = k => () => setTouch(t => ({ ...t, [k]: true }));
-  const rxField = (label, key, validator, msg2) => (
-    <div key={key}><label>{label}</label>
-      <input type="number" step="0.25" value={form[key] || ""} onChange={F(key)} onBlur={T(key)} style={vStyle(form[key], validator, touch[key])} />
-      {vMsg(form[key], validator, touch[key], msg2)}
-    </div>
-  );
-
-  const submit = () => {
-    const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form, createdBy: session.id, createdByName: session.name, createdAt: ts() };
-    if (isOwner) { const approved = { ...record, status: "approved" }; mutate("patientBill", arr => [...arr, approved], approved); audit("OWNER_ADD", { type: "patientBill", name: form.name }); }
-    else { staffSubmit("patientBill", record); }
-    setModal(false); setMsg(isOwner ? "Bill saved." : "Submitted for approval ✓");
-  };
-
-  const del = id => { if (confirm("Delete bill?")) { mutate("patientBill", arr => arr.filter(x => x.id !== id)); audit("DELETE", { type: "patientBill", id }); } };
-
-  const TABS = [{ id: "basic", label: "Patient Info" }, { id: "ar", label: "AR Readings" }, { id: "sub", label: "Subjective" }, { id: "eye", label: "Eye Exam" }, { id: "billing", label: "Billing" }];
-
-  return (
-    <div>
-      <SectionHeader title="Patient Bill" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "patient_bill.csv")} onAdd={can("patientBill", "add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setTab("basic"); setModal(true); } : null} msg={msg} />
-      <div className="card" style={{ overflowX: "auto" }}>
-        <table><thead><tr><th>Timestamp</th><th>MR No</th><th>Name</th><th>Phone</th><th>Town</th><th>Lens Type</th><th>Delivery</th><th>Balance</th><th>By</th><th>Branch</th>{isOwner && <th></th>}</tr></thead>
-          <tbody>{rows.map(r => (
-            <tr key={r.id}>
-              <td style={{ fontSize: 11, color: "#9b8e82", whiteSpace: "nowrap" }}>{r.timestamp}</td>
-              <td style={{ fontWeight: 700, fontFamily: "monospace" }}>{r.mrNo}</td>
-              <td style={{ fontWeight: 600 }}>{r.name}</td><td>{r.phone}</td><td>{r.town}</td>
-              <td><span className="tag tag-blue">{r.lensType}</span></td>
-              <td><span className={`tag ${r.deliveryStatus === "Delivered" ? "tag-green" : r.deliveryStatus === "Not Ready" ? "tag-red" : "tag-yellow"}`}>{r.deliveryStatus === "Fixing Completed But Not Delivered" ? "Fixing Done" : r.deliveryStatus}</span></td>
-              <td style={{ fontWeight: 700 }}>{currency(r.balance)}</td>
-              <td style={{ fontSize: 11, color: "#9b8e82" }}>{r.createdByName || "—"}</td>
-              <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{r.branch}</span></td>
-              {isOwner && <td><button className="btn btn-danger btn-sm" onClick={() => del(r.id)}>✕</button></td>}
-            </tr>
-          ))}</tbody>
-        </table>
-      </div>
-      {modal && (
-        <Modal title="Patient Bill" onClose={() => setModal(false)} onSave={submit} saveLabel={isOwner ? "Save Bill" : "Submit for Approval"} xl>
-          <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
-            {TABS.map(t => <button key={t.id} className={`btn btn-sm ${tab === t.id ? "btn-dark" : "btn-outline"}`} onClick={() => setTab(t.id)}>{t.label}</button>)}
-          </div>
-          {tab === "basic" && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-              <div><label>Timestamp (auto)</label><input type="text" value={form.timestamp} readOnly style={{ background: "#f0ede8", color: "#9b8e82" }} /></div>
-              <div><label>Date</label><input type="date" value={form.date} onChange={F("date")} /></div>
-              <div><label>Time</label><input type="time" value={form.time} onChange={F("time")} /></div>
-              <div><label>M.R. No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div>
-              <div style={{ gridColumn: "span 2" }}><label>Name *</label><input type="text" value={form.name} onChange={F("name")} onBlur={T("name")} style={vStyle(form.name, v => v.trim().length > 0, touch.name)} /></div>
-              <div><label>Phone * (10 digits)</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} onBlur={T("phone")} style={vStyle(form.phone, validate.phone, touch.phone)} />{vMsg(form.phone, validate.phone, touch.phone, "10 digits, not starting 0.")}</div>
-              <div><label>Town * (letters only)</label><input type="text" value={form.town} onChange={F("town")} onBlur={T("town")} style={vStyle(form.town, validate.town, touch.town)} />{vMsg(form.town, validate.town, touch.town, "Letters only.")}</div>
-              <div><label>Gender</label><select value={form.gender} onChange={F("gender")}><option>Male</option><option>Female</option><option>Other</option></select></div>
-              <div><label>Age</label><input type="number" value={form.age} onChange={F("age")} /></div>
-              <div style={{ gridColumn: "span 2" }}><label>Complaint</label><textarea rows={2} value={form.complaint} onChange={F("complaint")} /></div>
-              <div style={{ gridColumn: "1/-1" }}><label>Past History</label><textarea rows={2} value={form.pastHistory} onChange={F("pastHistory")} /></div>
-            </div>
-          )}
-          {tab === "ar" && (
-            <div style={{ display: "grid", gap: 14 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, background: "#f0ede8", borderRadius: 12, padding: "14px 16px" }}>
-                <div style={{ gridColumn: "1/-1", fontWeight: 700, fontSize: 11, color: "#9b8e82", textTransform: "uppercase" }}>Right Eye (RE) — AR</div>
-                {rxField("Spherical", "reSpherAR", validate.sphereCyl, "-6.00 to +6.00, steps 0.25")}
-                {rxField("Cylinder",  "reCylAR",   validate.sphereCyl, "-6.00 to +6.00, steps 0.25")}
-                {rxField("Axis",      "reAxisAR",  validate.axis,      "0–180, whole numbers")}
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, background: "#f0ede8", borderRadius: 12, padding: "14px 16px" }}>
-                <div style={{ gridColumn: "1/-1", fontWeight: 700, fontSize: 11, color: "#9b8e82", textTransform: "uppercase" }}>Left Eye (LE) — AR</div>
-                {rxField("Spherical", "leSpherAR", validate.sphereCyl, "-6.00 to +6.00, steps 0.25")}
-                {rxField("Cylinder",  "leCylAR",   validate.sphereCyl, "-6.00 to +6.00, steps 0.25")}
-                {rxField("Axis",      "leAxisAR",  validate.axis,      "0–180, whole numbers")}
-              </div>
-            </div>
-          )}
-          {tab === "sub" && (
-            <div style={{ display: "grid", gap: 14 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, background: "#f0ede8", borderRadius: 12, padding: "14px 16px" }}>
-                <div style={{ gridColumn: "1/-1", fontWeight: 700, fontSize: 11, color: "#9b8e82", textTransform: "uppercase" }}>Right Eye (RE) — Subjective</div>
-                {rxField("Spherical", "reSpherSub", validate.sphereCyl, "-6.00 to +6.00, steps 0.25")}
-                {rxField("Cylinder",  "reCylSub",   validate.sphereCyl, "-6.00 to +6.00, steps 0.25")}
-                {rxField("Axis",      "reAxisSub",  validate.axis,      "0–180, whole numbers")}
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, background: "#f0ede8", borderRadius: 12, padding: "14px 16px" }}>
-                <div style={{ gridColumn: "1/-1", fontWeight: 700, fontSize: 11, color: "#9b8e82", textTransform: "uppercase" }}>Left Eye (LE) — Subjective</div>
-                {rxField("Spherical", "leSpherSub", validate.sphereCyl, "-6.00 to +6.00, steps 0.25")}
-                {rxField("Cylinder",  "leCylSub",   validate.sphereCyl, "-6.00 to +6.00, steps 0.25")}
-                {rxField("Axis",      "leAxisSub",  validate.axis,      "0–180, whole numbers")}
-              </div>
-              <div style={{ maxWidth: 220 }}>
-                <label>ADD (Subjective)</label>
-                <input type="number" step="0.25" value={form.add || ""} onChange={F("add")} onBlur={T("add")} style={vStyle(form.add, v => !v || validate.add(v), touch.add)} />
-                {vMsg(form.add, v => !v || validate.add(v), touch.add, "0 or 0.75–3.00 in steps of 0.25")}
-              </div>
-            </div>
-          )}
-          {tab === "eye" && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-              {["eyelids", "conjunctiva", "cornea", "anteriorChamber", "iris", "pupil", "lens", "ocularMovements", "fundus"].map(k => (
-                <div key={k}><label>{k.replace(/([A-Z])/g, " $1").replace(/^./, s => s.toUpperCase())}</label><input type="text" value={form[k] || ""} onChange={F(k)} /></div>
-              ))}
-              <div style={{ gridColumn: "1/-1" }}><label>Advice</label><textarea rows={2} value={form.advice} onChange={F("advice")} /></div>
-              <div style={{ gridColumn: "span 2" }}><label>Optometrist / Ophthalmologist</label><input type="text" value={form.optom} onChange={F("optom")} /></div>
-            </div>
-          )}
-          {tab === "billing" && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-              <div style={{ gridColumn: "1/-1" }}><label>Lens Type</label><select value={form.lensType} onChange={F("lensType")}>{LENS_TYPES.map(l => <option key={l}>{l}</option>)}</select></div>
-              <div><label>Frame No</label><input type="text" value={form.frameNo} onChange={F("frameNo")} /></div>
-              <div><label>Advance (₹)</label><input type="number" value={form.advance} onChange={F("advance")} /></div>
-              <div><label>Payment Method</label><select value={form.paymentMethod} onChange={F("paymentMethod")}><option>Cash</option><option>UPI</option></select></div>
-              <div style={{ gridColumn: "1/-1" }}><label>Delivery Status</label><select value={form.deliveryStatus} onChange={F("deliveryStatus")}>{DELIVERY_STATUS.map(d => <option key={d}>{d}</option>)}</select></div>
-              <div><label>Balance (₹)</label><input type="number" value={form.balance} onChange={F("balance")} /></div>
-            </div>
-          )}
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// INVENTORY
-// ════════════════════════════════════════════════════════════════════════
-function InventorySection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
-  const isOwner = session.role === "owner";
-  const branch  = session.branch || "JPT Branch";
-  const rows    = (data.stock || []).filter(x => isOwner || x.branch === branch);
-  const [search, setSearch] = useState(""); const [cat, setCat] = useState("All");
-  const [modal,  setModal]  = useState(null); const [msg, setMsg] = useState("");
-  const blank = { sku: "", name: "", category: "Frames", brand: "", qty: 0, reorder: 5, cost: 0, price: 0, location: "", lensPower: "", lensType: "Single Vision", boxNo: "" };
-  const [form, setForm] = useState(blank);
-  const cats = ["All", "Frames", "Contact Lenses", "Lenses", "Accessories"];
-  const filtered = rows.filter(s => (cat === "All" || s.category === cat) && (s.name.toLowerCase().includes(search.toLowerCase()) || s.sku.toLowerCase().includes(search.toLowerCase())));
-  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
-  const open = s => { setForm(s ? { ...s } : { ...blank, branch: isOwner ? "JPT Branch" : branch }); setModal(s || "add"); };
-  const save = () => {
-    const item = { ...form, qty: Number(form.qty), reorder: Number(form.reorder), cost: Number(form.cost), price: Number(form.price) };
-    if (modal === "add") {
-      const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...item, createdBy: session.id, createdByName: session.name };
-      if (isOwner) { mutate("stock", arr => [...arr, record], record); audit("OWNER_ADD", { type: "stock", sku: item.sku }); }
-      else { staffSubmit("stock", record); setMsg("Submitted for approval."); }
-    } else {
-      if (isOwner) { const updated = { ...modal, ...item }; mutate("stock", arr => arr.map(x => x.id === modal.id ? updated : x), updated); audit("EDIT", { type: "stock", id: modal.id }); }
-      else { staffSubmit("stock", { ...modal, ...item }); setMsg("Edit submitted for approval."); }
+  const provisionStaffNode = () => {
+    if (!operator.id || !operator.name || !operator.password) return;
+    if (accounts.some(a => a.id === operator.id)) {
+      alert("Error Identity Target Conflict: Token profile key already assigned inside operational arrays.");
+      return;
     }
-    setModal(null);
+    setAccounts([...accounts, { ...operator, perms: { view: true, add: true, edit: false } }]);
+    alert("Success: Role-Based Account Vector initialized within secure tables.");
+    setOperator({ id: "", name: "", role: "staff", branch: "JPT Branch", department: "OP Registration", password: "" });
   };
-  return (
-    <div>
-      <SectionHeader title="Inventory" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "inventory.csv")} onAdd={can("inventory", "add") ? () => open(null) : null} msg={msg} />
-      <div className="card" style={{ overflowX: "auto" }}>
-        <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-          <input type="text" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} style={{ maxWidth: 200 }} />
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{cats.map(c => <button key={c} className={`btn btn-sm ${cat === c ? "btn-dark" : "btn-outline"}`} onClick={() => setCat(c)}>{c}</button>)}</div>
-        </div>
-        <table><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>Qty</th><th>Lens Power</th><th>Lens Type</th><th>Box No</th><th>Price</th><th>Location</th><th>Branch</th><th>By</th>{(can("inventory", "edit") || isOwner) && <th></th>}</tr></thead>
-          <tbody>{filtered.map(s => (
-            <tr key={s.id}>
-              <td style={{ fontFamily: "monospace", fontSize: 11 }}>{s.sku}</td>
-              <td style={{ fontWeight: 600 }}>{s.name}</td>
-              <td><span className="tag tag-blue">{s.category}</span></td>
-              <td><span style={{ fontWeight: 700, color: s.qty <= s.reorder ? "#dc2626" : "#16a34a" }}>{s.qty}</span></td>
-              <td style={{ fontFamily: "monospace" }}>{s.lensPower || "—"}</td>
-              <td>{s.lensType && s.category === "Lenses" ? <span className="tag tag-blue">{s.lensType}</span> : "—"}</td>
-              <td style={{ fontFamily: "monospace", fontSize: 12 }}>{s.boxNo || "—"}</td>
-              <td style={{ fontWeight: 600 }}>{currency(s.price)}</td>
-              <td style={{ fontSize: 12, color: "#9b8e82" }}>{s.location}</td>
-              <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{s.branch}</span></td>
-              <td style={{ fontSize: 11, color: "#9b8e82" }}>{s.createdByName || "—"}</td>
-              {(can("inventory", "edit") || isOwner) && (
-                <td style={{ display: "flex", gap: 5 }}>
-                  <button className="btn btn-outline btn-sm" onClick={() => open(s)}>Edit</button>
-                  {isOwner && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) { mutate("stock", arr => arr.filter(x => x.id !== s.id)); audit("DELETE", { type: "stock", id: s.id }); } }}>✕</button>}
-                </td>
-              )}
-            </tr>
-          ))}</tbody>
-        </table>
-      </div>
-      {modal && (
-        <Modal title={modal === "add" ? "Add Stock Item" : "Edit Stock Item"} onClose={() => setModal(null)} onSave={save} saveLabel={isOwner ? "Save" : "Submit for Approval"}>
-          <div className="form-grid">
-            <div><label>SKU</label><input type="text" value={form.sku} onChange={F("sku")} /></div>
-            <div><label>Category</label><select value={form.category} onChange={F("category")}>{["Frames", "Contact Lenses", "Lenses", "Accessories"].map(c => <option key={c}>{c}</option>)}</select></div>
-            <div className="full"><label>Name</label><input type="text" value={form.name} onChange={F("name")} /></div>
-            <div><label>Brand</label><input type="text" value={form.brand} onChange={F("brand")} /></div>
-            <div><label>Location</label><input type="text" value={form.location} onChange={F("location")} /></div>
-            <div><label>Qty</label><input type="number" value={form.qty} onChange={F("qty")} /></div>
-            <div><label>Reorder At</label><input type="number" value={form.reorder} onChange={F("reorder")} /></div>
-            <div><label>Cost (₹)</label><input type="number" value={form.cost} onChange={F("cost")} /></div>
-            <div><label>Price (₹)</label><input type="number" value={form.price} onChange={F("price")} /></div>
-            {form.category === "Lenses" && <>
-              <div><label>Lens Power</label><input type="text" placeholder="-2.50" value={form.lensPower} onChange={F("lensPower")} /></div>
-              <div><label>Lens Type</label><select value={form.lensType} onChange={F("lensType")}>{LENS_TYPES.map(l => <option key={l}>{l}</option>)}</select></div>
-              <div><label>Box Number</label><input type="text" placeholder="B-14" value={form.boxNo} onChange={F("boxNo")} /></div>
-            </>}
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
 
-// ════════════════════════════════════════════════════════════════════════
-// INVOICES
-// ════════════════════════════════════════════════════════════════════════
-function InvoicesSection({ session, data, mutate, staffSubmit, can, audit, onSync, syncing }) {
-  const isOwner = session.role === "owner";
-  const branch  = session.branch || "JPT Branch";
-  const rows    = (data.invoices || []).filter(x => (isOwner || x.branch === branch) && x.approvalStatus === "approved");
-  const [modal, setModal] = useState(false);
-  const [form,  setForm]  = useState({ patientName: "", date: todayStr(), items: [], discount: 0 });
-  const [lN, setLN] = useState(""); const [lQ, setLQ] = useState(1); const [lP, setLP] = useState(0);
-  const [msg, setMsg] = useState("");
-  const addLine = () => { if (!lN.trim()) return; setForm(f => ({ ...f, items: [...f.items, { name: lN, qty: Number(lQ), price: Number(lP) }] })); setLN(""); setLQ(1); setLP(0); };
-  const sub = (form.items || []).reduce((s, l) => s + l.qty * l.price, 0);
-  const save = () => {
-    if (!form.patientName || !form.items.length) return;
-    const record = { id: `INV-${uid().slice(0, 6).toUpperCase()}`, branch: isOwner ? "JPT Branch" : branch, ...form, discount: Number(form.discount), approvalStatus: "pending", status: "Pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
-    if (isOwner) { const approved = { ...record, approvalStatus: "approved" }; mutate("invoices", arr => [...arr, approved], approved); audit("OWNER_ADD", { type: "invoices" }); }
-    else { staffSubmit("invoices", record); setMsg("Submitted for approval."); }
-    setModal(false);
+  const toggleVisibilitySchemaElement = (sectionKey, itemField) => {
+    const sectionList = fieldVis[sectionKey] || [];
+    const changedFields = sectionList.includes(itemField) ? sectionList.filter(f => f !== itemField) : [...sectionList, itemField];
+    setFieldVis({ ...fieldVis, [sectionKey]: changedFields });
   };
-  const total = inv => (inv.items || []).reduce((s, i) => s + i.qty * i.price, 0) - (inv.discount || 0);
-  return (
-    <div>
-      <SectionHeader title="Sales & Invoices" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows, "invoices.csv")} onAdd={can("invoices", "add") ? () => { setForm({ patientName: "", date: todayStr(), items: [], discount: 0 }); setModal(true); } : null} msg={msg} />
-      <div className="card" style={{ overflowX: "auto" }}>
-        <table><thead><tr><th>Invoice</th><th>Date</th><th>Patient</th><th>Total</th><th>Status</th><th>By</th><th>Branch</th>{isOwner && <th></th>}</tr></thead>
-          <tbody>{rows.map(inv => (
-            <tr key={inv.id}>
-              <td style={{ fontWeight: 700 }}>{inv.id}</td><td>{inv.date}</td><td>{inv.patientName}</td>
-              <td style={{ fontWeight: 700 }}>{currency(total(inv))}</td>
-              <td><span className={`tag ${inv.status === "Paid" ? "tag-green" : "tag-yellow"}`}>{inv.status}</span></td>
-              <td style={{ fontSize: 11, color: "#9b8e82" }}>{inv.createdByName || "—"}</td>
-              <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{inv.branch}</span></td>
-              {isOwner && <td style={{ display: "flex", gap: 5 }}>
-                <button className="btn btn-sm" style={{ background: "#f0ede8", color: "#1a1714", border: "none", fontWeight: 600 }} onClick={() => printInvoice(inv)}>🖨 Print</button>
-                {inv.status === "Pending" && <button className="btn btn-sm" style={{ background: "#dcfce7", color: "#16a34a", border: "none", fontWeight: 700 }} onClick={() => mutate("invoices", arr => arr.map(i => i.id === inv.id ? { ...i, status: "Paid" } : i))}>✓ Paid</button>}
-                <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) mutate("invoices", arr => arr.filter(i => i.id !== inv.id)); }}>✕</button>
-              </td>}
-            </tr>
-          ))}</tbody>
-        </table>
-      </div>
-      {modal && (
-        <Modal title="New Invoice" onClose={() => setModal(false)} onSave={save} saveLabel={isOwner ? "Create Invoice" : "Submit for Approval"} wide>
-          <div className="form-grid" style={{ marginBottom: 14 }}>
-            <div><label>Patient Name</label><input type="text" value={form.patientName} onChange={e => setForm(f => ({ ...f, patientName: e.target.value }))} /></div>
-            <div><label>Date</label><input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
-          </div>
-          <label>Add Item</label>
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <input type="text" placeholder="Item name" value={lN} onChange={e => setLN(e.target.value)} style={{ flex: 2 }} />
-            <input type="number" placeholder="Qty" value={lQ} onChange={e => setLQ(e.target.value)} style={{ width: 60 }} />
-            <input type="number" placeholder="₹" value={lP} onChange={e => setLP(e.target.value)} style={{ width: 90 }} />
-            <button className="btn btn-dark btn-sm" onClick={addLine}>Add</button>
-          </div>
-          {form.items.length > 0 && <div style={{ background: "#faf9f7", borderRadius: 10, padding: "10px 14px", marginBottom: 12 }}>
-            {form.items.map((l, i) => <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>{l.name} × {l.qty}</span><span style={{ fontWeight: 600 }}>{currency(l.qty * l.price)}</span></div>)}
-            <div style={{ borderTop: "1px solid #e8e2db", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontWeight: 700 }}><span>Sub</span><span>{currency(sub)}</span></div>
-          </div>}
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <div style={{ flex: 1 }}><label>Discount (₹)</label><input type="number" value={form.discount} onChange={e => setForm(f => ({ ...f, discount: e.target.value }))} /></div>
-            <div style={{ flex: 1 }}><div style={{ fontSize: 11, color: "#9b8e82" }}>TOTAL</div><div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700 }}>{currency(sub - Number(form.discount))}</div></div>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
 
-// ════════════════════════════════════════════════════════════════════════
-// ALERTS
-// ════════════════════════════════════════════════════════════════════════
-function AlertsSection({ session, data, mutate, onSync, syncing }) {
-  const isOwner = session.role === "owner";
-  const branch  = session.branch || "JPT Branch";
-  const low     = (data.stock || []).filter(s => (isOwner || s.branch === branch) && s.qty <= s.reorder);
-  const [modal, setModal] = useState(null); const [qty, setQty] = useState(0);
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div className="section-title">Low Stock Alerts</div>
-        <div style={{ display: "flex", gap: 10 }}>
-          {onSync && <button className="btn btn-outline btn-sm" onClick={onSync} disabled={syncing}>{syncing ? "⟳ Syncing…" : "⟳ Sync"}</button>}
-          <button className="btn btn-outline btn-sm" onClick={() => exportCSV(low.map(({ id, ...r }) => r), "low_stock.csv")}>⬇ CSV</button>
+    <div style={{ display: "grid", gap: 24 }}>
+      <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+        <h3>Hospital Configuration Identity Customization & Branding Engine</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginTop: 12 }}>
+          <div><label style={LBL}>Hospital System Display Name Descriptor</label><input type="text" value={branding.name} onChange={e => setBranding({ ...branding, name: e.target.value })} style={INP} /></div>
+          <div><label style={LBL}>Logo Graphical Text Token Identifier</label><input type="text" value={branding.logo} onChange={e => setBranding({ ...branding, logo: e.target.value })} style={INP} /></div>
+          <div><label style={LBL}>Interface Theme Chromatic Hex Value</label><input type="color" value={branding.theme} onChange={e => setBranding({ ...branding, theme: e.target.value })} style={{ ...INP, height: 38, padding: 2 }} /></div>
         </div>
       </div>
-      {low.length === 0
-        ? <div className="card" style={{ textAlign: "center", padding: 48, color: "#9b8e82" }}><div style={{ fontSize: 36, marginBottom: 10 }}>✓</div><div style={{ fontWeight: 600 }}>All stock levels healthy</div></div>
-        : low.map(s => (
-          <div key={s.id} style={{ background: "#fff9f5", border: "1.5px solid #fed7aa", borderRadius: 12, padding: "12px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontWeight: 700 }}>{s.name}</div>
-              <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 2 }}>{s.sku} · {s.branch} · Box: {s.boxNo || "—"}</div>
-            </div>
-            <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-              <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#9b8e82" }}>Stock / Reorder</div><div><span style={{ fontWeight: 700, color: "#dc2626", fontSize: 16 }}>{s.qty}</span><span style={{ color: "#9b8e82" }}> / {s.reorder}</span></div></div>
-              {isOwner && <button className="btn btn-dark btn-sm" onClick={() => { setModal(s); setQty(s.reorder - s.qty + 10); }}>+ Restock</button>}
-            </div>
-          </div>
-        ))
-      }
-      {modal && <Modal title="Restock" onClose={() => setModal(null)} onSave={() => { mutate("stock", p => p.map(s => s.id === modal.id ? { ...s, qty: s.qty + Number(qty) } : s)); setModal(null); }} saveLabel="Update" width={360}>
-        <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 12 }}>{modal.name}</div>
-        <label>Units to Add</label><input type="number" min={1} value={qty} onChange={e => setQty(e.target.value)} />
-        <div style={{ fontSize: 13, color: "#9b8e82", marginTop: 8 }}>New total: {modal.qty + Number(qty)}</div>
-      </Modal>}
-    </div>
-  );
-}
 
-// ════════════════════════════════════════════════════════════════════════
-// MANAGE STAFF (Users)
-// ════════════════════════════════════════════════════════════════════════
-function UsersSection({ accounts, setAccounts, audit }) {
-  const staff = accounts.filter(a => a.role === "staff");
-  const [addModal, setAddModal] = useState(false);
-  const [newUser, setNewUser]   = useState({ id: "", name: "", branch: BRANCHES[0], password: "" });
-  const addStaff = () => {
-    if (!newUser.id || !newUser.name || !newUser.password) { alert("Fill all fields."); return; }
-    if (accounts.find(a => a.id === newUser.id)) { alert("User ID already exists."); return; }
-    const perms = {}; SECTIONS.forEach(s => { perms[s] = { view: false, add: false, edit: false }; });
-    setAccounts(p => [...p, { ...newUser, role: "staff", perms }]);
-    audit("CREATE_STAFF", { userId: newUser.id, name: newUser.name });
-    setAddModal(false); setNewUser({ id: "", name: "", branch: BRANCHES[0], password: "" });
-  };
-  const delStaff = id => { if (confirm("Delete staff account?")) { setAccounts(p => p.filter(a => a.id !== id)); audit("DELETE_STAFF", { userId: id }); } };
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
-        <div className="section-title">Manage Staff</div>
-        <button className="btn btn-dark btn-sm" onClick={() => setAddModal(true)}>+ Add Staff</button>
-      </div>
-      <div style={{ marginBottom: 14, fontSize: 13, color: "#9b8e82" }}>Use <strong>Dashboard Builder</strong> to control field visibility and section permissions per staff member.</div>
-      {staff.map(acc => (
-        <div key={acc.id} className="card" style={{ marginBottom: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name}</div>
-              <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>ID: <code style={CS}>{acc.id}</code> · {acc.branch} · Password: <code style={CS}>{acc.password}</code></div>
-            </div>
-            <button className="btn btn-danger btn-sm" onClick={() => delStaff(acc.id)}>Delete</button>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+        <div style={{ background: "#fff", padding: 20, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+          <h3>Staff RBAC User Node Provisioning Matrix</h3>
+          <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+            <input type="text" placeholder="Unique Access Identity ID Code (e.g. jpt_opt_2)" value={operator.id} onChange={e => setOperator({ ...operator, id: e.target.value })} style={INP} />
+            <input type="text" placeholder="Full Legal Display Name" value={operator.name} onChange={e => setOperator({ ...operator, name: e.target.value })} style={INP} />
+            <input type="text" placeholder="Access Authentication Encryption Passkey String" value={operator.password} onChange={e => setOperator({ ...operator, password: e.target.value })} style={INP} />
+            <select value={operator.branch} onChange={e => setOperator({ ...operator, branch: e.target.value })} style={INP}>
+              {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+            <select value={operator.department} onChange={e => setOperator({ ...operator, department: e.target.value })} style={INP}>
+              {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <button onClick={provisionStaffNode} style={{ background: "#16a34a", color: "#fff", padding: 10, border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer" }}>Authorize Operational Credentials Access Token</button>
           </div>
-          <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {SECTIONS.map(s => (
-              <div key={s} style={{ fontSize: 11, background: "#f0ede8", borderRadius: 20, padding: "2px 10px" }}>
-                {SECTION_LABELS[s]}: {["view", "add", "edit"].filter(a => acc.perms?.[s]?.[a]).join("/") || "none"}
+        </div>
+
+        <div style={{ background: "#fff", padding: 20, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+          <h3>Active Role-Based System User Trace Roster</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12, maxHeight: 300, overflowY: "auto" }}>
+            {accounts.map(a => (
+              <div key={a.id} style={{ display: "flex", justifyContent: "space-between", background: "#f9fafb", padding: 10, borderRadius: 6, fontSize: 13 }}>
+                <div>
+                  <strong>{a.name}</strong> <code style={{ fontSize: 11, background: "#e2e8f0", padding: "1px 4px" }}>{a.id}</code>
+                  <div style={{ color: "#4b5563", fontSize: 11, marginTop: 2 }}>Dept: {a.department} | Base: {a.branch}</div>
+                </div>
+                <span style={{ fontSize: 11, background: "#dcfce7", color: "#15803d", padding: "4px 8px", borderRadius: 12, alignSelf: "center", fontWeight: 700 }}>{a.role.toUpperCase()}</span>
               </div>
             ))}
           </div>
         </div>
-      ))}
-      {addModal && (
-        <Modal title="Add New Staff" onClose={() => setAddModal(false)} onSave={addStaff} saveLabel="Create Account">
-          <div className="form-grid">
-            <div><label>User ID (login)</label><input type="text" placeholder="staff_jpt2" value={newUser.id} onChange={e => setNewUser(f => ({ ...f, id: e.target.value }))} /></div>
-            <div><label>Display Name</label><input type="text" value={newUser.name} onChange={e => setNewUser(f => ({ ...f, name: e.target.value }))} /></div>
-            <div><label>Branch</label><select value={newUser.branch} onChange={e => setNewUser(f => ({ ...f, branch: e.target.value }))}>{BRANCHES.map(b => <option key={b}>{b}</option>)}</select></div>
-            <div><label>Password</label><input type="text" value={newUser.password} onChange={e => setNewUser(f => ({ ...f, password: e.target.value }))} /></div>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// SUPABASE SECTION  (Connect + SQL + Sync)
-// ════════════════════════════════════════════════════════════════════════
-function SupabaseSection({ sbCreds, sbStatus, onConnect, onSync, onPush }) {
-  const [url, setUrl]   = useState(sbCreds.url || "");
-  const [key, setKey]   = useState(sbCreds.key || "");
-  const [msg, setMsg]   = useState("");
-
-  const connect = async () => {
-    setMsg("Testing connection…");
-    const ok = await onConnect(url, key);
-    setMsg(ok ? "✅ Credentials saved! Push to DB to sync your data. (Note: live sync works best from your Vercel URL, not Claude.ai)" : "❌ Invalid URL or key format. URL must contain supabase.co and key must start with eyJ.");
-  };
-
-  const SQL = `-- Run this in Supabase → SQL Editor
-
-create table if not exists patients (
-  id text primary key, branch text, timestamp text,
-  date text, time text, name text, phone text, town text,
-  payment_method text, advance numeric, advance_payment_method text,
-  status text, created_by text, created_by_name text, created_at text
-);
-
-create table if not exists "patientBill" (
-  id text primary key, branch text, timestamp text, date text, time text,
-  mr_no text, name text, phone text, town text, gender text, age int,
-  complaint text, past_history text,
-  re_spher_ar text, re_cyl_ar text, re_axis_ar text,
-  le_spher_ar text, le_cyl_ar text, le_axis_ar text,
-  re_spher_sub text, re_cyl_sub text, re_axis_sub text,
-  le_spher_sub text, le_cyl_sub text, le_axis_sub text,
-  add_val text, eyelids text, conjunctiva text, cornea text,
-  anterior_chamber text, iris text, pupil text, lens text,
-  ocular_movements text, fundus text, advice text, optom text,
-  lens_type text, frame_no text, advance numeric, payment_method text,
-  delivery_status text, balance numeric, status text,
-  created_by text, created_by_name text, created_at text
-);
-
-create table if not exists stock (
-  id text primary key, branch text, sku text, name text,
-  category text, brand text, qty int, reorder int,
-  cost numeric, price numeric, location text,
-  lens_power text, lens_type text, box_no text,
-  created_by text, created_by_name text
-);
-
-create table if not exists invoices (
-  id text primary key, branch text, date text,
-  patient_name text, items jsonb, discount numeric,
-  status text, approval_status text,
-  created_by text, created_by_name text, created_at text
-);
-
-create table if not exists pending_queue (
-  id text primary key, type text, record jsonb,
-  submitted_by text, submitted_by_name text,
-  branch text, submitted_at text
-);
-
-create table if not exists accounts (
-  id text primary key, name text, role text,
-  branch text, password text, perms jsonb
-);
-
-create table if not exists audit_log (
-  id text primary key, action text, detail jsonb,
-  user_id text, user_name text, branch text, at text
-);
-
--- Enable Row Level Security (optional but recommended)
-alter table patients enable row level security;
-alter table stock enable row level security;
-alter table audit_log enable row level security;
-
--- Allow all operations via anon key (for now)
-create policy "allow all" on patients for all using (true);
-create policy "allow all" on stock for all using (true);
-create policy "allow all" on audit_log for all using (true);`;
-
-  const statusColor = { ok: "#16a34a", error: "#dc2626", testing: "#d97706", pushing: "#1d4ed8", syncing: "#7c3aed", idle: "#9b8e82" };
-
-  return (
-    <div>
-      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Cloud Sync — Supabase</div>
-      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 22 }}>Connect a free Supabase database to sync all data across devices and branches.</div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
-        <div className="card">
-          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 14 }}>Connection</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontSize: 13 }}>
-            <span style={{ width: 10, height: 10, borderRadius: "50%", background: statusColor[sbStatus] || "#9b8e82", display: "inline-block" }} />
-            Status: <strong>{sbStatus}</strong>
-          </div>
-          <div style={{ display: "grid", gap: 12 }}>
-            <div><label>Supabase Project URL</label><input type="text" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://xxxx.supabase.co" /></div>
-            <div><label>Anon / Public Key</label><input type="text" value={key} onChange={e => setKey(e.target.value)} placeholder="eyJhbGci…" /></div>
-          </div>
-          {msg && <div style={{ marginTop: 10, fontSize: 13, color: msg.startsWith("✅") ? "#16a34a" : msg.startsWith("❌") ? "#dc2626" : "#d97706" }}>{msg}</div>}
-          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-            <button className="btn btn-dark btn-sm" onClick={connect}>🔌 Connect & Test</button>
-            <button className="btn btn-outline btn-sm" onClick={onSync}>⬇ Pull from DB</button>
-            <button className="btn btn-outline btn-sm" onClick={onPush}>⬆ Push to DB</button>
-          </div>
-        </div>
-        <div className="card">
-          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Quick Steps</div>
-          {[
-            ["1", "Go to supabase.com → New Project", "#1d4ed8"],
-            ["2", "Copy Project URL + Anon Key from Settings → API", "#7c3aed"],
-            ["3", "Paste above → click Connect & Test", "#16a34a"],
-            ["4", "Run the SQL below in Supabase SQL Editor", "#d97706"],
-            ["5", "Click Push to DB to upload your local data", "#dc2626"],
-          ].map(([n, t, c]) => (
-            <div key={n} style={{ display: "flex", gap: 12, marginBottom: 10, alignItems: "flex-start" }}>
-              <div style={{ width: 24, height: 24, minWidth: 24, background: c, color: "#fff", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12 }}>{n}</div>
-              <div style={{ fontSize: 13 }}>{t}</div>
-            </div>
-          ))}
-        </div>
       </div>
 
-      <div className="card">
-        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Complete SQL Setup Script</div>
-        <div style={{ fontSize: 12, color: "#9b8e82", marginBottom: 10 }}>Copy and run this entire block in Supabase → SQL Editor → New Query</div>
-        <pre style={{ background: "#1a1714", color: "#f0ede8", padding: "16px 18px", borderRadius: 12, fontSize: 11, overflowX: "auto", lineHeight: 1.7 }}>{SQL}</pre>
-        <button className="btn btn-outline btn-sm" style={{ marginTop: 12 }} onClick={() => { navigator.clipboard.writeText(SQL); }}>📋 Copy SQL</button>
-      </div>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// LAUNCH GUIDE  (step-by-step how to publish this app)
-// ════════════════════════════════════════════════════════════════════════
-function LaunchGuide() {
-  const [step, setStep] = useState(0);
-
-  const STEPS = [
-    {
-      title: "Overview — What You Need",
-      icon: "📋",
-      content: (
-        <div>
-          <p style={{ marginBottom: 14 }}>To launch OptiManager you need 3 free tools:</p>
-          {[
-            ["💻", "GitHub", "Stores your app code — free", "https://github.com"],
-            ["🟢", "Vercel", "Hosts your app online, gives you a URL — free", "https://vercel.com"],
-            ["☁",  "Supabase", "Your cloud database — free (500MB)", "https://supabase.com"],
-          ].map(([icon, title, desc, url]) => (
-            <div key={title} style={{ display:"flex", gap:14, padding:"12px 0", borderBottom:"1px solid #f0ede8" }}>
-              <div style={{ fontSize:24 }}>{icon}</div>
-              <div>
-                <div style={{ fontWeight:700 }}>{title} — <a href={url} target="_blank" rel="noreferrer" style={{ color:"#1d4ed8" }}>{url}</a></div>
-                <div style={{ fontSize:13, color:"#6b5e52", marginTop:2 }}>{desc}</div>
+      <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+        <h3>Granular Clinical Field Visibility Schema Configuration Governance Grid</h3>
+        <p style={{ fontSize: 13, color: "#4b5563" }}>Configure explicit field visibility states across functional departments to enforce data segregation protocols.</p>
+        <div style={{ display: "grid", gap: 16, marginTop: 16 }}>
+          {Object.keys(DEFAULT_FIELD_VISIBILITY).map(sectionKey => (
+            <div key={sectionKey} style={{ background: "#f8f9fa", padding: 14, borderRadius: 8 }}>
+              <h5 style={{ margin: "0 0 8px", textTransform: "uppercase", color: "#1e3a8a", fontSize: 12 }}>Workflow Interface Array Module: {sectionKey}</h5>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {DEFAULT_FIELD_VISIBILITY[sectionKey].map(itemField => {
+                  const isActive = (fieldVis[sectionKey] || []).includes(itemField);
+                  return (
+                    <button key={itemField} onClick={() => toggleVisibilitySchemaElement(sectionKey, itemField)} style={{ padding: "4px 10px", borderRadius: 4, border: "1px solid", borderColor: isActive ? "#1e40af" : "#cbd5e1", background: isActive ? "#eff6ff" : "#fff", color: isActive ? "#1e40af" : "#6b7280", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+                      {itemField} {isActive ? "[VISIBLE]" : "[HIDDEN BY OWNER]"}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ))}
         </div>
-      )
-    },
-    {
-      title: "Step 1 — Set Up Supabase",
-      icon: "☁",
-      content: (
-        <div style={{ display:"grid", gap:14 }}>
-          {[
-            ["Go to supabase.com", "Click Start your project → sign in with GitHub (free). No credit card needed."],
-            ["Create a new project", "Click New Project. Name: optimanager. Pick region: ap-south-1 (Mumbai). Set a DB password. Click Create."],
-            ["Get your credentials", "After 60 seconds → Project Settings → API. Copy the Project URL and anon/public key."],
-            ["Run SQL tables", "Go to SQL Editor → New Query → paste the supabase_setup_v2.sql file → click Run. You will see: Success."],
-            ["Connect in app", "Open OptiManager → Cloud Sync → paste URL and key → Connect and Test → Push to DB."],
-          ].map(([t, d], i) => (
-            <div key={i} style={{ display:"flex", gap:14 }}>
-              <div style={{ width:28, height:28, minWidth:28, background:"#1a1714", color:"#f0ede8", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:13 }}>{i+1}</div>
-              <div><div style={{ fontWeight:700, fontSize:14 }}>{t}</div><div style={{ fontSize:13, color:"#6b5e52", marginTop:3, lineHeight:1.7 }}>{d}</div></div>
-            </div>
-          ))}
-        </div>
-      )
-    },
-    {
-      title: "Step 2 — Save Code to GitHub",
-      icon: "💻",
-      content: (
-        <div style={{ display:"grid", gap:14 }}>
-          <p style={{ fontSize:13, color:"#6b5e52" }}>GitHub stores your code and connects to Vercel for deployment.</p>
-          {[
-            ["Create a GitHub account", "Go to github.com → Sign up (free). Verify your email."],
-            ["Create a new repository", "Click + top right → New repository. Name: optimanager. Set to Public. Tick Add a README. Click Create repository."],
-            ["Upload index.html", "Click Add file → Create new file. Name: index.html. Paste the HTML boilerplate (html tag, head with title OptiManager, body with div id=root and a script tag pointing to /src/main.jsx). Commit."],
-            ["Upload package.json", "Click Add file → Create new file. Name: package.json. Paste the JSON with react and react + react + reactDOM as dependencies and vite as devDependency. Commit."],
-            ["Upload vite.config.js", "Click Add file → Create new file. Name: vite.config.js. Paste: import defineConfig from vite and plugin-react, export default defineConfig with plugins react(). Commit."],
-            ["Upload src/main.jsx", "Click Add file → Create new file. Type src/main.jsx as the name (GitHub creates the folder). Paste the React entry point that renders App into the root div. Commit."],
-            ["Upload src/App.jsx", "Click Add file → Upload files. Upload the optical-shop-manager.jsx file you downloaded from Claude. After upload, rename it to App.jsx. Commit."],
-          ].map(([t, d], i) => (
-            <div key={i} style={{ display:"flex", gap:14 }}>
-              <div style={{ width:28, height:28, minWidth:28, background:"#1d4ed8", color:"#fff", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:13 }}>{i+1}</div>
-              <div><div style={{ fontWeight:700, fontSize:14 }}>{t}</div><div style={{ fontSize:13, color:"#6b5e52", marginTop:3, lineHeight:1.7 }}>{d}</div></div>
-            </div>
-          ))}
-        </div>
-      )
-    },
-    {
-      title: "Step 3 — Deploy on Vercel",
-      icon: "🚀",
-      content: (
-        <div style={{ display:"grid", gap:14 }}>
-          <p style={{ fontSize:13, color:"#6b5e52" }}>Vercel gives you a free live URL like optimanager.vercel.app in about 2 minutes.</p>
-          {[
-            ["Sign up at vercel.com", "Click Start Deploying → Continue with GitHub. Uses the same GitHub account."],
-            ["Import your repository", "Click Add New → Project. Find your optimanager repository → click Import."],
-            ["Configure build settings", "Framework Preset: Vite. Build Command: vite build. Output Directory: dist. Leave everything else as default."],
-            ["Click Deploy", "Vercel builds and deploys automatically. Wait about 2 minutes."],
-            ["Get your live URL", "You will see a Congratulations screen with a URL like optimanager-xyz.vercel.app. Click Visit — your app is live!"],
-            ["Share with staff", "Copy the URL and send it on WhatsApp. Staff opens it in Chrome on any phone and logs in with their ID and password."],
-            ["Future updates", "When you get a new JSX file from Claude, go to GitHub, open src/App.jsx, click the pencil icon, paste the new code, commit. Vercel auto-rebuilds in 1 to 2 minutes."],
-          ].map(([t, d], i) => (
-            <div key={i} style={{ display:"flex", gap:14 }}>
-              <div style={{ width:28, height:28, minWidth:28, background:"#16a34a", color:"#fff", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:13 }}>{i+1}</div>
-              <div><div style={{ fontWeight:700, fontSize:14 }}>{t}</div><div style={{ fontSize:13, color:"#6b5e52", marginTop:3, lineHeight:1.7 }}>{d}</div></div>
-            </div>
-          ))}
-        </div>
-      )
-    },
-    {
-      title: "Step 4 — Daily Use & Staff Access",
-      icon: "👥",
-      content: (
-        <div style={{ display:"grid", gap:14 }}>
-          {[
-            ["Share the URL with staff", "Send the Vercel URL to your team on WhatsApp. They open it in Chrome on phone or computer."],
-            ["Each person uses their login", "Go to Manage Staff to create IDs and passwords. Share privately."],
-            ["Staff submit, you approve", "Staff additions go to your Approval Queue. Login as Owner and Accept or Reject each one."],
-            ["Dashboard Builder", "Toggle which fields appear per section and which actions each staff member can do."],
-            ["Audit Log", "Every login, submission, approval, and deletion is recorded with name and timestamp."],
-            ["Cloud Sync", "Data saves locally AND in Supabase. Use Pull from DB to sync latest from the cloud."],
-            ["Backup anytime", "Every section has a CSV export button to download your data."],
-          ].map(([t, d], i) => (
-            <div key={i} style={{ display:"flex", gap:14 }}>
-              <div style={{ width:28, height:28, minWidth:28, background:"#7c3aed", color:"#fff", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:13 }}>{i+1}</div>
-              <div><div style={{ fontWeight:700, fontSize:14 }}>{t}</div><div style={{ fontSize:13, color:"#6b5e52", marginTop:3, lineHeight:1.7 }}>{d}</div></div>
-            </div>
-          ))}
-          <div style={{ marginTop:8, background:"#dcfce7", borderRadius:12, padding:"14px 18px", border:"1.5px solid #bbf7d0" }}>
-            <div style={{ fontWeight:700, color:"#16a34a", marginBottom:6 }}>Total Cost: Rs. 0 per month</div>
-            <div style={{ fontSize:13, color:"#15803d", lineHeight:1.8 }}>GitHub Free · Vercel Free · Supabase Free (500MB, 50k API calls/day). All three are completely free for a small optical shop with 2 branches.</div>
-          </div>
-        </div>
-      )
-    },
-  ];
-
-    return (
-    <div>
-      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>🚀 Launch Guide</div>
-      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 22 }}>Step-by-step: from this app to a live URL your staff can open on any phone.</div>
-
-      {/* Step tabs */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 22, flexWrap: "wrap" }}>
-        {STEPS.map((s, i) => (
-          <button key={i} className={`btn btn-sm ${step === i ? "btn-dark" : "btn-outline"}`} onClick={() => setStep(i)}>
-            {s.icon} {i === 0 ? "Overview" : `Step ${i}`}
-          </button>
-        ))}
-      </div>
-
-      <div className="card">
-        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, fontWeight: 700, marginBottom: 18 }}>{STEPS[step].title}</div>
-        {STEPS[step].content}
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 24 }}>
-          <button className="btn btn-outline btn-sm" onClick={() => setStep(s => Math.max(0, s - 1))} disabled={step === 0}>← Previous</button>
-          <button className="btn btn-dark btn-sm" onClick={() => setStep(s => Math.min(STEPS.length - 1, s + 1))} disabled={step === STEPS.length - 1}>Next →</button>
-        </div>
       </div>
     </div>
   );
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// SHARED COMPONENTS
+// REUSABLE INTERFACES CSS STYLESHEETS CONFIGURATION
 // ════════════════════════════════════════════════════════════════════════
-function SectionHeader({ title, onAdd, onExport, onSync, syncing, msg }) {
-  return (
-    <div style={{ marginBottom: 18 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div className="section-title">{title}</div>
-        <div style={{ display: "flex", gap: 10 }}>
-          {onSync && (
-            <button className="btn btn-outline btn-sm" onClick={onSync} disabled={syncing} title="Pull latest data from cloud">
-              {syncing ? "⟳ Syncing…" : "⟳ Sync"}
-            </button>
-          )}
-          {onExport && <button className="btn btn-outline btn-sm" onClick={onExport}>⬇ CSV</button>}
-          {onAdd    && <button className="btn btn-dark btn-sm"    onClick={onAdd}>+ Add</button>}
-        </div>
-      </div>
-      {msg && <div style={{ marginTop: 8, fontSize: 13, padding: "8px 14px", borderRadius: 8, background: msg.includes("approval") ? "#fef9c3" : "#dcfce7", color: msg.includes("approval") ? "#a16207" : "#16a34a" }}>{msg}</div>}
-    </div>
-  );
-}
+const LBL = { display: "block", fontSize: "11px", fontWeight: "700", color: "#4b5563", textTransform: "uppercase", marginBottom: "4px", letterSpacing: "0.03em" };
+const INP = { width: "100%", padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: "6px", background: "#fafafa", fontSize: "13px", outline: "none", boxSizing: "border-box" };
+const SECT_BOX = { background: "#fafafa", border: "1px solid #e5e7eb", borderRadius: "10px", padding: "14px" };
+const SECT_TTL = { margin: "0 0 12px 0", fontSize: "12px", textTransform: "uppercase", color: "#4b5563", borderBottom: "1px solid #e5e7eb", paddingBottom: "4px", letterSpacing: "0.05em" };
 
-function Modal({ title, children, onClose, onSave, saveLabel = "Save", wide, xl, width }) {
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ width: xl ? "min(920px,96vw)" : wide ? "min(700px,96vw)" : width ? width : "min(560px,96vw)" }}>
-        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, fontWeight: 700, marginBottom: 18 }}>{title}</div>
-        {children}
-        <div style={{ display: "flex", gap: 10, marginTop: 22, justifyContent: "flex-end" }}>
-          <button className="btn btn-outline" onClick={onClose}>Cancel</button>
-          <button className="btn btn-dark" onClick={onSave}>{saveLabel}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// STYLES
-// ════════════════════════════════════════════════════════════════════════
-const CS = { background: "#f0ede8", padding: "2px 6px", borderRadius: 4, fontFamily: "monospace", fontSize: 12 };
-
-const GCSS = `
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Playfair+Display:wght@500;700&display=swap');
-*{box-sizing:border-box;margin:0;padding:0}
-::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#c8bfb0;border-radius:3px}
-input,select,textarea,button{font-family:inherit}button{cursor:pointer}
-.nav-item{display:flex;align-items:center;gap:9px;padding:8px 13px;border-radius:9px;font-size:13px;font-weight:500;color:#6b5e52;border:none;background:none;width:100%;text-align:left;transition:all .18s}
-.nav-item:hover{background:#e8e2db;color:#1a1714}.nav-item.active{background:#1a1714;color:#f0ede8}
-.badge{background:#e55e3a;color:#fff;border-radius:20px;font-size:11px;padding:1px 7px;font-weight:600}
-.card{background:#fff;border-radius:16px;padding:22px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
-.btn{padding:9px 18px;border-radius:9px;font-size:13px;font-weight:600;border:none;transition:all .15s}
-.btn-dark{background:#1a1714;color:#f0ede8}.btn-dark:hover{background:#2e2820}.btn-dark:disabled{opacity:.5;cursor:not-allowed}
-.btn-outline{background:transparent;border:1.5px solid #c8bfb0;color:#1a1714}.btn-outline:hover{background:#f0ede8}.btn-outline:disabled{opacity:.5}
-.btn-danger{background:#fee2e2;color:#dc2626}.btn-danger:hover{background:#fecaca}
-.btn-sm{padding:6px 12px;font-size:12px;border-radius:7px}
-input[type=text],input[type=number],input[type=date],input[type=time],input[type=email],input[type=tel],input[type=password],select,textarea{width:100%;padding:8px 11px;border:1.5px solid #e2ddd8;border-radius:8px;font-size:13px;background:#faf9f7;transition:border .15s;outline:none}
-input:focus,select:focus,textarea:focus{border-color:#1a1714;background:#fff}
-input[readonly]{background:#f0ede8;color:#9b8e82;border-color:#e2ddd8}
-label{font-size:11px;font-weight:700;color:#6b5e52;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px}
-table{width:100%;border-collapse:collapse;font-size:12.5px}
-th{text-align:left;padding:9px 12px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#9b8e82;border-bottom:1.5px solid #e8e2db;white-space:nowrap}
-td{padding:10px 12px;border-bottom:1px solid #f0ede8;vertical-align:middle}
-tr:last-child td{border-bottom:none}tr:hover td{background:#faf9f7}
-.tag{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600}
-.tag-green{background:#dcfce7;color:#16a34a}.tag-yellow{background:#fef9c3;color:#a16207}
-.tag-red{background:#fee2e2;color:#dc2626}.tag-blue{background:#dbeafe;color:#1d4ed8}
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
-.modal{background:#fff;border-radius:20px;padding:28px;max-height:93vh;overflow-y:auto;box-shadow:0 24px 70px rgba(0,0,0,.25)}
-.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.form-grid .full{grid-column:1/-1}
-.stat-card{background:#fff;border-radius:14px;padding:20px 22px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
-.stat-num{font-family:'Playfair Display',serif;font-size:34px;font-weight:700;line-height:1}
-.section-title{font-family:'Playfair Display',serif;font-size:21px;font-weight:700;margin-bottom:18px}
-p{line-height:1.7}
-@media(max-width:768px){.form-grid{grid-template-columns:1fr}}
+const SHELL_CSS = `
+  .sidebar-btn {
+    display: flex; align-items: center; width: 100%; padding: 10px 12px; background: transparent;
+    border: none; border-radius: 6px; color: rgba(255,255,255,0.8); text-align: left;
+    font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s;
+  }
+  .sidebar-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+  .sidebar-btn.active { background: rgba(255,255,255,0.2); color: #fff; font-weight: 700; }
+  .logout-btn {
+    width: 100%; padding: 10px; border-radius: 6px; background: #991b1b; color: #fff;
+    border: none; font-weight: 600; font-size: 12px; cursor: pointer; transition: background 0.2s;
+  }
+  .logout-btn:hover { background: #7f1d1d; }
+  .analytics-card {
+    background: #fff; padding: 16px; border-radius: 12px; border-left: 4px solid #2563eb;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .analytics-card .title { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; }
+  .analytics-card .value { font-size: 22px; font-weight: 700; color: #111827; margin-top: 4px; }
 `;
