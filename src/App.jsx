@@ -565,4 +565,210 @@ function Dashboard({ session, data, setView, auditLog }) {
 
   const pts   = flt(data.patients).filter(x => x.status === "approved");
   const bills = flt(data.patientBill).filter(x => x.status === "approved");
-  const invs  = flt(data.invoices).filter
+  const invs  = flt(data.invoices).filter(x => x.approvalStatus === "approved" && x.status === "Paid");
+  const rev   = invs.reduce((s, i) => s + safeArray(i.items).reduce((a, x) => a + x.qty * x.price, 0) - (i.discount || 0), 0);
+
+  const stats = [
+    { label: "Patients",          value: pts.length,    color: "#1a1714" },
+    { label: "Patient Bills",     value: bills.length,  color: "#1d4ed8" },
+    { label: "Revenue (Paid)",    value: currency(rev), color: "#16a34a" },
+  ];
+
+  const recentAudit = safeArray(auditLog).slice(0, 8);
+
+  return (
+    <div>
+      <div style={{ marginBottom: 22 }}>
+        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 26, fontWeight: 700 }}>Welcome, {session.name} 👋</div>
+        <div style={{ fontSize: 13, color: "#9b8e82", marginTop: 3 }}>{isOwner ? "All Branches" : myBranch} · {ts()}</div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 22 }}>
+        {stats.map(s => (
+          <div key={s.label} className="stat-card" onClick={s.action} style={{ cursor: s.action ? "pointer" : "default" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#9b8e82", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 6 }}>{s.label}</div>
+            <div className="stat-num" style={{ color: s.color }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: isOwner ? "1fr 1fr" : "1fr", gap: 18 }}>
+        {isOwner && (
+          <div className="card">
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Branch Overview</div>
+            {BRANCHES.map(br => {
+              const bPts   = safeArray(data.patients).filter(x => x.branch === br && x.status === "approved");
+              const bBills = safeArray(data.patientBill).filter(x => x.branch === br && x.status === "approved");
+              return (
+                <div key={br} style={{ padding: "10px 0", borderBottom: "1px solid #f0ede8" }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{br}</div>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    {[["Patients", bPts.length, "#1a1714"], ["Bills", bBills.length, "#1d4ed8"]].map(([l, v, c]) => (
+                      <div key={l} style={{ flex: 1, background: "#f0ede8", borderRadius: 8, padding: "8px 10px" }}>
+                        <div style={{ fontSize: 10, color: "#9b8e82", fontWeight: 600 }}>{l}</div>
+                        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 700, color: c }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {isOwner && (
+          <div className="card">
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Recent Activity</div>
+            {recentAudit.length === 0 && <div style={{ fontSize: 13, color: "#9b8e82" }}>No activity yet.</div>}
+            {recentAudit.map(a => (
+              <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f0ede8", fontSize: 12 }}>
+                <div>
+                  <span style={{ fontWeight: 700, marginRight: 6, color: { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", ADD: "#16a34a", DELETE: "#dc2626", EDIT: "#d97706" }[a.action] || "#1a1714" }}>{a.action}</span>
+                  <span style={{ color: "#6b5e52" }}>{a.userName}</span>
+                  {a.branch !== "All" && <span style={{ color: "#b5a99e", marginLeft: 5 }}>· {a.branch}</span>}
+                </div>
+                <div style={{ color: "#b5a99e", fontSize: 11 }}>{a.at}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// AUDIT LOG
+// ════════════════════════════════════════════════════════════════════════
+function AuditLogSection({ auditLog, accounts }) {
+  const [filter, setFilter] = useState("ALL");
+  const [userF,  setUserF]  = useState("ALL");
+  const actions = ["ALL", "LOGIN", "LOGOUT", "ADD", "EDIT", "DELETE"];
+  const filtered = safeArray(auditLog)
+    .filter(a => filter === "ALL" || a.action === filter)
+    .filter(a => userF  === "ALL" || a.userId === userF);
+
+  const actionColor = { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", ADD: "#16a34a", EDIT: "#d97706", DELETE: "#dc2626" };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div className="section-title">Audit Log</div>
+        <button className="btn btn-outline btn-sm" onClick={() => exportCSV(filtered.map(({ id, ...r }) => r), "audit_log.csv")}>⬇ CSV</button>
+      </div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {actions.map(a => <button key={a} className={`btn btn-sm ${filter === a ? "btn-dark" : "btn-outline"}`} onClick={() => setFilter(a)}>{a}</button>)}
+        </div>
+        <select value={userF} onChange={e => setUserF(e.target.value)} style={{ maxWidth: 200 }}>
+          <option value="ALL">All Users</option>
+          {safeArray(accounts).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+      </div>
+      <div className="card" style={{ overflowX: "auto" }}>
+        <table>
+          <thead><tr><th>Time</th><th>Action</th><th>User</th><th>Branch</th><th>Detail</th></tr></thead>
+          <tbody>
+            {filtered.length === 0 && <tr><td colSpan={5} style={{ color: "#9b8e82", textAlign: "center", padding: 24 }}>No entries.</td></tr>}
+            {filtered.map(a => (
+              <tr key={a.id}>
+                <td style={{ fontSize: 11, whiteSpace: "nowrap", color: "#9b8e82" }}>{a.at}</td>
+                <td><span style={{ background: `${actionColor[a.action] || "#9b8e82"}20`, color: actionColor[a.action] || "#9b8e82", borderRadius: 20, fontSize: 11, padding: "2px 9px", fontWeight: 700 }}>{a.action}</span></td>
+                <td style={{ fontWeight: 600 }}>{a.userName}</td>
+                <td style={{ fontSize: 12, color: "#9b8e82" }}>{a.branch}</td>
+                <td style={{ fontSize: 12, color: "#6b5e52" }}>{Object.entries(a.detail || {}).map(([k, v]) => `${k}: ${v}`).join(" · ") || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// DASHBOARD BUILDER
+// ════════════════════════════════════════════════════════════════════════
+function DashboardBuilder({ fieldVis, setFieldVis, accounts, setAccounts }) {
+  const [tab, setTab] = useState("fields");
+  const [section, setSection] = useState("patients");
+
+  const ALL_FIELDS = {
+    patients:    ["timestamp","date","time","mrNo","patientId","name","phone","address","ref","paymentAmount","paymentMode","paymentRefNo","branch","remarks","visitType"],
+    patientBill: ["timestamp","date","time","mrNo","patientId","name","phone","address","gender","age","complaint","pastHistory"],
+    optometrist: ["timestamp","mrNo","patientId","name","complaint","pastHistory"],
+    opticals:    ["timestamp","mrNo","patientId","name","phone","address","totalPrice","advance","advancePaymentMethod","transactionId","balance","optomName"],
+    inventory:   ["sku","name","category","brand","qty","reorder","lensPower","lensType","boxNo","cost","price","location"],
+    invoices:    ["id","date","patientName","items","discount","status"],
+  };
+
+  const toggleField = (sec, field) => {
+    setFieldVis(fv => {
+      const cur = fv[sec] || [];
+      return { ...fv, [sec]: cur.includes(field) ? cur.filter(f => f !== field) : [...cur, field] };
+    });
+  };
+
+  const staff = safeArray(accounts).filter(a => a.role === "staff");
+  const togglePerm = (id, sec, action) => {
+    setAccounts(prev => safeArray(prev).map(a => {
+      if (a.id !== id) return a;
+      return { ...a, perms: { ...a.perms, [sec]: { ...a.perms[sec], [action]: !a.perms[sec]?.[action] } } };
+    }));
+  };
+
+  return (
+    <div>
+      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Dashboard Builder</div>
+      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 20 }}>Control which fields and sections each staff member can access.</div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 22 }}>
+        {[{ id: "fields", label: "🔲 Field Visibility" }, { id: "perms", label: "🔐 Staff Permissions" }].map(t => (
+          <button key={t.id} className={`btn btn-sm ${tab === t.id ? "btn-dark" : "btn-outline"}`} onClick={() => setTab(t.id)}>{t.label}</button>
+        ))}
+      </div>
+
+      {tab === "fields" && (
+        <div className="card">
+          <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+            {Object.keys(ALL_FIELDS).map(s => <button key={s} className={`btn btn-sm ${section === s ? "btn-dark" : "btn-outline"}`} onClick={() => setSection(s)}>{SECTION_LABELS[s]}</button>)}
+          </div>
+          <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 14 }}>Toggle which fields are <strong>visible in forms and tables</strong> for the <strong>{SECTION_LABELS[section]}</strong> section. Disabled fields are hidden from staff.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px,1fr))", gap: 10 }}>
+            {(ALL_FIELDS[section] || []).map(field => {
+              const on = (fieldVis[section] || []).includes(field);
+              return (
+                <div key={field} onClick={() => toggleField(section, field)}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${on ? "#1a1714" : "#e2ddd8"}`, background: on ? "#1a1714" : "#fff", cursor: "pointer", transition: "all .15s" }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: on ? "#f0ede8" : "#1a1714" }}>{field}</span>
+                  <span style={{ fontSize: 18 }}>{on ? "✓" : "○"}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab === "perms" && (
+        <div>
+          {staff.length === 0 && <div className="card" style={{ color: "#9b8e82", textAlign: "center", padding: 32 }}>No staff accounts yet. Add staff in Manage Staff.</div>}
+          {staff.map(acc => (
+            <div key={acc.id} className="card" style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name} <span style={{ fontSize: 12, fontWeight: 400, color: "#6b5e52", background: "#f0ede8", padding: "2px 8px", borderRadius: 12, marginLeft: 6 }}>{acc.designation}</span></div>
+                  <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 4 }}>{acc.id} · {acc.branch}</div>
+                </div>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table>
+                  <thead><tr><th>Section</th><th style={{ textAlign: "center" }}>👁 View</th><th style={{ textAlign: "center" }}>➕ Add</th><th style={{ textAlign: "center" }}>✏️ Edit</th></tr></thead>
+                  <tbody>
+                    {SECTIONS.map(sec => (
+                      <tr key={sec}>
+                        <td style={{ fontWeight: 600 }}>{SECTION_LABELS[sec]}</td>
+                        {["view", "add", "edit"].map(action => (
+                          <td key={action} style={{ textAlign: "center" }}>
+                            <button onClick={() => togglePerm(acc.id, sec, action)}
+                              style={{ width: 36, height: 28, borderRadius: 6, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13, background: acc.perms?.[sec]?.[action] ? "#dcfce7" : "#fee2e2", color: acc.perms?.[sec]?.[action] ? "#16a34a" : "#dc2626" }}>
+                              {acc.perms?.[sec]?.[action] ? "✓" : "✗"}
+                            </button>
+                          </td>
+                        ))}
