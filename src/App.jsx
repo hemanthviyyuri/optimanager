@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 
-const APP_VER  = "4.8";
+const APP_VER  = "4.9";
 const BRANCHES = ["JPT Branch", "PRP Branch"];
 const SECTIONS = ["patients","patientBill","optometrist","opticals","inventory","invoices","alerts"];
 const SECTION_LABELS = { patients:"OP Registration", patientBill:"K Sheet Entry", optometrist:"Optometrist", opticals:"Opticals", inventory:"Inventory", invoices:"Sales & Invoices", alerts:"Low Stock Alerts" };
@@ -1102,7 +1102,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
       {modal && (
         <Modal title="Opticals Entry" onClose={()=>setModal(false)} onSave={submit} saveLabel="Save Entry" wide>
           <div style={{ background:"#f0ede8", borderRadius:10, padding:"12px 14px", marginBottom:14 }}><label style={{ fontWeight:700 }}>🔗 Link to Patient</label><div style={{ display:"flex", gap:8, marginTop:6 }}><input type="text" placeholder="Enter MR-001 or PT-0001 or phone…" value={form._lookup||""} onChange={e=>setForm(f=>({...f,_lookup:e.target.value}))} style={{ flex:1 }} /><button className="btn btn-dark btn-sm" onClick={()=>lookupPatient(form._lookup||"")}>Look Up & Fill</button></div>{mrLookup && <div style={{ fontSize:12,marginTop:6,color:mrLookup.startsWith("✓")?"#16a34a":"#dc2626" }}>{mrLookup}</div>}</div>
-          {rxPreview && (<div style={{ background:"#e0f2fe",borderRadius:10,padding:"12px 16px",marginBottom:14,fontSize:13 }}><div style={{ fontWeight:700,marginBottom:8,color:"#0369a1" }}>📋 Prescription from K Sheet</div><div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, fontFamily:"monospace" }}><div><span style={{ color:"#9b8e82",fontSize:11 }}>RE</span><br/>{rxPreview.RE}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>LE</span><br/>{rxPreview.LE}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>ADD</span><br/>{rxPreview.ADD}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>Lens Type</span><br/>{rxPreview.lensType}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>Frame No</span><br/>{rxPreview.frameNo}</div></div></div>)}
+          {rxPreview && (<div style={{ background:"#e0f2fe",borderRadius:10,padding:"12px 16px",marginBottom:14,fontSize:13 }}><div style={{ fontWeight:700,marginBottom:8,color:"#0369a1" }}>📋 Prescription from K Sheet</div><div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, fontFamily:"monospace" }}><div><span style={{ color:"#9b8e82",fontSize:11 }}>RE</span><br/>{rxPreview.RE}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>LE</span><br/>{rxPreview.LE}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>ADD</span><br/>{rxPreview.ADD}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>Lens Type</span><br/>{rxPreview.frameNo}</div></div></div>)}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
             <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div><div><label>Patient ID</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div><div></div>
             <div style={{ gridColumn:"span 2" }}><label>Name</label><input type="text" value={form.name} onChange={F("name")} /></div><div><label>Phone</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} /></div>
@@ -1365,40 +1365,58 @@ function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
 
 function UsersSection({ accounts, setAccounts, audit }) {
   const staff = safeArray(accounts).filter(a => a.role === "staff");
-  const [addModal, setAddModal] = useState(false);
-  const [newUser, setNewUser]   = useState({ id: "", name: "", designation: DESIGNATIONS[0], branch: BRANCHES[0], password: "" });
+  const [modal, setModal] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [form, setForm] = useState({ id: "", name: "", designation: DESIGNATIONS[0], branch: BRANCHES[0], password: "" });
   
-  const addStaff = () => {
-    if (!newUser.id || !newUser.name || !newUser.password) { alert("Fill all fields."); return; }
-    if (safeArray(accounts).find(a => a.id === newUser.id)) { alert("User ID already exists."); return; }
-    const perms = {}; SECTIONS.forEach(s => { perms[s] = { view: false, add: false, edit: false }; });
-    setAccounts(p => [...safeArray(p), { ...newUser, role: "staff", perms }]);
-    audit("ADD", { userId: newUser.id, name: newUser.name });
-    setAddModal(false); setNewUser({ id: "", name: "", designation: DESIGNATIONS[0], branch: BRANCHES[0], password: "" });
+  const openAdd = () => { setForm({ id: "", name: "", designation: DESIGNATIONS[0], branch: BRANCHES[0], password: "" }); setEditMode(false); setModal(true); };
+  const openEdit = (acc) => { setForm({ ...acc }); setEditMode(true); setModal(true); };
+
+  const saveStaff = () => {
+    if (!form.id || !form.name || !form.password) { alert("Fill all fields."); return; }
+    if (editMode) {
+      setAccounts(p => safeArray(p).map(a => a.id === form.id ? { ...a, ...form } : a));
+      audit("EDIT_STAFF", { userId: form.id, name: form.name });
+    } else {
+      if (safeArray(accounts).find(a => a.id === form.id)) { alert("User ID already exists."); return; }
+      const perms = {}; SECTIONS.forEach(s => { perms[s] = { view: false, add: false, edit: false }; });
+      setAccounts(p => [...safeArray(p), { ...form, role: "staff", perms }]);
+      audit("CREATE_STAFF", { userId: form.id, name: form.name });
+    }
+    setModal(false);
   };
   
-  const delStaff = id => { if (confirm("Delete staff?")) { setAccounts(p => safeArray(p).filter(a => a.id !== id)); audit("DELETE", { userId: id }); } };
+  const delStaff = id => { if (confirm("Delete staff?")) { setAccounts(p => safeArray(p).filter(a => a.id !== id)); audit("DELETE_STAFF", { userId: id }); } };
   
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
-        <div className="section-title">Manage Staff</div><button className="btn btn-dark btn-sm" onClick={() => setAddModal(true)}>+ Add Staff</button>
+        <div className="section-title">Manage Staff</div><button className="btn btn-dark btn-sm" onClick={openAdd}>+ Add Staff</button>
       </div>
+      <div style={{ marginBottom: 14, fontSize: 13, color: "#9b8e82" }}>Use <strong>Dashboard Builder</strong> to control field visibility and section permissions per staff member.</div>
       {staff.map(acc => (
         <div key={acc.id} className="card" style={{ marginBottom: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div><div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name} <span style={{ fontSize: 12, fontWeight: 400, color: "#6b5e52", background: "#f0ede8", padding: "2px 8px", borderRadius: 12, marginLeft: 6 }}>{acc.designation}</span></div><div style={{ fontSize: 12, color: "#9b8e82", marginTop: 4 }}>ID: <code style={CS}>{acc.id}</code> · {acc.branch} · Password: <code style={CS}>{acc.password}</code></div></div>
-            <button className="btn btn-danger btn-sm" onClick={() => delStaff(acc.id)}>Delete</button>
+            <div style={{ display: "flex", gap: 8 }}><button className="btn btn-outline btn-sm" onClick={() => openEdit(acc)}>Edit</button><button className="btn btn-danger btn-sm" onClick={() => delStaff(acc.id)}>Delete</button></div>
+          </div>
+          <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {SECTIONS.map(s => (
+              <div key={s} style={{ fontSize: 11, background: "#f0ede8", borderRadius: 20, padding: "2px 10px" }}>
+                {SECTION_LABELS[s]}: {["view", "add", "edit"].filter(a => acc.perms?.[s]?.[a]).join("/") || "none"}
+              </div>
+            ))}
           </div>
         </div>
       ))}
-      {addModal && (
-        <Modal title="Add New Staff" onClose={() => setAddModal(false)} onSave={addStaff} saveLabel="Create Account">
+      {modal && (
+        <Modal title={editMode ? "Edit Staff" : "Add New Staff"} onClose={() => setModal(false)} onSave={saveStaff} saveLabel={editMode ? "Update Account" : "Create Account"}>
           <div className="form-grid">
-            <div><label>User ID</label><input type="text" value={newUser.id} onChange={e => setNewUser(f => ({ ...f, id: e.target.value }))} /></div><div><label>Name</label><input type="text" value={newUser.name} onChange={e => setNewUser(f => ({ ...f, name: e.target.value }))} /></div>
-            <div><label>Designation</label><select value={newUser.designation} onChange={e => setNewUser(f => ({ ...f, designation: e.target.value }))}>{DESIGNATIONS.map(d => <option key={d}>{d}</option>)}</select></div>
-            <div><label>Branch</label><select value={newUser.branch} onChange={e => setNewUser(f => ({ ...f, branch: e.target.value }))}>{BRANCHES.map(b => <option key={b}>{b}</option>)}</select></div>
-            <div><label>Password</label><input type="text" value={newUser.password} onChange={e => setNewUser(f => ({ ...f, password: e.target.value }))} /></div>
+            <div><label>User ID (login)</label><input type="text" value={form.id} onChange={e => setForm(f => ({ ...f, id: e.target.value }))} readOnly={editMode} style={editMode ? { background: "#f0ede8", color: "#9b8e82" } : {}} /></div>
+            <div><label>Name</label><input type="text" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+            <div><label>Designation</label><select value={form.designation} onChange={e => setForm(f => ({ ...f, designation: e.target.value }))}>{DESIGNATIONS.map(d => <option key={d}>{d}</option>)}</select></div>
+            <div><label>Branch</label><select value={form.branch} onChange={e => setForm(f => ({ ...f, branch: e.target.value }))}>{BRANCHES.map(b => <option key={b}>{b}</option>)}</select></div>
+            <div><label>Password</label><input type="text" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} /></div>
           </div>
         </Modal>
       )}
@@ -1450,4 +1468,4 @@ function Modal({ title, children, onClose, onSave, saveLabel = "Save", wide, xl,
   );
 }
 
-// 
+//
