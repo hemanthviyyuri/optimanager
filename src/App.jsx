@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 
+// ════════════════════════════════════════════════════════════════════════
+// v4.9 — Ophthalmology HMS | Fixed Permissions Bug · Staff Editing
+// ════════════════════════════════════════════════════════════════════════
 const APP_VER  = "4.9";
 const BRANCHES = ["JPT Branch", "PRP Branch"];
 const SECTIONS = ["patients","patientBill","optometrist","opticals","inventory","invoices","alerts"];
@@ -272,9 +275,16 @@ export default function App() {
     });
   }, []);
 
-  const updateAccounts = useCallback(async (newAccounts) => {
-    setAccounts(safeArray(newAccounts, DEFAULT_ACCOUNTS));
-    if (sbReady()) await sbUpsertMany("accounts", newAccounts).catch(() => {});
+  // FIXED BUG: Properly handles functional state updates so Dashboard Builder checkboxes work
+  const updateAccounts = useCallback((updater) => {
+    setAccounts(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      const cleanNext = safeArray(next, DEFAULT_ACCOUNTS);
+      if (sbReady()) {
+        sbUpsertMany("accounts", cleanNext).catch(e => console.warn("Accounts sync failed", e));
+      }
+      return cleanNext;
+    });
   }, []);
 
   const login = useCallback(async (acc) => {
@@ -1102,7 +1112,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
       {modal && (
         <Modal title="Opticals Entry" onClose={()=>setModal(false)} onSave={submit} saveLabel="Save Entry" wide>
           <div style={{ background:"#f0ede8", borderRadius:10, padding:"12px 14px", marginBottom:14 }}><label style={{ fontWeight:700 }}>🔗 Link to Patient</label><div style={{ display:"flex", gap:8, marginTop:6 }}><input type="text" placeholder="Enter MR-001 or PT-0001 or phone…" value={form._lookup||""} onChange={e=>setForm(f=>({...f,_lookup:e.target.value}))} style={{ flex:1 }} /><button className="btn btn-dark btn-sm" onClick={()=>lookupPatient(form._lookup||"")}>Look Up & Fill</button></div>{mrLookup && <div style={{ fontSize:12,marginTop:6,color:mrLookup.startsWith("✓")?"#16a34a":"#dc2626" }}>{mrLookup}</div>}</div>
-          {rxPreview && (<div style={{ background:"#e0f2fe",borderRadius:10,padding:"12px 16px",marginBottom:14,fontSize:13 }}><div style={{ fontWeight:700,marginBottom:8,color:"#0369a1" }}>📋 Prescription from K Sheet</div><div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, fontFamily:"monospace" }}><div><span style={{ color:"#9b8e82",fontSize:11 }}>RE</span><br/>{rxPreview.RE}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>LE</span><br/>{rxPreview.LE}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>ADD</span><br/>{rxPreview.ADD}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>Lens Type</span><br/>{rxPreview.frameNo}</div></div></div>)}
+          {rxPreview && (<div style={{ background:"#e0f2fe",borderRadius:10,padding:"12px 16px",marginBottom:14,fontSize:13 }}><div style={{ fontWeight:700,marginBottom:8,color:"#0369a1" }}>📋 Prescription from K Sheet</div><div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, fontFamily:"monospace" }}><div><span style={{ color:"#9b8e82",fontSize:11 }}>RE</span><br/>{rxPreview.RE}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>LE</span><br/>{rxPreview.LE}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>ADD</span><br/>{rxPreview.ADD}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>Lens Type</span><br/>{rxPreview.lensType}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>Frame No</span><br/>{rxPreview.frameNo}</div></div></div>)}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
             <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div><div><label>Patient ID</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div><div></div>
             <div style={{ gridColumn:"span 2" }}><label>Name</label><input type="text" value={form.name} onChange={F("name")} /></div><div><label>Phone</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} /></div>
@@ -1322,7 +1332,7 @@ function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
   };
 
   const submit = () => {
-    if (!form.name.trim() || !form.reminderDate) { setMsg("Name and reminder date required."); return; }
+    if (!form.name.trim()) || !form.reminderDate) { setMsg("Name and reminder date required."); return; }
     const record = { id: uid(), ...form, status: "pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
     mutate("reminders", arr => [...arr, record], record); audit("REMINDER_ADD", { name: form.name, type: form.reminderType }); setModal(false); setMsg("Reminder set.");
   };
@@ -1468,4 +1478,4 @@ function Modal({ title, children, onClose, onSave, saveLabel = "Save", wide, xl,
   );
 }
 
-//
+export default App;
