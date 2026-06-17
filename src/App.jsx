@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 // ════════════════════════════════════════════════════════════════════════
-// v4.0 — OptiManager  |  Supabase · Audit Logs · Dashboard Builder
+// v4.5 — Ophthalmology HMS  |  Supabase · Direct Entry · Role Based
 // ════════════════════════════════════════════════════════════════════════
-const APP_VER  = "4.0";
+const APP_VER  = "4.5";
 const BRANCHES = ["JPT Branch", "PRP Branch"];
 const SECTIONS = ["patients","patientBill","optometrist","opticals","inventory","invoices","alerts"];
 const SECTION_LABELS = { patients:"OP Registration", patientBill:"K Sheet Entry", optometrist:"Optometrist", opticals:"Opticals", inventory:"Inventory", invoices:"Sales & Invoices", alerts:"Low Stock Alerts" };
@@ -14,11 +14,11 @@ const DELIVERY_STATUS= ["Delivered","Not Ready","Fixing Completed But Not Delive
 // DEFAULT ACCOUNTS
 // ════════════════════════════════════════════════════════════════════════
 const DEFAULT_ACCOUNTS = [
-  { id:"owner",      name:"Owner",       role:"owner", branch:"All",        password:"owner123", perms:{} },
-  { id:"staff_jpt1", name:"Ravi (JPT)",  role:"staff", branch:"JPT Branch", password:"jpt1234",
+  { id:"owner",      name:"Owner",       role:"owner", designation: "Hospital Administrator", branch:"All",        password:"owner123", perms:{} },
+  { id:"staff_jpt1", name:"Ravi (JPT)",  role:"staff", designation: "Receptionist",           branch:"JPT Branch", password:"jpt1234",
     perms:{ patients:{view:true,add:true,edit:false}, patientBill:{view:true,add:true,edit:false}, optometrist:{view:true,add:true,edit:false}, opticals:{view:true,add:true,edit:false}, inventory:{view:true,add:false,edit:false}, invoices:{view:true,add:false,edit:false}, alerts:{view:true,add:false,edit:false} }
   },
-  { id:"staff_prp1", name:"Divya (PRP)", role:"staff", branch:"PRP Branch", password:"prp1234",
+  { id:"staff_prp1", name:"Divya (PRP)", role:"staff", designation: "Optometrist",            branch:"PRP Branch", password:"prp1234",
     perms:{ patients:{view:true,add:true,edit:false}, patientBill:{view:true,add:true,edit:false}, optometrist:{view:true,add:true,edit:false}, opticals:{view:true,add:true,edit:false}, inventory:{view:false,add:false,edit:false}, invoices:{view:false,add:false,edit:false}, alerts:{view:false,add:false,edit:false} }
   },
 ];
@@ -53,7 +53,6 @@ const SB_TABLES = {
   opticals:      "opticals",
   stock:         "stock",
   invoices:      "invoices",
-  pending_queue: "pending_queue",
   accounts:      "accounts",
   audit_log:     "audit_log",
   tasks:         "tasks",
@@ -78,7 +77,7 @@ async function sbGet(table) {
 
 // UPSERT a single record
 async function sbUpsertOne(table, row) {
-  if (!_sb) return false;
+  if (!_sb) return { ok: false, error: "Not connected to Supabase" };
   const tbl = SB_TABLES[table] || table;
   try {
     const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}`, {
@@ -86,9 +85,16 @@ async function sbUpsertOne(table, row) {
       headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify(row),
     });
-    if (!r.ok) { const t = await r.text(); console.warn(`sbUpsertOne ${table} HTTP ${r.status}:`, t); }
-    return r.ok;
-  } catch(e) { console.warn(`sbUpsertOne ${table}:`, e); return false; }
+    if (!r.ok) {
+      const t = await r.text();
+      console.warn(`sbUpsertOne ${table} HTTP ${r.status}:`, t);
+      return { ok: false, error: `HTTP ${r.status}: ${t.slice(0, 200)}` };
+    }
+    return { ok: true, error: null };
+  } catch(e) {
+    console.warn(`sbUpsertOne ${table}:`, e);
+    return { ok: false, error: e.message || String(e) };
+  }
 }
 
 // UPSERT multiple records
@@ -130,12 +136,6 @@ async function sbInsert(table, row) {
     });
     return r.ok;
   } catch { return false; }
-}
-
-// Keep sbUpsert as alias for backwards compat (used in pushToSupabase)
-async function sbUpsert(table, rows) {
-  const arr = Array.isArray(rows) ? rows : [rows];
-  return sbUpsertMany(table, arr);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -184,35 +184,20 @@ const SEED_DATA = {
       ref:"", paymentAmount:200, paymentMode:"Cash", paymentRefNo:"", remarks:"", visitType:"New Patient",
       visitCount:1, status:"approved", createdBy:"owner", createdByName:"Owner" },
   ],
-  patientBill: [
-    { id:"b1", branch:"JPT Branch", timestamp:"29/05/2026 09:15:00", date:"2026-05-29", time:"09:15",
-      mrNo:"MR-001", patientId:"PT-001", name:"Sarah Mitchell", phone:"9876543210", address:"Kakinada",
-      gender:"Female", age:41, complaint:"Blurred vision", pastHistory:"Hypertension",
-      reSpherAR:"-2.50", reCylAR:"-0.75", reAxisAR:180, leSpherAR:"-2.25", leCylAR:"-0.50", leAxisAR:175,
-      reSpherSub:"-2.50", reCylSub:"-0.75", reAxisSub:180, leSpherSub:"-2.25", leCylSub:"-0.50", leAxisSub:175,
-      add:"1.50", eyelids:"Normal", conjunctiva:"Clear", cornea:"Clear", anteriorChamber:"Deep",
-      iris:"Normal", pupil:"RAPD-", lens:"Clear", ocularMovements:"Full", fundus:"Normal",
-      advice:"Progressive lenses", optom:"Dr. Priya", lensType:"Progressive", frameNo:"FR-A12",
-      advance:500, paymentMethod:"Cash", deliveryStatus:"Not Ready", balance:3200,
-      status:"approved", createdBy:"owner", createdByName:"Owner" },
-  ],
+  patientBill: [],
   optometrist: [],
   opticals: [],
   stock: [
     { id:"s1", branch:"JPT Branch", sku:"FR-001", name:"Ray-Ban Aviator Gold", category:"Frames",  brand:"Ray-Ban",  qty:8,  reorder:5,  cost:2000, price:8000,  location:"A1", lensPower:"",      lensType:"",               boxNo:"",     createdBy:"owner", createdByName:"Owner" },
     { id:"s2", branch:"JPT Branch", sku:"LN-001", name:"Essilor Varilux",      category:"Lenses",  brand:"Essilor", qty:15, reorder:6,  cost:2500, price:9000,  location:"D1", lensPower:"-2.50", lensType:"Progressive",     boxNo:"B-14", createdBy:"owner", createdByName:"Owner" },
-    { id:"s3", branch:"PRP Branch", sku:"FR-002", name:"Oakley Half Jacket",   category:"Frames",  brand:"Oakley",  qty:3,  reorder:5,  cost:2200, price:9500,  location:"A2", lensPower:"",      lensType:"",               boxNo:"",     createdBy:"owner", createdByName:"Owner" },
-    { id:"s4", branch:"PRP Branch", sku:"LN-002", name:"Zeiss DriveSafe",      category:"Lenses",  brand:"Zeiss",   qty:1,  reorder:4,  cost:3500, price:12000, location:"D2", lensPower:"-1.75", lensType:"Anti-Reflective", boxNo:"B-07", createdBy:"owner", createdByName:"Owner" },
   ],
-  invoices: [
-    { id:"INV-001", branch:"JPT Branch", date:"2026-05-29", patientName:"Sarah Mitchell", items:[{name:"Essilor Varilux",qty:1,price:9000}], discount:500, status:"Paid", approvalStatus:"approved", createdBy:"owner", createdByName:"Owner" },
-  ],
+  invoices: [],
   tasks:     [],
   reminders: [],
 };
 
 // ════════════════════════════════════════════════════════════════════════
-// PRINT HELPERS  (preserved from v3)
+// PRINT HELPERS
 // ════════════════════════════════════════════════════════════════════════
 function printInvoice(inv) {
   const total = (inv.items || []).reduce((s, i) => s + i.qty * i.price, 0) - (inv.discount || 0);
@@ -243,7 +228,6 @@ export default function App() {
   const [session,  setSession]  = useState(() => LS.getSess());
   const [accounts, setAccounts] = useState(() => LS.get("opti_accounts", DEFAULT_ACCOUNTS));
   const [data,     setData]     = useState(() => LS.get("opti_data_v4",  SEED_DATA));
-  const [pending,  setPending]  = useState(() => LS.get("opti_pending",  []));
   const [auditLog, setAuditLog] = useState(() => LS.get("opti_audit",    []));
   const [fieldVis, setFieldVis] = useState(() => LS.get("opti_fields",   DEFAULT_FIELD_VISIBILITY));
   const [sbCreds,  setSbCreds]  = useState(() => LS.get("opti_sb",       { url: "", key: "" }));
@@ -253,42 +237,31 @@ export default function App() {
   const [syncing,  setSyncing]  = useState(false);
 
   // ── localStorage persistence (write-through cache only) ──────────
-  // NOTE: These are backup caches. Supabase is always authoritative.
   useEffect(() => { LS.set("opti_accounts", accounts); }, [accounts]);
   useEffect(() => { LS.set("opti_data_v4",  data);     }, [data]);
-  useEffect(() => { LS.set("opti_pending",  pending);  }, [pending]);
   useEffect(() => { LS.set("opti_audit",    auditLog); }, [auditLog]);
   useEffect(() => { LS.set("opti_fields",   fieldVis); }, [fieldVis]);
   useEffect(() => { LS.set("opti_sb",       sbCreds);  }, [sbCreds]);
 
   // ── Core sync: pull everything from Supabase ──────────────────────
-  // Supabase is the single source of truth.
-  // null return = network/auth error → keep existing local data unchanged.
-  // [] return   = table is genuinely empty → replace local data with [].
   const syncFromCloud = async (url, key) => {
     if (!url || !key) return;
     initSB(url, key);
     if (!sbReady()) return;
-    if (syncing) return; // prevent overlapping syncs
+    if (syncing) return;
     setSyncing(true);
     try {
-      const [pts, bills, optom, optcl, stk, inv, pend, accs, tsks, rems] = await Promise.all([
+      const [pts, bills, optom, optcl, stk, inv, accs, tsks, rems] = await Promise.all([
         sbGet("patients"),
         sbGet("patientBill"),
         sbGet("optometrist"),
         sbGet("opticals"),
         sbGet("stock"),
         sbGet("invoices"),
-        sbGet("pending_queue"),
         sbGet("accounts"),
         sbGet("tasks"),
         sbGet("reminders"),
       ]);
-
-      console.log("[Sync] patients:", pts?.length ?? "ERR", "patientBill:", bills?.length ?? "ERR",
-        "optometrist:", optom?.length ?? "ERR", "opticals:", optcl?.length ?? "ERR",
-        "stock:", stk?.length ?? "ERR", "invoices:", inv?.length ?? "ERR",
-        "pending:", pend?.length ?? "ERR", "accounts:", accs?.length ?? "ERR");
 
       setData(d => ({
         ...d,
@@ -301,17 +274,6 @@ export default function App() {
         tasks:       Array.isArray(tsks)  ? tsks  : (d.tasks || []),
         reminders:   Array.isArray(rems)  ? rems  : (d.reminders || []),
       }));
-
-      // pending_queue: normalise entries from Supabase.
-      // Supabase may return record as a JSON string (if stored as text) or object (jsonb).
-      if (Array.isArray(pend)) {
-        const normalised = pend.map(p => ({
-          ...p,
-          record: typeof p.record === "string" ? JSON.parse(p.record) : (p.record || {}),
-        }));
-        setPending(normalised);
-        LS.set("opti_pending", normalised);
-      }
 
       if (Array.isArray(accs) && accs.length > 0) {
         setAccounts(accs);
@@ -327,15 +289,13 @@ export default function App() {
     setSyncing(false);
   };
 
-  // ── Init on mount + auto-sync every 10s ──────────────────────────
-  // Uses a ref for syncFromCloud to avoid stale closures in setInterval.
   const syncRef = useRef(syncFromCloud);
-  useEffect(() => { syncRef.current = syncFromCloud; }); // always up to date
+  useEffect(() => { syncRef.current = syncFromCloud; });
 
   useEffect(() => {
     if (!sbCreds.url || !sbCreds.key) return;
     initSB(sbCreds.url, sbCreds.key);
-    syncRef.current(sbCreds.url, sbCreds.key); // immediate on mount/cred change
+    syncRef.current(sbCreds.url, sbCreds.key);
     const id = setInterval(() => syncRef.current(sbCreds.url, sbCreds.key), 10000);
     return () => clearInterval(id);
   }, [sbCreds.url, sbCreds.key]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -346,21 +306,18 @@ export default function App() {
     const cleanUrl = url.replace(/\/$/, "");
     initSB(cleanUrl, key);
     try {
-      // Test with a lightweight ping
       const r = await fetch(`${cleanUrl}/rest/v1/patients?select=id&limit=1`, {
         headers: { "apikey": key, "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
       });
       if (r.status < 500) {
         setSbCreds({ url: cleanUrl, key });
         setSbStatus("ok");
-        // Push any local accounts to cloud so staff logins work everywhere
         await sbUpsertMany("accounts", accounts);
         await syncFromCloud(cleanUrl, key);
         return true;
       }
       setSbStatus("error"); _sb = null; return false;
     } catch(e) {
-      // CORS from sandbox — trust valid-format credentials
       if (cleanUrl.includes("supabase.co") && key.startsWith("eyJ") && key.length > 100) {
         initSB(cleanUrl, key);
         setSbCreds({ url: cleanUrl, key });
@@ -386,7 +343,6 @@ export default function App() {
         sbUpsertMany("opticals",      data.opticals    || []),
         sbUpsertMany("stock",         data.stock       || []),
         sbUpsertMany("invoices",      data.invoices    || []),
-        sbUpsertMany("pending_queue", pending),
         sbUpsertMany("accounts",      accounts),
         sbUpsertMany("tasks",         data.tasks       || []),
         sbUpsertMany("reminders",     data.reminders   || []),
@@ -404,14 +360,10 @@ export default function App() {
     sbInsert("audit_log", entry).catch(() => {});
   }, [session]);
 
-  // ── Data mutations (owner direct writes) ─────────────────────────
-  // Only upsert the NEW/CHANGED record, not the whole array.
-  // After write, re-pull from Supabase so all browsers get the update.
+  // ── Data mutations (Direct Writes for Everyone) ──────────────────
   const mutate = useCallback((key, fn, newRecord) => {
     setData(d => {
       const updated = typeof fn === "function" ? fn(d[key] || []) : fn;
-      // If we have the specific new/changed record, upsert just that one.
-      // Otherwise fall back to upserting the whole updated array.
       if (sbReady()) {
         if (newRecord) {
           sbUpsertOne(key, newRecord).catch(() => {});
@@ -423,135 +375,9 @@ export default function App() {
     });
   }, []);
 
-  // ── Staff submit → pending_queue ─────────────────────────────────
-  const staffSubmit = useCallback(async (type, record) => {
-    const pendingRecord = { ...record, status: "pending" };
-    const entry = {
-      id:              uid(),
-      type:            type,                     // e.g. "patients", "patientBill"
-      record:          pendingRecord,            // stored as JSONB in Supabase
-      submittedBy:     session.id,
-      submittedByName: session.name,
-      branch:          session.branch,
-      submittedAt:     ts(),
-    };
-
-    console.log("[staffSubmit] Writing to pending_queue:", entry.id, "type:", type);
-
-    // Write to Supabase pending_queue FIRST
-    const ok = await sbUpsertOne("pending_queue", entry);
-    console.log("[staffSubmit] Supabase write result:", ok);
-    if (!ok) {
-      alert("Warning: Cloud save may have failed. Please check your Supabase connection.");
-    }
-
-    // Always update local state regardless of Supabase result
-    setPending(p => {
-      const next = [...p, entry];
-      LS.set("opti_pending", next);
-      return next;
-    });
-    audit("STAFF_SUBMIT", { type, recordId: record.id });
-  }, [session, audit]);
-
-  // ── Owner approve ────────────────────────────────────────────────
-  const approvePending = useCallback(async (entryId) => {
-    const entry = pending.find(p => p.id === entryId);
-    if (!entry) {
-      console.error("[approve] Entry not found in pending state:", entryId);
-      alert("Error: Could not find this approval entry. Please refresh (Sync Now) and try again.");
-      return;
-    }
-
-    // Validate entry structure — Supabase may return record as string (text col) or object (jsonb col)
-    const rawRecord = entry.record;
-    const parsedRecord = typeof rawRecord === "string"
-      ? (() => { try { return JSON.parse(rawRecord); } catch { return null; } })()
-      : rawRecord;
-
-    if (!parsedRecord || typeof parsedRecord !== "object") {
-      console.error("[approve] entry.record is invalid:", rawRecord);
-      alert("Error: The pending record data is corrupted. Please ask staff to resubmit.");
-      return;
-    }
-
-    const targetTable = entry.type; // "patients", "patientBill", "stock", "invoices"
-    if (!targetTable || !["patients","patientBill","stock","invoices"].includes(targetTable)) {
-      console.error("[approve] Invalid entry.type:", targetTable);
-      alert("Error: Unknown record type '" + targetTable + "'. Cannot approve.");
-      return;
-    }
-
-    const approvedRecord = {
-      ...parsedRecord,
-      status:         "approved",
-      approvedBy:     session.id,
-      approvedByName: session.name,
-      approvedAt:     ts(),
-    };
-
-    // Ensure record has an id
-    if (!approvedRecord.id) {
-      approvedRecord.id = uid();
-      console.warn("[approve] Record had no id, assigned:", approvedRecord.id);
-    }
-
-    console.log("[approve] Writing to table:", targetTable, "record id:", approvedRecord.id);
-
-    // Step 1: Write approved record to the real data table in Supabase
-    const writeOk = await sbUpsertOne(targetTable, approvedRecord);
-    console.log("[approve] Step 1 - write to", targetTable, ":", writeOk);
-    if (!writeOk) {
-      alert("Warning: Failed to save approved record to cloud. Please check your Supabase connection and try again.");
-      return; // Don't proceed if write failed
-    }
-
-    // Step 2: Remove from pending_queue in Supabase
-    const deleteOk = await sbDelete("pending_queue", entryId);
-    console.log("[approve] Step 2 - delete from pending_queue:", deleteOk);
-
-    // Step 3: Update owner's local state immediately so UI reflects change
-    setData(d => {
-      const arr = d[targetTable] || [];
-      const exists = arr.find(x => x.id === approvedRecord.id);
-      const updated = exists
-        ? arr.map(x => x.id === approvedRecord.id ? approvedRecord : x)
-        : [...arr, approvedRecord];
-      console.log("[approve] Step 3 - local state updated. New", targetTable, "count:", updated.length);
-      return { ...d, [targetTable]: updated };
-    });
-
-    // Step 4: Remove from local pending
-    setPending(p => {
-      const next = p.filter(x => x.id !== entryId);
-      LS.set("opti_pending", next);
-      return next;
-    });
-
-    audit("APPROVE", { type: targetTable, recordId: approvedRecord.id, submittedBy: entry.submittedByName });
-
-    // Step 5: Re-sync from cloud after a short delay to confirm write succeeded
-    // and refresh all other users' views on next poll
-    setTimeout(() => {
-      if (sbCreds.url && sbCreds.key) syncFromCloud(sbCreds.url, sbCreds.key);
-    }, 1500);
-
-  }, [pending, session, audit, sbCreds]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const rejectPending = useCallback(async (entryId) => {
-    const entry = pending.find(p => p.id === entryId);
-    await sbDelete("pending_queue", entryId);
-    setPending(p => p.filter(x => x.id !== entryId));
-    audit("REJECT", { type: entry?.type, submittedBy: entry?.submittedByName });
-  }, [pending, audit]);
-
-  // ── Account management: always sync accounts to Supabase ─────────
   const updateAccounts = useCallback(async (newAccounts) => {
     setAccounts(newAccounts);
-    // Push updated accounts to Supabase so all devices see same staff list
-    if (sbReady()) {
-      await sbUpsertMany("accounts", newAccounts).catch(() => {});
-    }
+    if (sbReady()) { await sbUpsertMany("accounts", newAccounts).catch(() => {}); }
   }, []);
 
   // ── Login / Logout ───────────────────────────────────────────────
@@ -563,10 +389,7 @@ export default function App() {
     const entry = { id: uid(), action: "LOGIN", detail: {}, userId: acc.id, userName: acc.name, branch: acc.branch || "All", at: ts() };
     setAuditLog(a => [entry, ...a].slice(0, 500));
     sbInsert("audit_log", entry).catch(() => {});
-    // Immediately sync after login so user sees latest data
-    if (sbCreds.url && sbCreds.key) {
-      syncFromCloud(sbCreds.url, sbCreds.key);
-    }
+    if (sbCreds.url && sbCreds.key) { syncFromCloud(sbCreds.url, sbCreds.key); }
   }, [sbCreds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const logout = useCallback(() => {
@@ -582,35 +405,28 @@ export default function App() {
     return session.perms?.[section]?.[action] === true;
   }, [session]);
 
-  // ── LoginScreen: fetch accounts from Supabase before showing ─────
-  // So staff created on one device are visible on all devices.
   const [loginAccounts, setLoginAccounts] = useState(accounts);
   useEffect(() => {
     if (!sbCreds.url || !sbCreds.key) { setLoginAccounts(accounts); return; }
     initSB(sbCreds.url, sbCreds.key);
     sbGet("accounts").then(accs => {
       if (Array.isArray(accs) && accs.length > 0) {
-        setLoginAccounts(accs);
-        setAccounts(accs);
-        LS.set("opti_accounts", accs);
-      } else {
-        setLoginAccounts(accounts);
-      }
+        setLoginAccounts(accs); setAccounts(accs); LS.set("opti_accounts", accs);
+      } else { setLoginAccounts(accounts); }
     }).catch(() => setLoginAccounts(accounts));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!session) return <LoginScreen accounts={loginAccounts} onLogin={login} sbCreds={sbCreds} setSbCreds={setSbCreds} />;
 
   const sharedProps = {
-    session, data, mutate, staffSubmit, can, audit, fieldVis,
+    session, data, mutate, can, audit, fieldVis,
     onSync: () => syncFromCloud(sbCreds.url, sbCreds.key),
     syncing,
   };
 
   return (
-    <Shell session={session} onLogout={logout} pending={pending} view={view} setView={setView} can={can} sbStatus={sbStatus} syncing={syncing} lastSync={lastSync} onManualSync={() => syncFromCloud(sbCreds.url, sbCreds.key)}>
-      {view === "dashboard"    && <Dashboard session={session} data={data} pending={pending} setView={setView} auditLog={auditLog} />}
-      {view === "approval"     && session.role === "owner" && <ApprovalQueue pending={pending} onApprove={approvePending} onReject={rejectPending} />}
+    <Shell session={session} onLogout={logout} view={view} setView={setView} can={can} sbStatus={sbStatus} syncing={syncing} lastSync={lastSync} onManualSync={() => syncFromCloud(sbCreds.url, sbCreds.key)}>
+      {view === "dashboard"    && <Dashboard session={session} data={data} setView={setView} auditLog={auditLog} />}
       {view === "patients"     && <PatientsSection     {...sharedProps} />}
       {view === "patientBill"  && <PatientBillSection  {...sharedProps} />}
       {view === "optometrist"  && <OptometristSection  {...sharedProps} />}
@@ -629,11 +445,8 @@ export default function App() {
   );
 }
 
-
 // ════════════════════════════════════════════════════════════════════════
 // LOGIN SCREEN
-// Supports Supabase URL entry so staff on new devices can connect to
-// the cloud and load accounts without needing localStorage.
 // ════════════════════════════════════════════════════════════════════════
 function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
   const [userId,   setUserId]   = useState("");
@@ -644,7 +457,6 @@ function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
   const [liveAccs, setLiveAccs] = useState(accounts);
   const [loading,  setLoading]  = useState(false);
 
-  // ── Cloud setup panel (shown when no Supabase URL saved) ─────────
   const [showCloud, setShowCloud] = useState(!sbCreds?.url);
   const [cloudUrl,  setCloudUrl]  = useState(sbCreds?.url  || "");
   const [cloudKey,  setCloudKey]  = useState(sbCreds?.key  || "");
@@ -658,36 +470,24 @@ function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
     try {
       const accs = await sbGet("accounts");
       if (Array.isArray(accs) && accs.length > 0) {
-        setLiveAccs(accs);
-        setSbCreds({ url: cleanUrl, key: cloudKey });
+        setLiveAccs(accs); setSbCreds({ url: cleanUrl, key: cloudKey });
         LS.set("opti_sb", { url: cleanUrl, key: cloudKey });
         LS.set("opti_accounts", accs);
-        setCloudMsg("Connected ✓ — accounts loaded from cloud.");
-        setShowCloud(false);
+        setCloudMsg("Connected ✓ — accounts loaded from cloud."); setShowCloud(false);
       } else {
-        // Table might be empty — still save creds
         setSbCreds({ url: cleanUrl, key: cloudKey });
         LS.set("opti_sb", { url: cleanUrl, key: cloudKey });
-        setCloudMsg("Connected ✓ (no accounts in cloud yet — using defaults).");
-        setShowCloud(false);
+        setCloudMsg("Connected ✓ (no accounts in cloud yet — using defaults)."); setShowCloud(false);
       }
-    } catch(e) {
-      setCloudMsg("Connection failed. Check URL and key.");
-    }
+    } catch(e) { setCloudMsg("Connection failed. Check URL and key."); }
     setLoading(false);
   };
 
   const doLogin = () => {
     const all = [...liveAccs];
     const acc = all.find(a => a.id === userId.trim() && a.password === password);
-    if (!acc) {
-      setErr("Invalid user ID or password.");
-      return;
-    }
-    if (acc.role === "staff" && branch && acc.branch !== branch) {
-      setErr(`This account belongs to ${acc.branch}.`);
-      return;
-    }
+    if (!acc) { setErr("Invalid user ID or password."); return; }
+    if (acc.role === "staff" && branch && acc.branch !== branch) { setErr(`This account belongs to ${acc.branch}.`); return; }
     onLogin(acc);
   };
 
@@ -701,15 +501,10 @@ function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
           <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>v{APP_VER} · Multi-Branch Optical Suite</div>
         </div>
 
-        {/* Cloud connection panel */}
         <div style={{ marginBottom: 18, background: "#f0ede8", borderRadius: 12, padding: "14px 16px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: sbCreds?.url ? "#16a34a" : "#d97706" }}>
-              {sbCreds?.url ? "☁ Cloud Connected" : "☁ Cloud Not Connected"}
-            </div>
-            <button style={{ fontSize: 11, background: "none", border: "none", color: "#6b5e52", cursor: "pointer", textDecoration: "underline" }} onClick={() => setShowCloud(s => !s)}>
-              {showCloud ? "Hide" : "Configure"}
-            </button>
+            <div style={{ fontSize: 12, fontWeight: 700, color: sbCreds?.url ? "#16a34a" : "#d97706" }}>{sbCreds?.url ? "☁ Cloud Connected" : "☁ Cloud Not Connected"}</div>
+            <button style={{ fontSize: 11, background: "none", border: "none", color: "#6b5e52", cursor: "pointer", textDecoration: "underline" }} onClick={() => setShowCloud(s => !s)}>{showCloud ? "Hide" : "Configure"}</button>
           </div>
           {showCloud && (
             <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
@@ -742,7 +537,7 @@ function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
         {err && <div style={{ marginTop: 10, fontSize: 12, color: "#dc2626", background: "#fee2e2", padding: "8px 12px", borderRadius: 8 }}>{err}</div>}
         <button className="btn btn-dark" style={{ width: "100%", marginTop: 18, padding: 12 }} onClick={doLogin}>Login</button>
         <div style={{ marginTop: 18, background: "#faf9f7", borderRadius: 10, padding: "12px 16px", fontSize: 12, color: "#9b8e82", lineHeight: 1.9 }}>
-          <strong style={{ color: "#6b5e52" }}>Demo:</strong> <code style={CS}>owner</code>/<code style={CS}>owner123</code> · <code style={CS}>staff_jpt1</code>/<code style={CS}>jpt1234</code> · <code style={CS}>staff_prp1</code>/<code style={CS}>prp1234</code>
+          <strong style={{ color: "#6b5e52" }}>Demo:</strong> <code style={CS}>owner</code>/<code style={CS}>owner123</code> · <code style={CS}>staff_jpt1</code>/<code style={CS}>jpt1234</code>
         </div>
       </div>
     </div>
@@ -752,11 +547,10 @@ function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
 // ════════════════════════════════════════════════════════════════════════
 // SHELL
 // ════════════════════════════════════════════════════════════════════════
-function Shell({ session, onLogout, pending, view, setView, can, sbStatus, syncing, lastSync, onManualSync, children }) {
+function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastSync, onManualSync, children }) {
   const isOwner = session.role === "owner";
   const NAV = [
     { id: "dashboard",    label: "Dashboard",        icon: "⬡", show: true },
-    { id: "approval",     label: "Approval Queue",   icon: "✅", show: isOwner, badge: pending.length, badgeColor: "#16a34a" },
     { id: "patients",     label: "OP Registration",  icon: "◉", show: can("patients", "view") },
     { id: "patientBill",  label: "K Sheet Entry",    icon: "🧾", show: can("patientBill", "view") },
     { id: "optometrist",  label: "Optometrist",      icon: "👁", show: can("optometrist", "view") },
@@ -788,7 +582,7 @@ function Shell({ session, onLogout, pending, view, setView, can, sbStatus, synci
         </div>
         <div style={{ margin: "0 4px 12px", background: "#f0ede8", borderRadius: 10, padding: "9px 12px" }}>
           <div style={{ fontSize: 13, fontWeight: 700 }}>{session.name}</div>
-          <div style={{ fontSize: 11, color: "#9b8e82", marginTop: 2 }}>{isOwner ? "Owner · All Branches" : session.branch}</div>
+          <div style={{ fontSize: 11, color: "#9b8e82", marginTop: 2 }}>{session.designation || (isOwner ? "Owner" : "Staff")} · {isOwner ? "All Branches" : session.branch}</div>
           {isOwner && <span style={{ display: "inline-block", marginTop: 4, background: "#1a1714", color: "#f0ede8", borderRadius: 20, fontSize: 10, padding: "1px 8px", fontWeight: 700 }}>OWNER</span>}
         </div>
         {NAV.filter(n => n.id === "divider" || n.show).map(n =>
@@ -817,7 +611,7 @@ function Shell({ session, onLogout, pending, view, setView, can, sbStatus, synci
 // ════════════════════════════════════════════════════════════════════════
 // DASHBOARD
 // ════════════════════════════════════════════════════════════════════════
-function Dashboard({ session, data, pending, setView, auditLog }) {
+function Dashboard({ session, data, setView, auditLog }) {
   const isOwner = session.role === "owner";
   const myBranch = session.branch;
   const flt = arr => isOwner ? arr : arr.filter(x => x.branch === myBranch);
@@ -831,7 +625,6 @@ function Dashboard({ session, data, pending, setView, auditLog }) {
     { label: "Patients",          value: pts.length,    color: "#1a1714" },
     { label: "Patient Bills",     value: bills.length,  color: "#1d4ed8" },
     { label: "Revenue (Paid)",    value: currency(rev), color: "#16a34a" },
-    { label: "Pending Approvals", value: pending.length, color: "#d97706", action: isOwner ? () => setView("approval") : null },
   ];
 
   const recentAudit = auditLog.slice(0, 8);
@@ -842,7 +635,7 @@ function Dashboard({ session, data, pending, setView, auditLog }) {
         <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 26, fontWeight: 700 }}>Welcome, {session.name} 👋</div>
         <div style={{ fontSize: 13, color: "#9b8e82", marginTop: 3 }}>{isOwner ? "All Branches" : myBranch} · {ts()}</div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 22 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 22 }}>
         {stats.map(s => (
           <div key={s.label} className="stat-card" onClick={s.action} style={{ cursor: s.action ? "pointer" : "default" }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: "#9b8e82", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 6 }}>{s.label}</div>
@@ -857,12 +650,11 @@ function Dashboard({ session, data, pending, setView, auditLog }) {
             {BRANCHES.map(br => {
               const bPts   = (data.patients    || []).filter(x => x.branch === br && x.status === "approved");
               const bBills = (data.patientBill || []).filter(x => x.branch === br && x.status === "approved");
-              const bPend  = pending.filter(x => x.branch === br);
               return (
                 <div key={br} style={{ padding: "10px 0", borderBottom: "1px solid #f0ede8" }}>
                   <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{br}</div>
                   <div style={{ display: "flex", gap: 10 }}>
-                    {[["Patients", bPts.length, "#1a1714"], ["Bills", bBills.length, "#1d4ed8"], ["Pending", bPend.length, "#d97706"]].map(([l, v, c]) => (
+                    {[["Patients", bPts.length, "#1a1714"], ["Bills", bBills.length, "#1d4ed8"]].map(([l, v, c]) => (
                       <div key={l} style={{ flex: 1, background: "#f0ede8", borderRadius: 8, padding: "8px 10px" }}>
                         <div style={{ fontSize: 10, color: "#9b8e82", fontWeight: 600 }}>{l}</div>
                         <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 700, color: c }}>{v}</div>
@@ -881,7 +673,7 @@ function Dashboard({ session, data, pending, setView, auditLog }) {
             {recentAudit.map(a => (
               <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f0ede8", fontSize: 12 }}>
                 <div>
-                  <span style={{ fontWeight: 700, marginRight: 6, color: { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", APPROVE: "#16a34a", REJECT: "#dc2626", STAFF_SUBMIT: "#d97706" }[a.action] || "#1a1714" }}>{a.action}</span>
+                  <span style={{ fontWeight: 700, marginRight: 6, color: { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", ADD: "#16a34a", DELETE: "#dc2626" }[a.action] || "#1a1714" }}>{a.action}</span>
                   <span style={{ color: "#6b5e52" }}>{a.userName}</span>
                   {a.branch !== "All" && <span style={{ color: "#b5a99e", marginLeft: 5 }}>· {a.branch}</span>}
                 </div>
@@ -895,43 +687,6 @@ function Dashboard({ session, data, pending, setView, auditLog }) {
   );
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// APPROVAL QUEUE
-// ════════════════════════════════════════════════════════════════════════
-function ApprovalQueue({ pending, onApprove, onReject }) {
-  const [detail, setDetail] = useState(null);
-  const colors = { patients: "#1d4ed8", patientBill: "#7c3aed", inventory: "#16a34a", invoices: "#a16207" };
-  return (
-    <div>
-      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Approval Queue</div>
-      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 22 }}>Review staff submissions before they are saved to the database.</div>
-      {pending.length === 0
-        ? <div className="card" style={{ textAlign: "center", padding: 48, color: "#9b8e82" }}><div style={{ fontSize: 36, marginBottom: 10 }}>✅</div><div style={{ fontWeight: 600 }}>No pending approvals</div></div>
-        : pending.map(entry => (
-          <div key={entry.id} style={{ background: "#fff", borderRadius: 14, padding: "14px 18px", marginBottom: 10, boxShadow: "0 1px 4px rgba(0,0,0,.06)", borderLeft: `4px solid ${colors[entry.type] || "#1a1714"}` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
-              <div>
-                <span style={{ background: `${colors[entry.type]}20`, color: colors[entry.type] || "#1a1714", borderRadius: 20, fontSize: 11, padding: "2px 10px", fontWeight: 700, marginRight: 8 }}>{SECTION_LABELS[entry.type] || entry.type}</span>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>{entry.record?.name || entry.record?.sku || entry.id}</span>
-                <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 4 }}>By <strong>{entry.submittedByName}</strong> · {entry.branch} · {entry.submittedAt}</div>
-              </div>
-              <div style={{ display: "flex", gap: 7 }}>
-                <button className="btn btn-sm btn-outline" onClick={() => setDetail(detail?.id === entry.id ? null : entry)}>{detail?.id === entry.id ? "Hide" : "View"}</button>
-                <button className="btn btn-sm" style={{ background: "#dcfce7", color: "#16a34a", border: "none", fontWeight: 700 }} onClick={() => onApprove(entry.id)}>✓ Accept</button>
-                <button className="btn btn-sm btn-danger" onClick={() => onReject(entry.id)}>✕ Reject</button>
-              </div>
-            </div>
-            {detail?.id === entry.id && (
-              <div style={{ marginTop: 12, background: "#f0ede8", borderRadius: 10, padding: "10px 14px", fontSize: 12, fontFamily: "monospace", lineHeight: 1.9, maxHeight: 280, overflowY: "auto" }}>
-                {Object.entries(entry.record).filter(([k]) => k !== "status").map(([k, v]) => <div key={k}><strong>{k}:</strong> {String(v ?? "—")}</div>)}
-              </div>
-            )}
-          </div>
-        ))
-      }
-    </div>
-  );
-}
 
 // ════════════════════════════════════════════════════════════════════════
 // AUDIT LOG  (Owner only)
@@ -939,12 +694,12 @@ function ApprovalQueue({ pending, onApprove, onReject }) {
 function AuditLogSection({ auditLog, accounts }) {
   const [filter, setFilter] = useState("ALL");
   const [userF,  setUserF]  = useState("ALL");
-  const actions = ["ALL", "LOGIN", "LOGOUT", "STAFF_SUBMIT", "APPROVE", "REJECT"];
+  const actions = ["ALL", "LOGIN", "LOGOUT", "ADD", "EDIT", "DELETE"];
   const filtered = auditLog
     .filter(a => filter === "ALL" || a.action === filter)
     .filter(a => userF  === "ALL" || a.userId === userF);
 
-  const actionColor = { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", APPROVE: "#16a34a", REJECT: "#dc2626", STAFF_SUBMIT: "#d97706" };
+  const actionColor = { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", ADD: "#16a34a", EDIT: "#d97706", DELETE: "#dc2626" };
 
   return (
     <div>
@@ -1052,8 +807,8 @@ function DashboardBuilder({ fieldVis, setFieldVis, accounts, setAccounts }) {
             <div key={acc.id} className="card" style={{ marginBottom: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name}</div>
-                  <div style={{ fontSize: 12, color: "#9b8e82" }}>{acc.id} · {acc.branch}</div>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name} <span style={{ fontSize: 12, fontWeight: 400, color: "#6b5e52", background: "#f0ede8", padding: "2px 8px", borderRadius: 12, marginLeft: 6 }}>{acc.designation}</span></div>
+                  <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 4 }}>{acc.id} · {acc.branch}</div>
                 </div>
               </div>
               <div style={{ overflowX: "auto" }}>
@@ -1086,19 +841,14 @@ function DashboardBuilder({ fieldVis, setFieldVis, accounts, setAccounts }) {
 
 // ════════════════════════════════════════════════════════════════════════
 // OP REGISTRATION  (was "Patients")
-// New fields: MR No, Patient ID, Address, Ref/Camp, Payment Amount,
-// Payment Mode, Payment Ref No, Remarks, Visit Type (New/Existing)
-// Visit-duplicate detection by Phone or (Name+Age+Gender)
+// MR No and Patient ID are Auto-Generated and Read-Only.
+// Direct writes to database for any user with 'add' permission.
 // ════════════════════════════════════════════════════════════════════════
-function PatientsSection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
+function PatientsSection({ session, data, mutate, can, audit, fieldVis, onSync, syncing }) {
   const isOwner  = session.role === "owner";
   const branch   = session.branch || "JPT Branch";
 
-  const pendingMine = (data.patients || []).filter(x => x.branch === branch && x.status === "pending" && x.createdBy === session.id);
-  const rows = [
-    ...(data.patients || []).filter(x => (isOwner || x.branch === branch) && x.status === "approved"),
-    ...(!isOwner ? pendingMine : []),
-  ];
+  const rows = (data.patients || []).filter(x => (isOwner || x.branch === branch));
 
   const [modal, setModal] = useState(false);
   const [form,  setForm]  = useState({});
@@ -1133,7 +883,7 @@ function PatientsSection({ session, data, mutate, staffSubmit, can, audit, field
   const F = k => e => { setForm(f => ({ ...f, [k]: e.target.value })); setDupWarning(null); };
   const T = k => () => setTouch(t => ({ ...t, [k]: true }));
 
-  // Duplicate detection: phone OR (name+age+gender) match
+  // Duplicate detection
   const checkDuplicate = (f) => {
     const all = data.patients || [];
     if (f.phone && f.phone.length === 10) {
@@ -1157,14 +907,13 @@ function PatientsSection({ session, data, mutate, staffSubmit, can, audit, field
   const submit = () => {
     setTouch({ phone: true, name: true, address: true });
     if (!validate.phone(form.phone) || !form.name.trim() || !form.address.trim()) { setMsg("Fill required fields correctly."); return; }
-    const record = { id: uid(), ...form, createdBy: session.id, createdByName: session.name, createdAt: ts() };
-    if (isOwner) {
-      const approved = { ...record, status: "approved" };
-      mutate("patients", arr => [...arr, approved], approved);
-      audit("OWNER_ADD", { type: "patients", name: form.name });
-    } else { staffSubmit("patients", record); }
+    
+    // Direct submission for all allowed roles
+    const record = { id: uid(), ...form, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    mutate("patients", arr => [...arr, record], record);
+    audit("ADD", { type: "patients", name: form.name });
     setModal(false);
-    setMsg(isOwner ? "Patient registered." : "Submitted for owner approval ✓");
+    setMsg("Patient registered successfully.");
   };
 
   const del = id => { if (confirm("Delete patient?")) { mutate("patients", arr => arr.filter(x => x.id !== id)); audit("DELETE", { type: "patients", id }); } };
@@ -1199,14 +948,11 @@ function PatientsSection({ session, data, mutate, staffSubmit, can, audit, field
             {isOwner && <th></th>}
           </tr></thead>
           <tbody>{filtered.map(r => (
-            <tr key={r.id} style={r.status === "pending" ? { opacity:0.65, background:"#fef9c3" } : {}}>
+            <tr key={r.id}>
               <td style={{ fontSize:11, whiteSpace:"nowrap", color:"#9b8e82" }}>{r.timestamp}</td>
               <td style={{ fontWeight:700, fontFamily:"monospace" }}>{r.mrNo}</td>
               <td style={{ fontFamily:"monospace", color:"#1d4ed8" }}>{r.patientId}</td>
-              <td style={{ fontWeight:600 }}>
-                {r.name}
-                {r.status === "pending" && <span style={{ marginLeft:6, fontSize:10, background:"#fef9c3", color:"#a16207", padding:"1px 6px", borderRadius:8, fontWeight:700, border:"1px solid #fde68a" }}>⏳ Pending</span>}
-              </td>
+              <td style={{ fontWeight:600 }}>{r.name}</td>
               <td>{r.phone}</td>
               <td style={{ maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.address}</td>
               <td><span className="tag tag-blue">{r.paymentMode}</span></td>
@@ -1215,7 +961,7 @@ function PatientsSection({ session, data, mutate, staffSubmit, can, audit, field
               <td><span style={{ fontSize:11, padding:"2px 8px", borderRadius:20, fontWeight:700, background:`${visitColor(r.visitType)}20`, color:visitColor(r.visitType) }}>{r.visitType || "New Patient"}</span></td>
               <td><span className="tag" style={{ background:"#f0ede8", color:"#6b5e52" }}>{r.branch}</span></td>
               <td style={{ fontSize:12, color:"#9b8e82", maxWidth:120, overflow:"hidden", textOverflow:"ellipsis" }}>{r.remarks || "—"}</td>
-              {isOwner && r.status !== "pending" && <td><button className="btn btn-danger btn-sm" onClick={() => del(r.id)}>✕</button></td>}
+              {isOwner && <td><button className="btn btn-danger btn-sm" onClick={() => del(r.id)}>✕</button></td>}
             </tr>
           ))}</tbody>
         </table>
@@ -1223,18 +969,18 @@ function PatientsSection({ session, data, mutate, staffSubmit, can, audit, field
 
       {modal && (
         <Modal title="OP Registration" onClose={() => setModal(false)} onSave={submit}
-          saveLabel={isOwner ? "Save" : "Submit for Approval"} wide>
+          saveLabel="Save Registration" wide>
           {dupWarning && (
             <div style={{ marginBottom:14, background:"#fef9c3", border:"1px solid #fde68a", borderRadius:10, padding:"10px 14px", fontSize:13, color:"#a16207", fontWeight:600 }}>
               {dupWarning.msg}
             </div>
           )}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
-            <div><label>Timestamp (auto)</label><input type="text" value={form.timestamp} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div>
+            <div><label>Timestamp (Auto)</label><input type="text" value={form.timestamp} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div>
             <div><label>Date</label><input type="date" value={form.date} onChange={F("date")} /></div>
             <div><label>Time</label><input type="time" value={form.time} onChange={F("time")} /></div>
-            <div><label>MR No (auto)</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div>
-            <div><label>Patient ID (auto)</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div>
+            <div><label>MR No (Auto Generated)</label><input type="text" value={form.mrNo} readOnly style={{ background:"#f0ede8", color:"#9b8e82", fontWeight: 700 }} /></div>
+            <div><label>Patient ID (Auto Generated)</label><input type="text" value={form.patientId} readOnly style={{ background:"#f0ede8", color:"#9b8e82", fontWeight: 700 }} /></div>
             <div><label>Visit Type</label>
               <select value={form.visitType} onChange={F("visitType")}>
                 {["New Patient","2nd Visit","3rd Visit","4th Visit","5th Visit","Review"].map(v => <option key={v}>{v}</option>)}
@@ -1283,12 +1029,14 @@ function PatientsSection({ session, data, mutate, staffSubmit, can, audit, field
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// K SHEET ENTRY  (was "Patient Bill") — linked to OP Registration via MR No / Patient ID
+// K SHEET ENTRY  (was "Patient Bill")
+// MR No and Patient ID are read-only and must be populated via lookup.
+// Direct writes to database.
 // ════════════════════════════════════════════════════════════════════════
-function PatientBillSection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
+function PatientBillSection({ session, data, mutate, can, audit, fieldVis, onSync, syncing }) {
   const isOwner = session.role === "owner";
   const branch  = session.branch || "JPT Branch";
-  const rows    = (data.patientBill || []).filter(x => (isOwner || x.branch === branch) && x.status === "approved");
+  const rows    = (data.patientBill || []).filter(x => (isOwner || x.branch === branch));
 
   const [modal, setModal] = useState(false);
   const [form,  setForm]  = useState({});
@@ -1298,7 +1046,6 @@ function PatientBillSection({ session, data, mutate, staffSubmit, can, audit, fi
   const [search,setSearch]= useState("");
   const [mrLookup, setMrLookup] = useState("");
 
-  // Auto-fill from OP Registration when MR No / Patient ID is entered
   const lookupPatient = (query) => {
     if (!query.trim()) return;
     const found = (data.patients || []).find(p =>
@@ -1321,16 +1068,9 @@ function PatientBillSection({ session, data, mutate, staffSubmit, can, audit, fi
     }
   };
 
-  const nextMrNo = () => {
-    const all = data.patientBill || [];
-    const nums = all.map(p => parseInt((p.mrNo || "").replace(/\D/g,""))).filter(n => !isNaN(n));
-    const next = nums.length ? Math.max(...nums) + 1 : 1;
-    return `MR-${String(next).padStart(3,"0")}`;
-  };
-
   const blank = () => ({
     timestamp: ts(), date: todayStr(), time: timeStr(),
-    mrNo: nextMrNo(), patientId: "",
+    mrNo: "", patientId: "",
     name: "", phone: "", address: "", gender: "Male", age: "",
     complaint: "", pastHistory: "",
     reSpherAR:"", reCylAR:"", reAxisAR:"", leSpherAR:"", leCylAR:"", leAxisAR:"",
@@ -1354,10 +1094,10 @@ function PatientBillSection({ session, data, mutate, staffSubmit, can, audit, fi
 
   const submit = () => {
     const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form,
-      createdBy: session.id, createdByName: session.name, createdAt: ts() };
-    if (isOwner) { const approved = { ...record, status:"approved" }; mutate("patientBill", arr => [...arr, approved], approved); audit("OWNER_ADD",{type:"patientBill",name:form.name}); }
-    else { staffSubmit("patientBill", record); }
-    setModal(false); setMsg(isOwner ? "K Sheet saved." : "Submitted for approval ✓");
+      status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    mutate("patientBill", arr => [...arr, record], record); 
+    audit("ADD",{type:"patientBill",name:form.name}); 
+    setModal(false); setMsg("K Sheet saved successfully.");
   };
 
   const del = id => { if (confirm("Delete K Sheet?")) { mutate("patientBill", arr => arr.filter(x => x.id!==id)); audit("DELETE",{type:"patientBill",id}); } };
@@ -1415,14 +1155,12 @@ function PatientBillSection({ session, data, mutate, staffSubmit, can, audit, fi
         </table>
       </div>
       {modal && (
-        <Modal title="K Sheet Entry" onClose={()=>setModal(false)} onSave={submit}
-          saveLabel={isOwner?"Save K Sheet":"Submit for Approval"} xl>
+        <Modal title="K Sheet Entry" onClose={()=>setModal(false)} onSave={submit} saveLabel="Save K Sheet" xl>
           <div style={{ display:"flex", gap:6, marginBottom:18, flexWrap:"wrap" }}>
             {TABS.map(t => <button key={t.id} className={`btn btn-sm ${tab===t.id?"btn-dark":"btn-outline"}`} onClick={()=>setTab(t.id)}>{t.label}</button>)}
           </div>
           {tab==="basic" && (
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
-              {/* MR No Lookup */}
               <div style={{ gridColumn:"1/-1", background:"#f0ede8", borderRadius:10, padding:"12px 14px" }}>
                 <label style={{ fontWeight:700 }}>🔗 Link to OP Registration (MR No / Patient ID / Phone)</label>
                 <div style={{ display:"flex", gap:8, marginTop:6 }}>
@@ -1432,9 +1170,9 @@ function PatientBillSection({ session, data, mutate, staffSubmit, can, audit, fi
                 </div>
                 {mrLookup && <div style={{ fontSize:12, marginTop:6, color: mrLookup.startsWith("✓")?"#16a34a":"#dc2626" }}>{mrLookup}</div>}
               </div>
-              <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div>
-              <div><label>Patient ID</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div>
-              <div><label>Timestamp (auto)</label><input type="text" value={form.timestamp} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div>
+              <div><label>MR No (Read Only)</label><input type="text" value={form.mrNo} readOnly style={{ background:"#f0ede8", color:"#9b8e82", fontWeight: 700 }} /></div>
+              <div><label>Patient ID (Read Only)</label><input type="text" value={form.patientId} readOnly style={{ background:"#f0ede8", color:"#9b8e82", fontWeight: 700 }} /></div>
+              <div><label>Timestamp (Auto)</label><input type="text" value={form.timestamp} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div>
               <div><label>Date</label><input type="date" value={form.date} onChange={F("date")} /></div>
               <div><label>Time</label><input type="time" value={form.time} onChange={F("time")} /></div>
               <div style={{ gridColumn:"span 3" }}></div>
@@ -1530,12 +1268,11 @@ function PatientBillSection({ session, data, mutate, staffSubmit, can, audit, fi
 
 // ════════════════════════════════════════════════════════════════════════
 // OPTOMETRIST / OPTOM SECTION
-// Complaint + Past History, linked to patient via MR No / Patient ID
 // ════════════════════════════════════════════════════════════════════════
-function OptometristSection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
+function OptometristSection({ session, data, mutate, can, audit, fieldVis, onSync, syncing }) {
   const isOwner = session.role === "owner";
   const branch  = session.branch || "JPT Branch";
-  const rows    = (data.optometrist || []).filter(x => (isOwner || x.branch === branch) && x.status === "approved");
+  const rows    = (data.optometrist || []).filter(x => (isOwner || x.branch === branch));
 
   const [modal, setModal] = useState(false);
   const [form,  setForm]  = useState({});
@@ -1558,7 +1295,6 @@ function OptometristSection({ session, data, mutate, staffSubmit, can, audit, fi
       p.phone === query
     );
     if (found) {
-      // Also try to pull complaint/history from K Sheet
       const ksheet = (data.patientBill || []).find(b =>
         b.mrNo === found.mrNo || b.patientId === found.patientId
       );
@@ -1577,10 +1313,9 @@ function OptometristSection({ session, data, mutate, staffSubmit, can, audit, fi
   const submit = () => {
     if (!form.name.trim()) { setMsg("Patient name required."); return; }
     const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form,
-      createdBy: session.id, createdByName: session.name, createdAt: ts() };
-    if (isOwner) { const approved = { ...record, status:"approved" }; mutate("optometrist", arr=>[...arr, approved], approved); }
-    else { staffSubmit("optometrist", record); }
-    setModal(false); setMsg(isOwner ? "Saved." : "Submitted for approval ✓");
+      status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    mutate("optometrist", arr=>[...arr, record], record); 
+    setModal(false); setMsg("Saved successfully.");
   };
 
   const del = id => { if (confirm("Delete?")) { mutate("optometrist", arr=>arr.filter(x=>x.id!==id)); audit("DELETE",{type:"optometrist",id}); } };
@@ -1621,8 +1356,7 @@ function OptometristSection({ session, data, mutate, staffSubmit, can, audit, fi
         </table>
       </div>
       {modal && (
-        <Modal title="Optometrist Entry" onClose={()=>setModal(false)} onSave={submit}
-          saveLabel={isOwner?"Save":"Submit for Approval"}>
+        <Modal title="Optometrist Entry" onClose={()=>setModal(false)} onSave={submit} saveLabel="Save Entry">
           <div style={{ background:"#f0ede8", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
             <label style={{ fontWeight:700 }}>🔗 Look Up Patient (MR No / Patient ID / Phone)</label>
             <div style={{ display:"flex", gap:8, marginTop:6 }}>
@@ -1633,8 +1367,8 @@ function OptometristSection({ session, data, mutate, staffSubmit, can, audit, fi
             {mrLookup && <div style={{ fontSize:12,marginTop:6,color:mrLookup.startsWith("✓")?"#16a34a":"#dc2626" }}>{mrLookup}</div>}
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
-            <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div>
-            <div><label>Patient ID</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div>
+            <div><label>MR No (Read Only)</label><input type="text" value={form.mrNo} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div>
+            <div><label>Patient ID (Read Only)</label><input type="text" value={form.patientId} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div>
             <div><label>Name *</label><input type="text" value={form.name} onChange={F("name")} /></div>
             <div><label>Phone</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} /></div>
             <div style={{ gridColumn:"1/-1" }}><label>Complaint</label><textarea rows={3} value={form.complaint} onChange={F("complaint")} /></div>
@@ -1649,13 +1383,11 @@ function OptometristSection({ session, data, mutate, staffSubmit, can, audit, fi
 
 // ════════════════════════════════════════════════════════════════════════
 // OPTICALS SECTION
-// Auto-pulls prescription from K Sheet via Patient ID / MR No
-// Opticals rep enters: Total Price, Advance, Advance Mode, Txn ID, Balance
 // ════════════════════════════════════════════════════════════════════════
-function OpticalsSection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
+function OpticalsSection({ session, data, mutate, can, audit, fieldVis, onSync, syncing }) {
   const isOwner = session.role === "owner";
   const branch  = session.branch || "JPT Branch";
-  const rows    = (data.opticals || []).filter(x => (isOwner || x.branch === branch) && x.status === "approved");
+  const rows    = (data.opticals || []).filter(x => (isOwner || x.branch === branch));
 
   const [modal,    setModal]    = useState(false);
   const [form,     setForm]     = useState({});
@@ -1673,7 +1405,6 @@ function OpticalsSection({ session, data, mutate, staffSubmit, can, audit, field
   });
   const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
-  // Look up patient and auto-fill from OP Registration + K Sheet prescription
   const lookupPatient = (query) => {
     if (!query.trim()) return;
     const foundOp = (data.patients || []).find(p =>
@@ -1683,7 +1414,6 @@ function OpticalsSection({ session, data, mutate, staffSubmit, can, audit, field
     );
     if (!foundOp) { setMrLookup("No patient found in OP Registration."); return; }
 
-    // Pull K Sheet for prescription
     const ksheet = (data.patientBill || []).find(b =>
       b.mrNo === foundOp.mrNo || b.patientId === foundOp.patientId
     );
@@ -1708,7 +1438,6 @@ function OpticalsSection({ session, data, mutate, staffSubmit, can, audit, field
     }
   };
 
-  // Auto-calc balance
   const calcBalance = () => {
     const total = parseFloat(form.totalPrice) || 0;
     const adv   = parseFloat(form.advance)    || 0;
@@ -1718,10 +1447,9 @@ function OpticalsSection({ session, data, mutate, staffSubmit, can, audit, field
   const submit = () => {
     if (!form.name.trim()) { setMsg("Patient name required."); return; }
     const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form,
-      createdBy: session.id, createdByName: session.name, createdAt: ts() };
-    if (isOwner) { const approved = { ...record, status:"approved" }; mutate("opticals", arr=>[...arr, approved], approved); }
-    else { staffSubmit("opticals", record); }
-    setModal(false); setMsg(isOwner ? "Opticals saved." : "Submitted for approval ✓");
+      status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    mutate("opticals", arr=>[...arr, record], record); 
+    setModal(false); setMsg("Opticals saved successfully.");
   };
 
   const del = id => { if (confirm("Delete?")) { mutate("opticals", arr=>arr.filter(x=>x.id!==id)); audit("DELETE",{type:"opticals",id}); } };
@@ -1769,8 +1497,7 @@ function OpticalsSection({ session, data, mutate, staffSubmit, can, audit, field
         </table>
       </div>
       {modal && (
-        <Modal title="Opticals Entry" onClose={()=>setModal(false)} onSave={submit}
-          saveLabel={isOwner?"Save":"Submit for Approval"} wide>
+        <Modal title="Opticals Entry" onClose={()=>setModal(false)} onSave={submit} saveLabel="Save Entry" wide>
           <div style={{ background:"#f0ede8", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
             <label style={{ fontWeight:700 }}>🔗 Link to Patient (MR No / Patient ID / Phone)</label>
             <div style={{ display:"flex", gap:8, marginTop:6 }}>
@@ -1793,15 +1520,15 @@ function OpticalsSection({ session, data, mutate, staffSubmit, can, audit, field
             </div>
           )}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
-            <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div>
-            <div><label>Patient ID</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div>
+            <div><label>MR No (Read Only)</label><input type="text" value={form.mrNo} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div>
+            <div><label>Patient ID (Read Only)</label><input type="text" value={form.patientId} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div>
             <div></div>
             <div style={{ gridColumn:"span 2" }}><label>Name</label><input type="text" value={form.name} onChange={F("name")} /></div>
             <div><label>Phone</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} /></div>
             <div style={{ gridColumn:"1/-1" }}><label>Address</label><input type="text" value={form.address} onChange={F("address")} /></div>
             <div><label>Total Price (₹) *</label><input type="number" value={form.totalPrice} onChange={F("totalPrice")} onBlur={calcBalance} /></div>
             <div><label>Advance (₹)</label><input type="number" value={form.advance} onChange={F("advance")} onBlur={calcBalance} /></div>
-            <div><label>Balance (₹) (auto)</label><input type="number" value={form.balance} onChange={F("balance")} style={{ background:"#f0ede8" }} /></div>
+            <div><label>Balance (₹) (auto)</label><input type="number" value={form.balance} readOnly style={{ background:"#f0ede8" }} /></div>
             <div><label>Advance Payment Method</label>
               <select value={form.advancePaymentMethod} onChange={F("advancePaymentMethod")}>
                 {["Cash","UPI","Card","Cheque","NA"].map(m=><option key={m}>{m}</option>)}
@@ -1819,18 +1546,218 @@ function OpticalsSection({ session, data, mutate, staffSubmit, can, audit, field
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// TASKS  — Owner assigns tasks with deadlines to staff; staff mark complete
+// INVENTORY
+// ════════════════════════════════════════════════════════════════════════
+function InventorySection({ session, data, mutate, can, audit, fieldVis, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const rows    = (data.stock || []).filter(x => isOwner || x.branch === branch);
+  const [search, setSearch] = useState(""); const [cat, setCat] = useState("All");
+  const [modal,  setModal]  = useState(null); const [msg, setMsg] = useState("");
+  const blank = { sku: "", name: "", category: "Frames", brand: "", qty: 0, reorder: 5, cost: 0, price: 0, location: "", lensPower: "", lensType: "Single Vision", boxNo: "" };
+  const [form, setForm] = useState(blank);
+  const cats = ["All", "Frames", "Contact Lenses", "Lenses", "Accessories"];
+  const filtered = rows.filter(s => (cat === "All" || s.category === cat) && (s.name.toLowerCase().includes(search.toLowerCase()) || s.sku.toLowerCase().includes(search.toLowerCase())));
+  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  
+  const open = s => { setForm(s ? { ...s } : { ...blank, branch: isOwner ? "JPT Branch" : branch }); setModal(s || "add"); };
+  
+  const save = () => {
+    const item = { ...form, qty: Number(form.qty), reorder: Number(form.reorder), cost: Number(form.cost), price: Number(form.price) };
+    if (modal === "add") {
+      const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...item, createdBy: session.id, createdByName: session.name };
+      mutate("stock", arr => [...arr, record], record); 
+      audit("ADD", { type: "stock", sku: item.sku }); 
+    } else {
+      const updated = { ...modal, ...item }; 
+      mutate("stock", arr => arr.map(x => x.id === modal.id ? updated : x), updated); 
+      audit("EDIT", { type: "stock", id: modal.id }); 
+    }
+    setModal(null);
+  };
+  
+  return (
+    <div>
+      <SectionHeader title="Inventory" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "inventory.csv")} onAdd={can("inventory", "add") ? () => open(null) : null} msg={msg} />
+      <div className="card" style={{ overflowX: "auto" }}>
+        <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+          <input type="text" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} style={{ maxWidth: 200 }} />
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{cats.map(c => <button key={c} className={`btn btn-sm ${cat === c ? "btn-dark" : "btn-outline"}`} onClick={() => setCat(c)}>{c}</button>)}</div>
+        </div>
+        <table><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>Qty</th><th>Lens Power</th><th>Lens Type</th><th>Box No</th><th>Price</th><th>Location</th><th>Branch</th><th>By</th>{(can("inventory", "edit") || isOwner) && <th></th>}</tr></thead>
+          <tbody>{filtered.map(s => (
+            <tr key={s.id}>
+              <td style={{ fontFamily: "monospace", fontSize: 11 }}>{s.sku}</td>
+              <td style={{ fontWeight: 600 }}>{s.name}</td>
+              <td><span className="tag tag-blue">{s.category}</span></td>
+              <td><span style={{ fontWeight: 700, color: s.qty <= s.reorder ? "#dc2626" : "#16a34a" }}>{s.qty}</span></td>
+              <td style={{ fontFamily: "monospace" }}>{s.lensPower || "—"}</td>
+              <td>{s.lensType && s.category === "Lenses" ? <span className="tag tag-blue">{s.lensType}</span> : "—"}</td>
+              <td style={{ fontFamily: "monospace", fontSize: 12 }}>{s.boxNo || "—"}</td>
+              <td style={{ fontWeight: 600 }}>{currency(s.price)}</td>
+              <td style={{ fontSize: 12, color: "#9b8e82" }}>{s.location}</td>
+              <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{s.branch}</span></td>
+              <td style={{ fontSize: 11, color: "#9b8e82" }}>{s.createdByName || "—"}</td>
+              {(can("inventory", "edit") || isOwner) && (
+                <td style={{ display: "flex", gap: 5 }}>
+                  <button className="btn btn-outline btn-sm" onClick={() => open(s)}>Edit</button>
+                  {isOwner && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) { mutate("stock", arr => arr.filter(x => x.id !== s.id)); audit("DELETE", { type: "stock", id: s.id }); } }}>✕</button>}
+                </td>
+              )}
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      {modal && (
+        <Modal title={modal === "add" ? "Add Stock Item" : "Edit Stock Item"} onClose={() => setModal(null)} onSave={save} saveLabel="Save Inventory">
+          <div className="form-grid">
+            <div><label>SKU</label><input type="text" value={form.sku} onChange={F("sku")} /></div>
+            <div><label>Category</label><select value={form.category} onChange={F("category")}>{["Frames", "Contact Lenses", "Lenses", "Accessories"].map(c => <option key={c}>{c}</option>)}</select></div>
+            <div className="full"><label>Name</label><input type="text" value={form.name} onChange={F("name")} /></div>
+            <div><label>Brand</label><input type="text" value={form.brand} onChange={F("brand")} /></div>
+            <div><label>Location</label><input type="text" value={form.location} onChange={F("location")} /></div>
+            <div><label>Qty</label><input type="number" value={form.qty} onChange={F("qty")} /></div>
+            <div><label>Reorder At</label><input type="number" value={form.reorder} onChange={F("reorder")} /></div>
+            <div><label>Cost (₹)</label><input type="number" value={form.cost} onChange={F("cost")} /></div>
+            <div><label>Price (₹)</label><input type="number" value={form.price} onChange={F("price")} /></div>
+            {form.category === "Lenses" && <>
+              <div><label>Lens Power</label><input type="text" placeholder="-2.50" value={form.lensPower} onChange={F("lensPower")} /></div>
+              <div><label>Lens Type</label><select value={form.lensType} onChange={F("lensType")}>{LENS_TYPES.map(l => <option key={l}>{l}</option>)}</select></div>
+              <div><label>Box Number</label><input type="text" placeholder="B-14" value={form.boxNo} onChange={F("boxNo")} /></div>
+            </>}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// INVOICES
+// ════════════════════════════════════════════════════════════════════════
+function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const rows    = (data.invoices || []).filter(x => (isOwner || x.branch === branch));
+  const [modal, setModal] = useState(false);
+  const [form,  setForm]  = useState({ patientName: "", date: todayStr(), items: [], discount: 0 });
+  const [lN, setLN] = useState(""); const [lQ, setLQ] = useState(1); const [lP, setLP] = useState(0);
+  const [msg, setMsg] = useState("");
+  
+  const addLine = () => { if (!lN.trim()) return; setForm(f => ({ ...f, items: [...f.items, { name: lN, qty: Number(lQ), price: Number(lP) }] })); setLN(""); setLQ(1); setLP(0); };
+  const sub = (form.items || []).reduce((s, l) => s + l.qty * l.price, 0);
+  
+  const save = () => {
+    if (!form.patientName || !form.items.length) return;
+    const record = { id: `INV-${uid().slice(0, 6).toUpperCase()}`, branch: isOwner ? "JPT Branch" : branch, ...form, discount: Number(form.discount), approvalStatus: "approved", status: "Pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    mutate("invoices", arr => [...arr, record], record); 
+    audit("ADD", { type: "invoices" }); 
+    setModal(false);
+  };
+  
+  const total = inv => (inv.items || []).reduce((s, i) => s + i.qty * i.price, 0) - (inv.discount || 0);
+  
+  return (
+    <div>
+      <SectionHeader title="Sales & Invoices" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows, "invoices.csv")} onAdd={can("invoices", "add") ? () => { setForm({ patientName: "", date: todayStr(), items: [], discount: 0 }); setModal(true); } : null} msg={msg} />
+      <div className="card" style={{ overflowX: "auto" }}>
+        <table><thead><tr><th>Invoice</th><th>Date</th><th>Patient</th><th>Total</th><th>Status</th><th>By</th><th>Branch</th>{isOwner && <th></th>}</tr></thead>
+          <tbody>{rows.map(inv => (
+            <tr key={inv.id}>
+              <td style={{ fontWeight: 700 }}>{inv.id}</td><td>{inv.date}</td><td>{inv.patientName}</td>
+              <td style={{ fontWeight: 700 }}>{currency(total(inv))}</td>
+              <td><span className={`tag ${inv.status === "Paid" ? "tag-green" : "tag-yellow"}`}>{inv.status}</span></td>
+              <td style={{ fontSize: 11, color: "#9b8e82" }}>{inv.createdByName || "—"}</td>
+              <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{inv.branch}</span></td>
+              <td style={{ display: "flex", gap: 5 }}>
+                <button className="btn btn-sm" style={{ background: "#f0ede8", color: "#1a1714", border: "none", fontWeight: 600 }} onClick={() => printInvoice(inv)}>🖨 Print</button>
+                {(isOwner || can("invoices", "edit")) && inv.status === "Pending" && <button className="btn btn-sm" style={{ background: "#dcfce7", color: "#16a34a", border: "none", fontWeight: 700 }} onClick={() => mutate("invoices", arr => arr.map(i => i.id === inv.id ? { ...i, status: "Paid" } : i))}>✓ Paid</button>}
+                {isOwner && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) mutate("invoices", arr => arr.filter(i => i.id !== inv.id)); }}>✕</button>}
+              </td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      {modal && (
+        <Modal title="New Invoice" onClose={() => setModal(false)} onSave={save} saveLabel="Create Invoice" wide>
+          <div className="form-grid" style={{ marginBottom: 14 }}>
+            <div><label>Patient Name</label><input type="text" value={form.patientName} onChange={e => setForm(f => ({ ...f, patientName: e.target.value }))} /></div>
+            <div><label>Date</label><input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
+          </div>
+          <label>Add Item</label>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <input type="text" placeholder="Item name" value={lN} onChange={e => setLN(e.target.value)} style={{ flex: 2 }} />
+            <input type="number" placeholder="Qty" value={lQ} onChange={e => setLQ(e.target.value)} style={{ width: 60 }} />
+            <input type="number" placeholder="₹" value={lP} onChange={e => setLP(e.target.value)} style={{ width: 90 }} />
+            <button className="btn btn-dark btn-sm" onClick={addLine}>Add</button>
+          </div>
+          {form.items.length > 0 && <div style={{ background: "#faf9f7", borderRadius: 10, padding: "10px 14px", marginBottom: 12 }}>
+            {form.items.map((l, i) => <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>{l.name} × {l.qty}</span><span style={{ fontWeight: 600 }}>{currency(l.qty * l.price)}</span></div>)}
+            <div style={{ borderTop: "1px solid #e8e2db", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontWeight: 700 }}><span>Sub</span><span>{currency(sub)}</span></div>
+          </div>}
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <div style={{ flex: 1 }}><label>Discount (₹)</label><input type="number" value={form.discount} onChange={e => setForm(f => ({ ...f, discount: e.target.value }))} /></div>
+            <div style={{ flex: 1 }}><div style={{ fontSize: 11, color: "#9b8e82" }}>TOTAL</div><div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700 }}>{currency(sub - Number(form.discount))}</div></div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// ALERTS
+// ════════════════════════════════════════════════════════════════════════
+function AlertsSection({ session, data, mutate, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const low     = (data.stock || []).filter(s => (isOwner || s.branch === branch) && s.qty <= s.reorder);
+  const [modal, setModal] = useState(null); const [qty, setQty] = useState(0);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div className="section-title">Low Stock Alerts</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          {onSync && <button className="btn btn-outline btn-sm" onClick={onSync} disabled={syncing}>{syncing ? "⟳ Syncing…" : "⟳ Sync"}</button>}
+          <button className="btn btn-outline btn-sm" onClick={() => exportCSV(low.map(({ id, ...r }) => r), "low_stock.csv")}>⬇ CSV</button>
+        </div>
+      </div>
+      {low.length === 0
+        ? <div className="card" style={{ textAlign: "center", padding: 48, color: "#9b8e82" }}><div style={{ fontSize: 36, marginBottom: 10 }}>✓</div><div style={{ fontWeight: 600 }}>All stock levels healthy</div></div>
+        : low.map(s => (
+          <div key={s.id} style={{ background: "#fff9f5", border: "1.5px solid #fed7aa", borderRadius: 12, padding: "12px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>{s.name}</div>
+              <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 2 }}>{s.sku} · {s.branch} · Box: {s.boxNo || "—"}</div>
+            </div>
+            <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+              <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#9b8e82" }}>Stock / Reorder</div><div><span style={{ fontWeight: 700, color: "#dc2626", fontSize: 16 }}>{s.qty}</span><span style={{ color: "#9b8e82" }}> / {s.reorder}</span></div></div>
+              {isOwner && <button className="btn btn-dark btn-sm" onClick={() => { setModal(s); setQty(s.reorder - s.qty + 10); }}>+ Restock</button>}
+            </div>
+          </div>
+        ))
+      }
+      {modal && <Modal title="Restock" onClose={() => setModal(null)} onSave={() => { mutate("stock", p => p.map(s => s.id === modal.id ? { ...s, qty: s.qty + Number(qty) } : s)); setModal(null); }} saveLabel="Update" width={360}>
+        <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 12 }}>{modal.name}</div>
+        <label>Units to Add</label><input type="number" min={1} value={qty} onChange={e => setQty(e.target.value)} />
+        <div style={{ fontSize: 13, color: "#9b8e82", marginTop: 8 }}>New total: {modal.qty + Number(qty)}</div>
+      </Modal>}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// TASKS
 // ════════════════════════════════════════════════════════════════════════
 function TasksSection({ session, data, mutate, audit, accounts, onSync, syncing }) {
   const isOwner = session.role === "owner";
   const allTasks = data.tasks || [];
-  // Owner sees all tasks; staff see only tasks assigned to them
   const rows = isOwner ? allTasks : allTasks.filter(t => t.assignedTo === session.id);
 
   const [modal, setModal] = useState(false);
   const [form,  setForm]  = useState({});
   const [msg,   setMsg]   = useState("");
-  const [filter,setFilter]= useState("all"); // all | pending | done | overdue
+  const [filter,setFilter]= useState("all"); 
 
   const staffList = (accounts || []).filter(a => a.role === "staff");
 
@@ -1939,7 +1866,7 @@ function TasksSection({ session, data, mutate, audit, accounts, onSync, syncing 
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// REMINDERS — per MR No / Patient ID (e.g. lens delivery, follow-up visit)
+// REMINDERS
 // ════════════════════════════════════════════════════════════════════════
 function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
   const isOwner = session.role === "owner";
@@ -1951,7 +1878,7 @@ function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
   const [form,  setForm]  = useState({});
   const [msg,   setMsg]   = useState("");
   const [mrLookup, setMrLookup] = useState("");
-  const [filter, setFilter] = useState("upcoming"); // upcoming | done | all
+  const [filter, setFilter] = useState("upcoming");
 
   const blank = () => ({
     mrNo: "", patientId: "", name: "", phone: "",
@@ -2054,8 +1981,8 @@ function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
             {mrLookup && <div style={{ fontSize:12,marginTop:6,color:mrLookup.startsWith("✓")?"#16a34a":"#dc2626" }}>{mrLookup}</div>}
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
-            <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div>
-            <div><label>Patient ID</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div>
+            <div><label>MR No (Read Only)</label><input type="text" value={form.mrNo} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div>
+            <div><label>Patient ID (Read Only)</label><input type="text" value={form.patientId} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div>
             <div style={{ gridColumn:"1/-1" }}><label>Name *</label><input type="text" value={form.name} onChange={F("name")} /></div>
             <div><label>Phone</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} /></div>
             <div><label>Reminder Type</label>
@@ -2074,214 +2001,25 @@ function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// INVENTORY
-// ════════════════════════════════════════════════════════════════════════
-function InventorySection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
-  const isOwner = session.role === "owner";
-  const branch  = session.branch || "JPT Branch";
-  const rows    = (data.stock || []).filter(x => isOwner || x.branch === branch);
-  const [search, setSearch] = useState(""); const [cat, setCat] = useState("All");
-  const [modal,  setModal]  = useState(null); const [msg, setMsg] = useState("");
-  const blank = { sku: "", name: "", category: "Frames", brand: "", qty: 0, reorder: 5, cost: 0, price: 0, location: "", lensPower: "", lensType: "Single Vision", boxNo: "" };
-  const [form, setForm] = useState(blank);
-  const cats = ["All", "Frames", "Contact Lenses", "Lenses", "Accessories"];
-  const filtered = rows.filter(s => (cat === "All" || s.category === cat) && (s.name.toLowerCase().includes(search.toLowerCase()) || s.sku.toLowerCase().includes(search.toLowerCase())));
-  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
-  const open = s => { setForm(s ? { ...s } : { ...blank, branch: isOwner ? "JPT Branch" : branch }); setModal(s || "add"); };
-  const save = () => {
-    const item = { ...form, qty: Number(form.qty), reorder: Number(form.reorder), cost: Number(form.cost), price: Number(form.price) };
-    if (modal === "add") {
-      const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...item, createdBy: session.id, createdByName: session.name };
-      if (isOwner) { mutate("stock", arr => [...arr, record], record); audit("OWNER_ADD", { type: "stock", sku: item.sku }); }
-      else { staffSubmit("stock", record); setMsg("Submitted for approval."); }
-    } else {
-      if (isOwner) { const updated = { ...modal, ...item }; mutate("stock", arr => arr.map(x => x.id === modal.id ? updated : x), updated); audit("EDIT", { type: "stock", id: modal.id }); }
-      else { staffSubmit("stock", { ...modal, ...item }); setMsg("Edit submitted for approval."); }
-    }
-    setModal(null);
-  };
-  return (
-    <div>
-      <SectionHeader title="Inventory" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "inventory.csv")} onAdd={can("inventory", "add") ? () => open(null) : null} msg={msg} />
-      <div className="card" style={{ overflowX: "auto" }}>
-        <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-          <input type="text" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} style={{ maxWidth: 200 }} />
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{cats.map(c => <button key={c} className={`btn btn-sm ${cat === c ? "btn-dark" : "btn-outline"}`} onClick={() => setCat(c)}>{c}</button>)}</div>
-        </div>
-        <table><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>Qty</th><th>Lens Power</th><th>Lens Type</th><th>Box No</th><th>Price</th><th>Location</th><th>Branch</th><th>By</th>{(can("inventory", "edit") || isOwner) && <th></th>}</tr></thead>
-          <tbody>{filtered.map(s => (
-            <tr key={s.id}>
-              <td style={{ fontFamily: "monospace", fontSize: 11 }}>{s.sku}</td>
-              <td style={{ fontWeight: 600 }}>{s.name}</td>
-              <td><span className="tag tag-blue">{s.category}</span></td>
-              <td><span style={{ fontWeight: 700, color: s.qty <= s.reorder ? "#dc2626" : "#16a34a" }}>{s.qty}</span></td>
-              <td style={{ fontFamily: "monospace" }}>{s.lensPower || "—"}</td>
-              <td>{s.lensType && s.category === "Lenses" ? <span className="tag tag-blue">{s.lensType}</span> : "—"}</td>
-              <td style={{ fontFamily: "monospace", fontSize: 12 }}>{s.boxNo || "—"}</td>
-              <td style={{ fontWeight: 600 }}>{currency(s.price)}</td>
-              <td style={{ fontSize: 12, color: "#9b8e82" }}>{s.location}</td>
-              <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{s.branch}</span></td>
-              <td style={{ fontSize: 11, color: "#9b8e82" }}>{s.createdByName || "—"}</td>
-              {(can("inventory", "edit") || isOwner) && (
-                <td style={{ display: "flex", gap: 5 }}>
-                  <button className="btn btn-outline btn-sm" onClick={() => open(s)}>Edit</button>
-                  {isOwner && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) { mutate("stock", arr => arr.filter(x => x.id !== s.id)); audit("DELETE", { type: "stock", id: s.id }); } }}>✕</button>}
-                </td>
-              )}
-            </tr>
-          ))}</tbody>
-        </table>
-      </div>
-      {modal && (
-        <Modal title={modal === "add" ? "Add Stock Item" : "Edit Stock Item"} onClose={() => setModal(null)} onSave={save} saveLabel={isOwner ? "Save" : "Submit for Approval"}>
-          <div className="form-grid">
-            <div><label>SKU</label><input type="text" value={form.sku} onChange={F("sku")} /></div>
-            <div><label>Category</label><select value={form.category} onChange={F("category")}>{["Frames", "Contact Lenses", "Lenses", "Accessories"].map(c => <option key={c}>{c}</option>)}</select></div>
-            <div className="full"><label>Name</label><input type="text" value={form.name} onChange={F("name")} /></div>
-            <div><label>Brand</label><input type="text" value={form.brand} onChange={F("brand")} /></div>
-            <div><label>Location</label><input type="text" value={form.location} onChange={F("location")} /></div>
-            <div><label>Qty</label><input type="number" value={form.qty} onChange={F("qty")} /></div>
-            <div><label>Reorder At</label><input type="number" value={form.reorder} onChange={F("reorder")} /></div>
-            <div><label>Cost (₹)</label><input type="number" value={form.cost} onChange={F("cost")} /></div>
-            <div><label>Price (₹)</label><input type="number" value={form.price} onChange={F("price")} /></div>
-            {form.category === "Lenses" && <>
-              <div><label>Lens Power</label><input type="text" placeholder="-2.50" value={form.lensPower} onChange={F("lensPower")} /></div>
-              <div><label>Lens Type</label><select value={form.lensType} onChange={F("lensType")}>{LENS_TYPES.map(l => <option key={l}>{l}</option>)}</select></div>
-              <div><label>Box Number</label><input type="text" placeholder="B-14" value={form.boxNo} onChange={F("boxNo")} /></div>
-            </>}
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// INVOICES
-// ════════════════════════════════════════════════════════════════════════
-function InvoicesSection({ session, data, mutate, staffSubmit, can, audit, onSync, syncing }) {
-  const isOwner = session.role === "owner";
-  const branch  = session.branch || "JPT Branch";
-  const rows    = (data.invoices || []).filter(x => (isOwner || x.branch === branch) && x.approvalStatus === "approved");
-  const [modal, setModal] = useState(false);
-  const [form,  setForm]  = useState({ patientName: "", date: todayStr(), items: [], discount: 0 });
-  const [lN, setLN] = useState(""); const [lQ, setLQ] = useState(1); const [lP, setLP] = useState(0);
-  const [msg, setMsg] = useState("");
-  const addLine = () => { if (!lN.trim()) return; setForm(f => ({ ...f, items: [...f.items, { name: lN, qty: Number(lQ), price: Number(lP) }] })); setLN(""); setLQ(1); setLP(0); };
-  const sub = (form.items || []).reduce((s, l) => s + l.qty * l.price, 0);
-  const save = () => {
-    if (!form.patientName || !form.items.length) return;
-    const record = { id: `INV-${uid().slice(0, 6).toUpperCase()}`, branch: isOwner ? "JPT Branch" : branch, ...form, discount: Number(form.discount), approvalStatus: "pending", status: "Pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
-    if (isOwner) { const approved = { ...record, approvalStatus: "approved" }; mutate("invoices", arr => [...arr, approved], approved); audit("OWNER_ADD", { type: "invoices" }); }
-    else { staffSubmit("invoices", record); setMsg("Submitted for approval."); }
-    setModal(false);
-  };
-  const total = inv => (inv.items || []).reduce((s, i) => s + i.qty * i.price, 0) - (inv.discount || 0);
-  return (
-    <div>
-      <SectionHeader title="Sales & Invoices" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows, "invoices.csv")} onAdd={can("invoices", "add") ? () => { setForm({ patientName: "", date: todayStr(), items: [], discount: 0 }); setModal(true); } : null} msg={msg} />
-      <div className="card" style={{ overflowX: "auto" }}>
-        <table><thead><tr><th>Invoice</th><th>Date</th><th>Patient</th><th>Total</th><th>Status</th><th>By</th><th>Branch</th>{isOwner && <th></th>}</tr></thead>
-          <tbody>{rows.map(inv => (
-            <tr key={inv.id}>
-              <td style={{ fontWeight: 700 }}>{inv.id}</td><td>{inv.date}</td><td>{inv.patientName}</td>
-              <td style={{ fontWeight: 700 }}>{currency(total(inv))}</td>
-              <td><span className={`tag ${inv.status === "Paid" ? "tag-green" : "tag-yellow"}`}>{inv.status}</span></td>
-              <td style={{ fontSize: 11, color: "#9b8e82" }}>{inv.createdByName || "—"}</td>
-              <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{inv.branch}</span></td>
-              {isOwner && <td style={{ display: "flex", gap: 5 }}>
-                <button className="btn btn-sm" style={{ background: "#f0ede8", color: "#1a1714", border: "none", fontWeight: 600 }} onClick={() => printInvoice(inv)}>🖨 Print</button>
-                {inv.status === "Pending" && <button className="btn btn-sm" style={{ background: "#dcfce7", color: "#16a34a", border: "none", fontWeight: 700 }} onClick={() => mutate("invoices", arr => arr.map(i => i.id === inv.id ? { ...i, status: "Paid" } : i))}>✓ Paid</button>}
-                <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) mutate("invoices", arr => arr.filter(i => i.id !== inv.id)); }}>✕</button>
-              </td>}
-            </tr>
-          ))}</tbody>
-        </table>
-      </div>
-      {modal && (
-        <Modal title="New Invoice" onClose={() => setModal(false)} onSave={save} saveLabel={isOwner ? "Create Invoice" : "Submit for Approval"} wide>
-          <div className="form-grid" style={{ marginBottom: 14 }}>
-            <div><label>Patient Name</label><input type="text" value={form.patientName} onChange={e => setForm(f => ({ ...f, patientName: e.target.value }))} /></div>
-            <div><label>Date</label><input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
-          </div>
-          <label>Add Item</label>
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <input type="text" placeholder="Item name" value={lN} onChange={e => setLN(e.target.value)} style={{ flex: 2 }} />
-            <input type="number" placeholder="Qty" value={lQ} onChange={e => setLQ(e.target.value)} style={{ width: 60 }} />
-            <input type="number" placeholder="₹" value={lP} onChange={e => setLP(e.target.value)} style={{ width: 90 }} />
-            <button className="btn btn-dark btn-sm" onClick={addLine}>Add</button>
-          </div>
-          {form.items.length > 0 && <div style={{ background: "#faf9f7", borderRadius: 10, padding: "10px 14px", marginBottom: 12 }}>
-            {form.items.map((l, i) => <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>{l.name} × {l.qty}</span><span style={{ fontWeight: 600 }}>{currency(l.qty * l.price)}</span></div>)}
-            <div style={{ borderTop: "1px solid #e8e2db", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontWeight: 700 }}><span>Sub</span><span>{currency(sub)}</span></div>
-          </div>}
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <div style={{ flex: 1 }}><label>Discount (₹)</label><input type="number" value={form.discount} onChange={e => setForm(f => ({ ...f, discount: e.target.value }))} /></div>
-            <div style={{ flex: 1 }}><div style={{ fontSize: 11, color: "#9b8e82" }}>TOTAL</div><div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700 }}>{currency(sub - Number(form.discount))}</div></div>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// ALERTS
-// ════════════════════════════════════════════════════════════════════════
-function AlertsSection({ session, data, mutate, onSync, syncing }) {
-  const isOwner = session.role === "owner";
-  const branch  = session.branch || "JPT Branch";
-  const low     = (data.stock || []).filter(s => (isOwner || s.branch === branch) && s.qty <= s.reorder);
-  const [modal, setModal] = useState(null); const [qty, setQty] = useState(0);
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div className="section-title">Low Stock Alerts</div>
-        <div style={{ display: "flex", gap: 10 }}>
-          {onSync && <button className="btn btn-outline btn-sm" onClick={onSync} disabled={syncing}>{syncing ? "⟳ Syncing…" : "⟳ Sync"}</button>}
-          <button className="btn btn-outline btn-sm" onClick={() => exportCSV(low.map(({ id, ...r }) => r), "low_stock.csv")}>⬇ CSV</button>
-        </div>
-      </div>
-      {low.length === 0
-        ? <div className="card" style={{ textAlign: "center", padding: 48, color: "#9b8e82" }}><div style={{ fontSize: 36, marginBottom: 10 }}>✓</div><div style={{ fontWeight: 600 }}>All stock levels healthy</div></div>
-        : low.map(s => (
-          <div key={s.id} style={{ background: "#fff9f5", border: "1.5px solid #fed7aa", borderRadius: 12, padding: "12px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontWeight: 700 }}>{s.name}</div>
-              <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 2 }}>{s.sku} · {s.branch} · Box: {s.boxNo || "—"}</div>
-            </div>
-            <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-              <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#9b8e82" }}>Stock / Reorder</div><div><span style={{ fontWeight: 700, color: "#dc2626", fontSize: 16 }}>{s.qty}</span><span style={{ color: "#9b8e82" }}> / {s.reorder}</span></div></div>
-              {isOwner && <button className="btn btn-dark btn-sm" onClick={() => { setModal(s); setQty(s.reorder - s.qty + 10); }}>+ Restock</button>}
-            </div>
-          </div>
-        ))
-      }
-      {modal && <Modal title="Restock" onClose={() => setModal(null)} onSave={() => { mutate("stock", p => p.map(s => s.id === modal.id ? { ...s, qty: s.qty + Number(qty) } : s)); setModal(null); }} saveLabel="Update" width={360}>
-        <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 12 }}>{modal.name}</div>
-        <label>Units to Add</label><input type="number" min={1} value={qty} onChange={e => setQty(e.target.value)} />
-        <div style={{ fontSize: 13, color: "#9b8e82", marginTop: 8 }}>New total: {modal.qty + Number(qty)}</div>
-      </Modal>}
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
 // MANAGE STAFF (Users)
+// Added Designation (Role)
 // ════════════════════════════════════════════════════════════════════════
 function UsersSection({ accounts, setAccounts, audit }) {
   const staff = accounts.filter(a => a.role === "staff");
   const [addModal, setAddModal] = useState(false);
-  const [newUser, setNewUser]   = useState({ id: "", name: "", branch: BRANCHES[0], password: "" });
+  const [newUser, setNewUser]   = useState({ id: "", name: "", designation: "Staff", branch: BRANCHES[0], password: "" });
+  
   const addStaff = () => {
     if (!newUser.id || !newUser.name || !newUser.password) { alert("Fill all fields."); return; }
     if (accounts.find(a => a.id === newUser.id)) { alert("User ID already exists."); return; }
     const perms = {}; SECTIONS.forEach(s => { perms[s] = { view: false, add: false, edit: false }; });
     setAccounts(p => [...p, { ...newUser, role: "staff", perms }]);
-    audit("CREATE_STAFF", { userId: newUser.id, name: newUser.name });
-    setAddModal(false); setNewUser({ id: "", name: "", branch: BRANCHES[0], password: "" });
+    audit("ADD", { userId: newUser.id, name: newUser.name });
+    setAddModal(false); setNewUser({ id: "", name: "", designation: "Staff", branch: BRANCHES[0], password: "" });
   };
-  const delStaff = id => { if (confirm("Delete staff account?")) { setAccounts(p => p.filter(a => a.id !== id)); audit("DELETE_STAFF", { userId: id }); } };
+  
+  const delStaff = id => { if (confirm("Delete staff account?")) { setAccounts(p => p.filter(a => a.id !== id)); audit("DELETE", { userId: id }); } };
+  
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
@@ -2293,8 +2031,8 @@ function UsersSection({ accounts, setAccounts, audit }) {
         <div key={acc.id} className="card" style={{ marginBottom: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
-              <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name}</div>
-              <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>ID: <code style={CS}>{acc.id}</code> · {acc.branch} · Password: <code style={CS}>{acc.password}</code></div>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name} <span style={{ fontSize: 12, fontWeight: 400, color: "#6b5e52", background: "#f0ede8", padding: "2px 8px", borderRadius: 12, marginLeft: 6 }}>{acc.designation}</span></div>
+              <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 4 }}>ID: <code style={CS}>{acc.id}</code> · {acc.branch} · Password: <code style={CS}>{acc.password}</code></div>
             </div>
             <button className="btn btn-danger btn-sm" onClick={() => delStaff(acc.id)}>Delete</button>
           </div>
@@ -2312,6 +2050,7 @@ function UsersSection({ accounts, setAccounts, audit }) {
           <div className="form-grid">
             <div><label>User ID (login)</label><input type="text" placeholder="staff_jpt2" value={newUser.id} onChange={e => setNewUser(f => ({ ...f, id: e.target.value }))} /></div>
             <div><label>Display Name</label><input type="text" value={newUser.name} onChange={e => setNewUser(f => ({ ...f, name: e.target.value }))} /></div>
+            <div><label>Designation (Role)</label><input type="text" placeholder="e.g. Optometrist" value={newUser.designation} onChange={e => setNewUser(f => ({ ...f, designation: e.target.value }))} /></div>
             <div><label>Branch</label><select value={newUser.branch} onChange={e => setNewUser(f => ({ ...f, branch: e.target.value }))}>{BRANCHES.map(b => <option key={b}>{b}</option>)}</select></div>
             <div><label>Password</label><input type="text" value={newUser.password} onChange={e => setNewUser(f => ({ ...f, password: e.target.value }))} /></div>
           </div>
@@ -2322,7 +2061,7 @@ function UsersSection({ accounts, setAccounts, audit }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// SUPABASE SECTION  (Connect + SQL + Sync)
+// SUPABASE SECTION
 // ════════════════════════════════════════════════════════════════════════
 function SupabaseSection({ sbCreds, sbStatus, onConnect, onSync, onPush }) {
   const [url, setUrl]   = useState(sbCreds.url || "");
@@ -2332,158 +2071,8 @@ function SupabaseSection({ sbCreds, sbStatus, onConnect, onSync, onPush }) {
   const connect = async () => {
     setMsg("Testing connection…");
     const ok = await onConnect(url, key);
-    setMsg(ok ? "✅ Credentials saved! Push to DB to sync your data. (Note: live sync works best from your Vercel URL, not Claude.ai)" : "❌ Invalid URL or key format. URL must contain supabase.co and key must start with eyJ.");
+    setMsg(ok ? "✅ Credentials saved! Push to DB to sync your data. (Note: live sync works best from your Vercel URL)" : "❌ Invalid URL or key format.");
   };
-
-  const SQL = `-- ══════════════════════════════════════════════════════════════
--- OptiManager v4 — Supabase Setup SQL
--- IMPORTANT: Column names use camelCase to match the JavaScript app.
--- Run this entire block in Supabase → SQL Editor → New Query
--- ══════════════════════════════════════════════════════════════
-
--- Patients table
-create table if not exists patients (
-  id text primary key,
-  branch text, timestamp text, date text, time text,
-  name text, phone text, town text,
-  "paymentMethod" text, advance numeric, "advancePaymentMethod" text,
-  status text,
-  "createdBy" text, "createdByName" text, "createdAt" text,
-  "approvedBy" text, "approvedByName" text, "approvedAt" text
-);
-
--- Patient Bill table
-create table if not exists "patientBill" (
-  id text primary key,
-  branch text, timestamp text, date text, time text,
-  "mrNo" text, name text, phone text, town text, gender text, age int,
-  complaint text, "pastHistory" text,
-  "reSpherAR" text, "reCylAR" text, "reAxisAR" text,
-  "leSpherAR" text, "leCylAR" text, "leAxisAR" text,
-  "reSpherSub" text, "reCylSub" text, "reAxisSub" text,
-  "leSpherSub" text, "leCylSub" text, "leAxisSub" text,
-  add text, eyelids text, conjunctiva text, cornea text,
-  "anteriorChamber" text, iris text, pupil text, lens text,
-  "ocularMovements" text, fundus text, advice text, optom text,
-  "lensType" text, "frameNo" text, advance numeric, "paymentMethod" text,
-  "deliveryStatus" text, balance numeric, status text,
-  "createdBy" text, "createdByName" text, "createdAt" text,
-  "approvedBy" text, "approvedByName" text, "approvedAt" text
-);
-
--- Optometrist table
-create table if not exists optometrist (
-  id text primary key,
-  branch text, timestamp text, date text, time text,
-  "mrNo" text, "patientId" text, name text, phone text,
-  complaint text, "pastHistory" text, "optomName" text,
-  status text,
-  "createdBy" text, "createdByName" text, "createdAt" text,
-  "approvedBy" text, "approvedByName" text, "approvedAt" text
-);
-
--- Opticals table
-create table if not exists opticals (
-  id text primary key,
-  branch text, timestamp text, date text, time text,
-  "mrNo" text, "patientId" text, name text, phone text, address text,
-  "totalPrice" numeric, advance numeric, "advancePaymentMethod" text,
-  "transactionId" text, balance numeric, "optomName" text,
-  status text,
-  "createdBy" text, "createdByName" text, "createdAt" text,
-  "approvedBy" text, "approvedByName" text, "approvedAt" text
-);
-
--- Tasks table
-create table if not exists tasks (
-  id text primary key,
-  title text, description text,
-  "assignedTo" text, deadline text, priority text, status text,
-  "createdBy" text, "createdByName" text, "createdAt" text,
-  "completedAt" text
-);
-
--- Reminders table
-create table if not exists reminders (
-  id text primary key,
-  branch text,
-  "mrNo" text, "patientId" text, name text, phone text,
-  "reminderType" text, "reminderDate" text, notes text, status text,
-  "createdBy" text, "createdByName" text, "createdAt" text,
-  "completedAt" text
-);
-
--- Stock / Inventory table
-create table if not exists stock (
-  id text primary key,
-  branch text, sku text, name text,
-  category text, brand text, qty int, reorder int,
-  cost numeric, price numeric, location text,
-  "lensPower" text, "lensType" text, "boxNo" text,
-  "createdBy" text, "createdByName" text
-);
-
--- Sales & Invoices table
-create table if not exists invoices (
-  id text primary key,
-  branch text, date text,
-  "patientName" text, items jsonb, discount numeric,
-  status text, "approvalStatus" text,
-  "createdBy" text, "createdByName" text, "createdAt" text
-);
-
--- Pending Approval Queue — record column MUST be jsonb
-create table if not exists pending_queue (
-  id text primary key,
-  type text,
-  record jsonb,
-  "submittedBy" text,
-  "submittedByName" text,
-  branch text,
-  "submittedAt" text
-);
-
--- Accounts / Staff table
-create table if not exists accounts (
-  id text primary key,
-  name text, role text, branch text,
-  password text, perms jsonb
-);
-
--- Audit Log table
-create table if not exists audit_log (
-  id text primary key,
-  action text, detail jsonb,
-  "userId" text, "userName" text, branch text, at text
-);
-
--- ══════════════════════════════════════════════════════════════
--- Row Level Security — allow all operations via anon key
--- (Required for the app to read/write data)
--- ══════════════════════════════════════════════════════════════
-alter table patients enable row level security;
-alter table "patientBill" enable row level security;
-alter table optometrist enable row level security;
-alter table opticals enable row level security;
-alter table stock enable row level security;
-alter table invoices enable row level security;
-alter table pending_queue enable row level security;
-alter table accounts enable row level security;
-alter table audit_log enable row level security;
-alter table tasks enable row level security;
-alter table reminders enable row level security;
-
-create policy "allow_all" on patients for all using (true) with check (true);
-create policy "allow_all" on "patientBill" for all using (true) with check (true);
-create policy "allow_all" on optometrist for all using (true) with check (true);
-create policy "allow_all" on opticals for all using (true) with check (true);
-create policy "allow_all" on stock for all using (true) with check (true);
-create policy "allow_all" on invoices for all using (true) with check (true);
-create policy "allow_all" on pending_queue for all using (true) with check (true);
-create policy "allow_all" on accounts for all using (true) with check (true);
-create policy "allow_all" on audit_log for all using (true) with check (true);
-create policy "allow_all" on tasks for all using (true) with check (true);
-create policy "allow_all" on reminders for all using (true) with check (true);`;
 
   const statusColor = { ok: "#16a34a", error: "#dc2626", testing: "#d97706", pushing: "#1d4ed8", syncing: "#7c3aed", idle: "#9b8e82" };
 
@@ -2511,34 +2100,18 @@ create policy "allow_all" on reminders for all using (true) with check (true);`;
           </div>
         </div>
         <div className="card">
-          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Quick Steps</div>
-          {[
-            ["1", "Go to supabase.com → New Project", "#1d4ed8"],
-            ["2", "Copy Project URL + Anon Key from Settings → API", "#7c3aed"],
-            ["3", "Paste above → click Connect & Test", "#16a34a"],
-            ["4", "Run the SQL below in Supabase SQL Editor", "#d97706"],
-            ["5", "Click Push to DB to upload your local data", "#dc2626"],
-          ].map(([n, t, c]) => (
-            <div key={n} style={{ display: "flex", gap: 12, marginBottom: 10, alignItems: "flex-start" }}>
-              <div style={{ width: 24, height: 24, minWidth: 24, background: c, color: "#fff", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12 }}>{n}</div>
-              <div style={{ fontSize: 13 }}>{t}</div>
-            </div>
-          ))}
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Note regarding Pending Queue</div>
+          <div style={{ fontSize: 13, color: "#6b5e52", lineHeight: 1.8 }}>
+            The Approval Queue system has been completely removed. Based on your SQL query, the `pending_queue` table may still exist in your Supabase project, but it is no longer used or required by this app. Staff submissions with "Add" permissions now save directly to the respective live tables.
+          </div>
         </div>
-      </div>
-
-      <div className="card">
-        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Complete SQL Setup Script</div>
-        <div style={{ fontSize: 12, color: "#9b8e82", marginBottom: 10 }}>Copy and run this entire block in Supabase → SQL Editor → New Query</div>
-        <pre style={{ background: "#1a1714", color: "#f0ede8", padding: "16px 18px", borderRadius: 12, fontSize: 11, overflowX: "auto", lineHeight: 1.7 }}>{SQL}</pre>
-        <button className="btn btn-outline btn-sm" style={{ marginTop: 12 }} onClick={() => { navigator.clipboard.writeText(SQL); }}>📋 Copy SQL</button>
       </div>
     </div>
   );
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// LAUNCH GUIDE  (step-by-step how to publish this app)
+// LAUNCH GUIDE
 // ════════════════════════════════════════════════════════════════════════
 function LaunchGuide() {
   const [step, setStep] = useState(0);
@@ -2572,10 +2145,10 @@ function LaunchGuide() {
       content: (
         <div style={{ display:"grid", gap:14 }}>
           {[
-            ["Go to supabase.com", "Click Start your project → sign in with GitHub (free). No credit card needed."],
+            ["Go to supabase.com", "Click Start your project → sign in with GitHub (free)."],
             ["Create a new project", "Click New Project. Name: optimanager. Pick region: ap-south-1 (Mumbai). Set a DB password. Click Create."],
             ["Get your credentials", "After 60 seconds → Project Settings → API. Copy the Project URL and anon/public key."],
-            ["Run SQL tables", "Go to SQL Editor → New Query → paste the supabase_setup_v2.sql file → click Run. You will see: Success."],
+            ["Run SQL tables", "Go to SQL Editor → New Query → paste the supabase setup sql you provided → click Run."],
             ["Connect in app", "Open OptiManager → Cloud Sync → paste URL and key → Connect and Test → Push to DB."],
           ].map(([t, d], i) => (
             <div key={i} style={{ display:"flex", gap:14 }}>
@@ -2587,77 +2160,26 @@ function LaunchGuide() {
       )
     },
     {
-      title: "Step 2 — Save Code to GitHub",
-      icon: "💻",
-      content: (
-        <div style={{ display:"grid", gap:14 }}>
-          <p style={{ fontSize:13, color:"#6b5e52" }}>GitHub stores your code and connects to Vercel for deployment.</p>
-          {[
-            ["Create a GitHub account", "Go to github.com → Sign up (free). Verify your email."],
-            ["Create a new repository", "Click + top right → New repository. Name: optimanager. Set to Public. Tick Add a README. Click Create repository."],
-            ["Upload index.html", "Click Add file → Create new file. Name: index.html. Paste the HTML boilerplate (html tag, head with title OptiManager, body with div id=root and a script tag pointing to /src/main.jsx). Commit."],
-            ["Upload package.json", "Click Add file → Create new file. Name: package.json. Paste the JSON with react and react + react + reactDOM as dependencies and vite as devDependency. Commit."],
-            ["Upload vite.config.js", "Click Add file → Create new file. Name: vite.config.js. Paste: import defineConfig from vite and plugin-react, export default defineConfig with plugins react(). Commit."],
-            ["Upload src/main.jsx", "Click Add file → Create new file. Type src/main.jsx as the name (GitHub creates the folder). Paste the React entry point that renders App into the root div. Commit."],
-            ["Upload src/App.jsx", "Click Add file → Upload files. Upload the optical-shop-manager.jsx file you downloaded from Claude. After upload, rename it to App.jsx. Commit."],
-          ].map(([t, d], i) => (
-            <div key={i} style={{ display:"flex", gap:14 }}>
-              <div style={{ width:28, height:28, minWidth:28, background:"#1d4ed8", color:"#fff", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:13 }}>{i+1}</div>
-              <div><div style={{ fontWeight:700, fontSize:14 }}>{t}</div><div style={{ fontSize:13, color:"#6b5e52", marginTop:3, lineHeight:1.7 }}>{d}</div></div>
-            </div>
-          ))}
-        </div>
-      )
-    },
-    {
-      title: "Step 3 — Deploy on Vercel",
-      icon: "🚀",
-      content: (
-        <div style={{ display:"grid", gap:14 }}>
-          <p style={{ fontSize:13, color:"#6b5e52" }}>Vercel gives you a free live URL like optimanager.vercel.app in about 2 minutes.</p>
-          {[
-            ["Sign up at vercel.com", "Click Start Deploying → Continue with GitHub. Uses the same GitHub account."],
-            ["Import your repository", "Click Add New → Project. Find your optimanager repository → click Import."],
-            ["Configure build settings", "Framework Preset: Vite. Build Command: vite build. Output Directory: dist. Leave everything else as default."],
-            ["Click Deploy", "Vercel builds and deploys automatically. Wait about 2 minutes."],
-            ["Get your live URL", "You will see a Congratulations screen with a URL like optimanager-xyz.vercel.app. Click Visit — your app is live!"],
-            ["Share with staff", "Copy the URL and send it on WhatsApp. Staff opens it in Chrome on any phone and logs in with their ID and password."],
-            ["Future updates", "When you get a new JSX file from Claude, go to GitHub, open src/App.jsx, click the pencil icon, paste the new code, commit. Vercel auto-rebuilds in 1 to 2 minutes."],
-          ].map(([t, d], i) => (
-            <div key={i} style={{ display:"flex", gap:14 }}>
-              <div style={{ width:28, height:28, minWidth:28, background:"#16a34a", color:"#fff", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:13 }}>{i+1}</div>
-              <div><div style={{ fontWeight:700, fontSize:14 }}>{t}</div><div style={{ fontSize:13, color:"#6b5e52", marginTop:3, lineHeight:1.7 }}>{d}</div></div>
-            </div>
-          ))}
-        </div>
-      )
-    },
-    {
-      title: "Step 4 — Daily Use & Staff Access",
+      title: "Step 2 — Vercel & Direct Access",
       icon: "👥",
       content: (
         <div style={{ display:"grid", gap:14 }}>
           {[
             ["Share the URL with staff", "Send the Vercel URL to your team on WhatsApp. They open it in Chrome on phone or computer."],
-            ["Each person uses their login", "Go to Manage Staff to create IDs and passwords. Share privately."],
-            ["Staff submit, you approve", "Staff additions go to your Approval Queue. Login as Owner and Accept or Reject each one."],
+            ["Each person uses their login", "Go to Manage Staff to create IDs, passwords, and Designations. Share privately."],
+            ["Direct Additions", "Staff additions go straight into the live system. There is no approval queue. Ensure the permissions are correct in the Dashboard Builder."],
             ["Dashboard Builder", "Toggle which fields appear per section and which actions each staff member can do."],
-            ["Audit Log", "Every login, submission, approval, and deletion is recorded with name and timestamp."],
-            ["Cloud Sync", "Data saves locally AND in Supabase. Use Pull from DB to sync latest from the cloud."],
-            ["Backup anytime", "Every section has a CSV export button to download your data."],
+            ["Audit Log", "Every login, addition, edit, and deletion is recorded with name and timestamp."],
+            ["Cloud Sync", "Data saves directly to Supabase. Use Pull from DB to sync latest from the cloud if required."],
           ].map(([t, d], i) => (
             <div key={i} style={{ display:"flex", gap:14 }}>
               <div style={{ width:28, height:28, minWidth:28, background:"#7c3aed", color:"#fff", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:13 }}>{i+1}</div>
               <div><div style={{ fontWeight:700, fontSize:14 }}>{t}</div><div style={{ fontSize:13, color:"#6b5e52", marginTop:3, lineHeight:1.7 }}>{d}</div></div>
             </div>
           ))}
-          <div style={{ marginTop:8, background:"#dcfce7", borderRadius:12, padding:"14px 18px", border:"1.5px solid #bbf7d0" }}>
-            <div style={{ fontWeight:700, color:"#16a34a", marginBottom:6 }}>Total Cost: Rs. 0 per month</div>
-            <div style={{ fontSize:13, color:"#15803d", lineHeight:1.8 }}>GitHub Free · Vercel Free · Supabase Free (500MB, 50k API calls/day). All three are completely free for a small optical shop with 2 branches.</div>
-          </div>
         </div>
       )
-    },
+    }
   ];
 
     return (
@@ -2665,7 +2187,6 @@ function LaunchGuide() {
       <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>🚀 Launch Guide</div>
       <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 22 }}>Step-by-step: from this app to a live URL your staff can open on any phone.</div>
 
-      {/* Step tabs */}
       <div style={{ display: "flex", gap: 6, marginBottom: 22, flexWrap: "wrap" }}>
         {STEPS.map((s, i) => (
           <button key={i} className={`btn btn-sm ${step === i ? "btn-dark" : "btn-outline"}`} onClick={() => setStep(i)}>
