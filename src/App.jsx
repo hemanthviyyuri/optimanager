@@ -1,20 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 
-// ════════════════════════════════════════════════════════════════════════
-// v4.8 — Ophthalmology HMS  |  Manual MR No · Auto Patient ID · Crash Proof
-// ════════════════════════════════════════════════════════════════════════
 const APP_VER  = "4.8";
 const BRANCHES = ["JPT Branch", "PRP Branch"];
 const SECTIONS = ["patients","patientBill","optometrist","opticals","inventory","invoices","alerts"];
 const SECTION_LABELS = { patients:"OP Registration", patientBill:"K Sheet Entry", optometrist:"Optometrist", opticals:"Opticals", inventory:"Inventory", invoices:"Sales & Invoices", alerts:"Low Stock Alerts" };
 const LENS_TYPES     = ["Single Vision","Bifocal","Progressive","Anti-Reflective","Photochromic","Blue Cut","UV400","Polarized","High Index 1.60","High Index 1.67","High Index 1.74","Trivex","Polycarbonate","Toric (Contact)","Multifocal (Contact)"];
 const DELIVERY_STATUS= ["Delivered","Not Ready","Fixing Completed But Not Delivered"];
-
 const DESIGNATIONS   = ["FRONT DESK STAFF", "OPTOM", "OPTOMOLOGIST", "MD", "DEVELOPER"];
 
-// ════════════════════════════════════════════════════════════════════════
-// STYLES & CONSTANTS
-// ════════════════════════════════════════════════════════════════════════
 const CS = { background: "#f0ede8", padding: "2px 6px", borderRadius: 4, fontFamily: "monospace", fontSize: 12 };
 
 const GCSS = `
@@ -53,9 +46,6 @@ p{line-height:1.7}
 @media(max-width:768px){.form-grid{grid-template-columns:1fr}}
 `;
 
-// ════════════════════════════════════════════════════════════════════════
-// DEFAULT ACCOUNTS
-// ════════════════════════════════════════════════════════════════════════
 const DEFAULT_ACCOUNTS = [
   { id:"owner",      name:"Owner",       role:"owner", designation: "MD", branch:"All",        password:"owner123", perms:{} },
   { id:"staff_jpt1", name:"Ravi (JPT)",  role:"staff", designation: "FRONT DESK STAFF", branch:"JPT Branch", password:"jpt1234",
@@ -72,9 +62,6 @@ const DEFAULT_FIELD_VISIBILITY = {
   invoices:     ["id","date","patientName","items","discount","status"],
 };
 
-// ════════════════════════════════════════════════════════════════════════
-// SUPABASE CLIENT
-// ════════════════════════════════════════════════════════════════════════
 let _sb = null;
 function initSB(url, key) {
   if (!url || !key) { _sb = null; return false; }
@@ -84,27 +71,16 @@ function initSB(url, key) {
 function sbReady() { return _sb !== null; }
 
 const SB_TABLES = {
-  patients:      "patients",
-  patientBill:   "patientBill",
-  optometrist:   "optometrist",
-  opticals:      "opticals",
-  stock:         "stock",
-  invoices:      "invoices",
-  accounts:      "accounts",
-  audit_log:     "audit_log",
-  tasks:         "tasks",
-  reminders:     "reminders",
+  patients: "patients", patientBill: "patientBill", optometrist: "optometrist", opticals: "opticals",
+  stock: "stock", invoices: "invoices", accounts: "accounts", audit_log: "audit_log", tasks: "tasks", reminders: "reminders",
 };
 
-function sbHeaders() {
-  return { "Content-Type": "application/json", "apikey": _sb.key, "Authorization": `Bearer ${_sb.key}` };
-}
+function sbHeaders() { return { "Content-Type": "application/json", "apikey": _sb.key, "Authorization": `Bearer ${_sb.key}` }; }
 
 async function sbGet(table) {
   if (!_sb) return null;
-  const tbl = SB_TABLES[table] || table;
   try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}?select=*`, { headers: sbHeaders() });
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}?select=*`, { headers: sbHeaders() });
     if (!r.ok) return null;
     const d = await r.json();
     return Array.isArray(d) ? d : null;
@@ -112,29 +88,20 @@ async function sbGet(table) {
 }
 
 async function sbUpsertOne(table, row) {
-  if (!_sb) return { ok: false, error: "Not connected to Supabase" };
-  const tbl = SB_TABLES[table] || table;
+  if (!_sb) return { ok: false, error: "Not connected" };
   try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}`, {
-      method: "POST",
-      headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify(row),
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}`, {
+      method: "POST", headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(row),
     });
-    if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
-    return { ok: true, error: null };
-  } catch(e) {
-    return { ok: false, error: String(e) };
-  }
+    return { ok: r.ok, error: r.ok ? null : `HTTP ${r.status}` };
+  } catch(e) { return { ok: false, error: String(e) }; }
 }
 
 async function sbUpsertMany(table, rows) {
   if (!_sb || !rows.length) return true;
-  const tbl = SB_TABLES[table] || table;
   try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}`, {
-      method: "POST",
-      headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify(rows),
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}`, {
+      method: "POST", headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(rows),
     });
     return r.ok;
   } catch(e) { return false; }
@@ -142,31 +109,22 @@ async function sbUpsertMany(table, rows) {
 
 async function sbDelete(table, id) {
   if (!_sb) return false;
-  const tbl = SB_TABLES[table] || table;
   try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}?id=eq.${encodeURIComponent(id)}`, {
-      method: "DELETE", headers: sbHeaders(),
-    });
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}?id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers: sbHeaders() });
     return r.ok;
   } catch(e) { return false; }
 }
 
 async function sbInsert(table, row) {
   if (!_sb) return false;
-  const tbl = SB_TABLES[table] || table;
   try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}`, {
-      method: "POST",
-      headers: { ...sbHeaders(), "Prefer": "return=minimal" },
-      body: JSON.stringify(row),
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}`, {
+      method: "POST", headers: { ...sbHeaders(), "Prefer": "return=minimal" }, body: JSON.stringify(row),
     });
     return r.ok;
   } catch { return false; }
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// HELPERS
-// ════════════════════════════════════════════════════════════════════════
 const now      = () => new Date();
 const ts       = (d = now()) => `${d.toLocaleDateString("en-IN")} ${d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
 const todayStr = () => now().toISOString().split("T")[0];
@@ -192,9 +150,6 @@ const validate = {
 const vStyle = (val, fn, touched) => !touched ? {} : fn(val) ? { borderColor: "#16a34a" } : { borderColor: "#dc2626" };
 const vMsg   = (val, fn, touched, msg) => (!touched || fn(val)) ? null : <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{msg}</div>;
 
-// ════════════════════════════════════════════════════════════════════════
-// LOCAL PERSISTENCE (Crash Proofed)
-// ════════════════════════════════════════════════════════════════════════
 const LS = {
   get:  (k, def) => { try { const val = JSON.parse(localStorage.getItem(k)); return val !== null ? val : def; } catch { return def; } },
   set:  (k, v)   => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
@@ -202,16 +157,9 @@ const LS = {
   getSess: ()    => { try { return JSON.parse(sessionStorage.getItem("opti_sess")); } catch { return null; } },
 };
 
-const SEED_DATA = {
-  patients: [], patientBill: [], optometrist: [], opticals: [], stock: [], invoices: [], tasks: [], reminders: [],
-};
-
-// Safe wrapper to prevent map/filter crashes if data is corrupted
+const SEED_DATA = { patients: [], patientBill: [], optometrist: [], opticals: [], stock: [], invoices: [], tasks: [], reminders: [] };
 const safeArray = (arr, fallback = []) => Array.isArray(arr) ? arr : fallback;
 
-// ════════════════════════════════════════════════════════════════════════
-// ROOT APP
-// ════════════════════════════════════════════════════════════════════════
 export default function App() {
   const [session,  setSession]  = useState(() => LS.getSess());
   const [accounts, setAccounts] = useState(() => safeArray(LS.get("opti_accounts", DEFAULT_ACCOUNTS), DEFAULT_ACCOUNTS));
@@ -234,8 +182,7 @@ export default function App() {
   const syncFromCloud = async (url, key) => {
     if (!url || !key) return;
     initSB(url, key);
-    if (!sbReady()) return;
-    if (syncing) return;
+    if (!sbReady() || syncing) return;
     setSyncing(true);
     try {
       const [pts, bills, optom, optcl, stk, inv, accs, tsks, rems] = await Promise.all([
@@ -254,13 +201,8 @@ export default function App() {
         reminders:   Array.isArray(rems)  ? rems  : safeArray(d.reminders),
       }));
 
-      if (Array.isArray(accs) && accs.length > 0) {
-        setAccounts(accs);
-        LS.set("opti_accounts", accs);
-      }
-
-      setLastSync(new Date());
-      setSbStatus("ok");
+      if (Array.isArray(accs) && accs.length > 0) { setAccounts(accs); LS.set("opti_accounts", accs); }
+      setLastSync(new Date()); setSbStatus("ok");
     } catch(e) { setSbStatus("error"); }
     setSyncing(false);
   };
@@ -281,9 +223,7 @@ export default function App() {
     const cleanUrl = url.replace(/\/$/, "");
     initSB(cleanUrl, key);
     try {
-      const r = await fetch(`${cleanUrl}/rest/v1/patients?select=id&limit=1`, {
-        headers: { "apikey": key, "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-      });
+      const r = await fetch(`${cleanUrl}/rest/v1/patients?select=id&limit=1`, { headers: { "apikey": key, "Authorization": `Bearer ${key}`, "Content-Type": "application/json" } });
       if (r.status < 500) {
         setSbCreds({ url: cleanUrl, key }); setSbStatus("ok");
         await sbUpsertMany("accounts", accounts); await syncFromCloud(cleanUrl, key); return true;
@@ -310,8 +250,7 @@ export default function App() {
         sbUpsertMany("stock", safeArray(data.stock)), sbUpsertMany("invoices", safeArray(data.invoices)),
         sbUpsertMany("accounts", safeArray(accounts)), sbUpsertMany("tasks", safeArray(data.tasks)), sbUpsertMany("reminders", safeArray(data.reminders)),
       ]);
-      setSbStatus("ok");
-      await syncFromCloud(sbCreds.url, sbCreds.key);
+      setSbStatus("ok"); await syncFromCloud(sbCreds.url, sbCreds.key);
     } catch { setSbStatus("error"); }
   };
 
@@ -326,8 +265,8 @@ export default function App() {
     setData(d => {
       const updated = typeof fn === "function" ? fn(safeArray(d[key])) : fn;
       if (sbReady()) {
-        if (newRecord) { sbUpsertOne(key, newRecord).catch(() => {}); } 
-        else if (Array.isArray(updated)) { sbUpsertMany(key, updated).catch(() => {}); }
+        if (newRecord) sbUpsertOne(key, newRecord).catch(() => {});
+        else if (Array.isArray(updated)) sbUpsertMany(key, updated).catch(() => {});
       }
       return { ...d, [key]: updated };
     });
@@ -335,21 +274,17 @@ export default function App() {
 
   const updateAccounts = useCallback(async (newAccounts) => {
     setAccounts(safeArray(newAccounts, DEFAULT_ACCOUNTS));
-    if (sbReady()) { await sbUpsertMany("accounts", newAccounts).catch(() => {}); }
+    if (sbReady()) await sbUpsertMany("accounts", newAccounts).catch(() => {});
   }, []);
 
   const login = useCallback(async (acc) => {
     const s = { ...acc, loginTime: ts() };
     LS.sess(s); setSession(s); setView("dashboard");
-    const entry = { id: uid(), action: "LOGIN", detail: {}, userId: acc.id, userName: acc.name, branch: acc.branch || "All", at: ts() };
-    setAuditLog(a => [entry, ...safeArray(a)].slice(0, 500));
-    sbInsert("audit_log", entry).catch(() => {});
-    if (sbCreds.url && sbCreds.key) { syncFromCloud(sbCreds.url, sbCreds.key); }
-  }, [sbCreds]);
+    audit("LOGIN", {});
+    if (sbCreds.url && sbCreds.key) syncFromCloud(sbCreds.url, sbCreds.key);
+  }, [sbCreds, audit]);
 
-  const logout = useCallback(() => {
-    audit("LOGOUT", {}); LS.sess(null); setSession(null); setView("dashboard");
-  }, [audit]);
+  const logout = useCallback(() => { audit("LOGOUT", {}); LS.sess(null); setSession(null); setView("dashboard"); }, [audit]);
 
   const can = useCallback((section, action) => {
     if (!session) return false;
@@ -362,19 +297,14 @@ export default function App() {
     if (!sbCreds.url || !sbCreds.key) { setLoginAccounts(accounts); return; }
     initSB(sbCreds.url, sbCreds.key);
     sbGet("accounts").then(accs => {
-      if (Array.isArray(accs) && accs.length > 0) {
-        setLoginAccounts(accs); setAccounts(accs); LS.set("opti_accounts", accs);
-      } else { setLoginAccounts(accounts); }
+      if (Array.isArray(accs) && accs.length > 0) { setLoginAccounts(accs); setAccounts(accs); LS.set("opti_accounts", accs); }
+      else { setLoginAccounts(accounts); }
     }).catch(() => setLoginAccounts(accounts));
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!session) return <LoginScreen accounts={loginAccounts} onLogin={login} sbCreds={sbCreds} setSbCreds={setSbCreds} />;
 
-  const sharedProps = {
-    session, data, mutate, can, audit, fieldVis,
-    onSync: () => syncFromCloud(sbCreds.url, sbCreds.key),
-    syncing,
-  };
+  const sharedProps = { session, data, mutate, can, audit, fieldVis, onSync: () => syncFromCloud(sbCreds.url, sbCreds.key), syncing };
 
   return (
     <Shell session={session} onLogout={logout} view={view} setView={setView} can={can} sbStatus={sbStatus} syncing={syncing} lastSync={lastSync} onManualSync={() => syncFromCloud(sbCreds.url, sbCreds.key)}>
@@ -397,9 +327,6 @@ export default function App() {
   );
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// LOGIN SCREEN
-// ════════════════════════════════════════════════════════════════════════
 function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
   const [userId,   setUserId]   = useState("");
   const [password, setPassword] = useState("");
@@ -408,7 +335,6 @@ function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
   const [showPw,   setShowPw]   = useState(false);
   const [liveAccs, setLiveAccs] = useState(safeArray(accounts, DEFAULT_ACCOUNTS));
   const [loading,  setLoading]  = useState(false);
-
   const [showCloud, setShowCloud] = useState(!sbCreds?.url);
   const [cloudUrl,  setCloudUrl]  = useState(sbCreds?.url  || "");
   const [cloudKey,  setCloudKey]  = useState(sbCreds?.key  || "");
@@ -421,354 +347,4 @@ function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
     initSB(cleanUrl, cloudKey);
     try {
       const accs = await sbGet("accounts");
-      if (Array.isArray(accs) && accs.length > 0) {
-        setLiveAccs(accs); setSbCreds({ url: cleanUrl, key: cloudKey });
-        LS.set("opti_sb", { url: cleanUrl, key: cloudKey }); LS.set("opti_accounts", accs);
-        setCloudMsg("Connected ✓ — accounts loaded from cloud."); setShowCloud(false);
-      } else {
-        setSbCreds({ url: cleanUrl, key: cloudKey }); LS.set("opti_sb", { url: cleanUrl, key: cloudKey });
-        setCloudMsg("Connected ✓ (no accounts in cloud yet — using defaults)."); setShowCloud(false);
-      }
-    } catch(e) { setCloudMsg("Connection failed. Check URL and key."); }
-    setLoading(false);
-  };
-
-  const doLogin = () => {
-    const all = safeArray(liveAccs, DEFAULT_ACCOUNTS);
-    const acc = all.find(a => a.id === userId.trim() && a.password === password);
-    if (!acc) { setErr("Invalid user ID or password."); return; }
-    if (acc.role === "staff" && branch && acc.branch !== branch) { setErr(`This account belongs to ${acc.branch}.`); return; }
-    onLogin(acc);
-  };
-
-  return (
-    <div style={{ minHeight: "100vh", background: "#0f0e0c", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans',sans-serif" }}>
-      <style>{GCSS}</style>
-      <div style={{ width: 420, background: "#fff", borderRadius: 24, padding: "42px 38px", boxShadow: "0 40px 100px rgba(0,0,0,.5)" }}>
-        <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ width: 60, height: 60, background: "#1a1714", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", fontSize: 28 }}>👁</div>
-          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 24, fontWeight: 700 }}>OptiManager</div>
-          <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>v{APP_VER} · Ophthalmology HMS</div>
-        </div>
-
-        <div style={{ marginBottom: 18, background: "#f0ede8", borderRadius: 12, padding: "14px 16px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: sbCreds?.url ? "#16a34a" : "#d97706" }}>{sbCreds?.url ? "☁ Cloud Connected" : "☁ Cloud Not Connected"}</div>
-            <button style={{ fontSize: 11, background: "none", border: "none", color: "#6b5e52", cursor: "pointer", textDecoration: "underline" }} onClick={() => setShowCloud(s => !s)}>{showCloud ? "Hide" : "Configure"}</button>
-          </div>
-          {showCloud && (
-            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-              <div style={{ fontSize: 11, color: "#9b8e82" }}>Enter your Supabase credentials to sync data.</div>
-              <input type="text" placeholder="https://xxxx.supabase.co" value={cloudUrl} onChange={e => setCloudUrl(e.target.value)} style={{ fontSize: 12 }} />
-              <input type="password" placeholder="anon public key (eyJ…)" value={cloudKey} onChange={e => setCloudKey(e.target.value)} style={{ fontSize: 12 }} />
-              <button className="btn btn-dark btn-sm" onClick={connectCloud} disabled={loading}>{loading ? "Connecting…" : "Connect to Cloud"}</button>
-              {cloudMsg && <div style={{ fontSize: 11, color: cloudMsg.includes("✓") ? "#16a34a" : "#dc2626" }}>{cloudMsg}</div>}
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: "grid", gap: 14 }}>
-          <div><label>Branch</label>
-            <select value={branch} onChange={e => setBranch(e.target.value)}>
-              <option value="">— Owner Login (no branch) —</option>
-              {BRANCHES.map(b => <option key={b}>{b}</option>)}
-            </select>
-          </div>
-          <div><label>User ID</label>
-            <input type="text" placeholder="owner / staff_jpt1" value={userId} onChange={e => { setUserId(e.target.value); setErr(""); }} />
-          </div>
-          <div><label>Password</label>
-            <div style={{ position: "relative" }}>
-              <input type={showPw ? "text" : "password"} value={password} onChange={e => { setPassword(e.target.value); setErr(""); }} onKeyDown={e => e.key === "Enter" && doLogin()} style={{ paddingRight: 42 }} />
-              <button onClick={() => setShowPw(s => !s)} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#9b8e82", fontSize: 16 }}>{showPw ? "🙈" : "👁"}</button>
-            </div>
-          </div>
-        </div>
-        {err && <div style={{ marginTop: 10, fontSize: 12, color: "#dc2626", background: "#fee2e2", padding: "8px 12px", borderRadius: 8 }}>{err}</div>}
-        <button className="btn btn-dark" style={{ width: "100%", marginTop: 18, padding: 12 }} onClick={doLogin}>Login</button>
-      </div>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// SHELL
-// ════════════════════════════════════════════════════════════════════════
-function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastSync, onManualSync, children }) {
-  const isOwner = session.role === "owner";
-  const NAV = [
-    { id: "dashboard",    label: "Dashboard",        icon: "⬡", show: true },
-    { id: "patients",     label: "OP Registration",  icon: "◉", show: can("patients", "view") },
-    { id: "patientBill",  label: "K Sheet Entry",    icon: "🧾", show: can("patientBill", "view") },
-    { id: "optometrist",  label: "Optometrist",      icon: "👁", show: can("optometrist", "view") },
-    { id: "opticals",     label: "Opticals",         icon: "🔭", show: can("opticals", "view") },
-    { id: "inventory",    label: "Inventory",        icon: "▦", show: can("inventory", "view") },
-    { id: "invoices",     label: "Sales & Invoices", icon: "◆", show: can("invoices", "view") },
-    { id: "alerts",       label: "Low Stock Alerts", icon: "▲", show: can("alerts", "view") },
-    { id: "tasks",        label: "Tasks",            icon: "📌", show: true },
-    { id: "reminders",    label: "Reminders",        icon: "🔔", show: true },
-    { id: "divider" },
-    { id: "auditlog",    label: "Audit Log",        icon: "📋", show: isOwner },
-    { id: "dashbuilder", label: "Dashboard Builder",icon: "🏗", show: isOwner },
-    { id: "users",       label: "Manage Staff",     icon: "👥", show: isOwner },
-    { id: "supabase",    label: "Cloud Sync",       icon: "☁", show: isOwner, badge: sbStatus === "error" ? "!" : 0, badgeColor: "#dc2626" },
-    { id: "launchguide", label: "Launch Guide",     icon: "🚀", show: true },
-  ];
-
-  const sbDot = { ok: "#16a34a", error: "#dc2626", testing: "#d97706", pushing: "#d97706", syncing: "#d97706" }[sbStatus] || "#9b8e82";
-
-  return (
-    <div style={{ display: "flex", minHeight: "100vh", fontFamily: "'DM Sans',sans-serif", background: "#f0ede8", color: "#1a1714" }}>
-      <style>{GCSS}</style>
-      <aside style={{ width: 236, background: "#fff", borderRight: "1px solid #e8e2db", padding: "18px 10px", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh", flexShrink: 0, overflowY: "auto" }}>
-        <div style={{ padding: "0 8px 14px", borderBottom: "1px solid #f0ede8", marginBottom: 10 }}>
-          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 16, fontWeight: 700 }}>👁 OptiManager</div>
-          <div style={{ fontSize: 10, color: "#9b8e82", marginTop: 1, display: "flex", alignItems: "center", gap: 5 }}>
-            v{APP_VER} <span style={{ width: 7, height: 7, borderRadius: "50%", background: sbDot, display: "inline-block" }} title={`Supabase: ${sbStatus}`} />
-          </div>
-        </div>
-        <div style={{ margin: "0 4px 12px", background: "#f0ede8", borderRadius: 10, padding: "9px 12px" }}>
-          <div style={{ fontSize: 13, fontWeight: 700 }}>{session.name}</div>
-          <div style={{ fontSize: 11, color: "#9b8e82", marginTop: 2 }}>{session.designation || (isOwner ? "Owner" : "Staff")} · {isOwner ? "All Branches" : session.branch}</div>
-          {isOwner && <span style={{ display: "inline-block", marginTop: 4, background: "#1a1714", color: "#f0ede8", borderRadius: 20, fontSize: 10, padding: "1px 8px", fontWeight: 700 }}>OWNER</span>}
-        </div>
-        {NAV.filter(n => n.id === "divider" || n.show).map(n =>
-          n.id === "divider"
-            ? <div key="div" style={{ margin: "6px 8px", borderTop: "1px solid #f0ede8" }} />
-            : <button key={n.id} className={`nav-item ${view === n.id ? "active" : ""}`} onClick={() => setView(n.id)}>
-                <span style={{ fontSize: 13 }}>{n.icon}</span>{n.label}
-                {n.badge > 0 && <span className="badge" style={{ marginLeft: "auto", background: n.badgeColor || "#e55e3a" }}>{n.badge}</span>}
-              </button>
-        )}
-        <div style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px solid #f0ede8" }}>
-          <button className="btn btn-outline btn-sm" style={{ width: "100%", marginBottom: 8 }} onClick={onManualSync} disabled={syncing}>
-            {syncing ? "⟳ Syncing…" : "⟳ Sync Now"}
-          </button>
-          {lastSync && <div style={{ fontSize: 10, color: "#b5a99e", textAlign: "center", marginBottom: 8 }}>
-            Last sync: {lastSync.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-          </div>}
-          <button className="btn btn-outline btn-sm" style={{ width: "100%" }} onClick={onLogout}>🔒 Logout</button>
-        </div>
-      </aside>
-      <main style={{ flex: 1, padding: "26px 30px", overflowY: "auto", maxWidth: "calc(100vw - 236px)" }}>{children}</main>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// DASHBOARD
-// ════════════════════════════════════════════════════════════════════════
-function Dashboard({ session, data, setView, auditLog }) {
-  const isOwner = session.role === "owner";
-  const myBranch = session.branch;
-  const flt = arr => isOwner ? safeArray(arr) : safeArray(arr).filter(x => x.branch === myBranch);
-
-  const pts   = flt(data.patients).filter(x => x.status === "approved");
-  const bills = flt(data.patientBill).filter(x => x.status === "approved");
-  const invs  = flt(data.invoices).filter(x => x.approvalStatus === "approved" && x.status === "Paid");
-  const rev   = invs.reduce((s, i) => s + safeArray(i.items).reduce((a, x) => a + x.qty * x.price, 0) - (i.discount || 0), 0);
-
-  const stats = [
-    { label: "Patients",          value: pts.length,    color: "#1a1714" },
-    { label: "Patient Bills",     value: bills.length,  color: "#1d4ed8" },
-    { label: "Revenue (Paid)",    value: currency(rev), color: "#16a34a" },
-  ];
-
-  const recentAudit = safeArray(auditLog).slice(0, 8);
-
-  return (
-    <div>
-      <div style={{ marginBottom: 22 }}>
-        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 26, fontWeight: 700 }}>Welcome, {session.name} 👋</div>
-        <div style={{ fontSize: 13, color: "#9b8e82", marginTop: 3 }}>{isOwner ? "All Branches" : myBranch} · {ts()}</div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 22 }}>
-        {stats.map(s => (
-          <div key={s.label} className="stat-card" onClick={s.action} style={{ cursor: s.action ? "pointer" : "default" }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#9b8e82", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 6 }}>{s.label}</div>
-            <div className="stat-num" style={{ color: s.color }}>{s.value}</div>
-          </div>
-        ))}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: isOwner ? "1fr 1fr" : "1fr", gap: 18 }}>
-        {isOwner && (
-          <div className="card">
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Branch Overview</div>
-            {BRANCHES.map(br => {
-              const bPts   = safeArray(data.patients).filter(x => x.branch === br && x.status === "approved");
-              const bBills = safeArray(data.patientBill).filter(x => x.branch === br && x.status === "approved");
-              return (
-                <div key={br} style={{ padding: "10px 0", borderBottom: "1px solid #f0ede8" }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{br}</div>
-                  <div style={{ display: "flex", gap: 10 }}>
-                    {[["Patients", bPts.length, "#1a1714"], ["Bills", bBills.length, "#1d4ed8"]].map(([l, v, c]) => (
-                      <div key={l} style={{ flex: 1, background: "#f0ede8", borderRadius: 8, padding: "8px 10px" }}>
-                        <div style={{ fontSize: 10, color: "#9b8e82", fontWeight: 600 }}>{l}</div>
-                        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 700, color: c }}>{v}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {isOwner && (
-          <div className="card">
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Recent Activity</div>
-            {recentAudit.length === 0 && <div style={{ fontSize: 13, color: "#9b8e82" }}>No activity yet.</div>}
-            {recentAudit.map(a => (
-              <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f0ede8", fontSize: 12 }}>
-                <div>
-                  <span style={{ fontWeight: 700, marginRight: 6, color: { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", ADD: "#16a34a", DELETE: "#dc2626", EDIT: "#d97706" }[a.action] || "#1a1714" }}>{a.action}</span>
-                  <span style={{ color: "#6b5e52" }}>{a.userName}</span>
-                  {a.branch !== "All" && <span style={{ color: "#b5a99e", marginLeft: 5 }}>· {a.branch}</span>}
-                </div>
-                <div style={{ color: "#b5a99e", fontSize: 11 }}>{a.at}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// AUDIT LOG
-// ════════════════════════════════════════════════════════════════════════
-function AuditLogSection({ auditLog, accounts }) {
-  const [filter, setFilter] = useState("ALL");
-  const [userF,  setUserF]  = useState("ALL");
-  const actions = ["ALL", "LOGIN", "LOGOUT", "ADD", "EDIT", "DELETE"];
-  const filtered = safeArray(auditLog)
-    .filter(a => filter === "ALL" || a.action === filter)
-    .filter(a => userF  === "ALL" || a.userId === userF);
-
-  const actionColor = { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", ADD: "#16a34a", EDIT: "#d97706", DELETE: "#dc2626" };
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div className="section-title">Audit Log</div>
-        <button className="btn btn-outline btn-sm" onClick={() => exportCSV(filtered.map(({ id, ...r }) => r), "audit_log.csv")}>⬇ CSV</button>
-      </div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {actions.map(a => <button key={a} className={`btn btn-sm ${filter === a ? "btn-dark" : "btn-outline"}`} onClick={() => setFilter(a)}>{a}</button>)}
-        </div>
-        <select value={userF} onChange={e => setUserF(e.target.value)} style={{ maxWidth: 200 }}>
-          <option value="ALL">All Users</option>
-          {safeArray(accounts).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-      </div>
-      <div className="card" style={{ overflowX: "auto" }}>
-        <table>
-          <thead><tr><th>Time</th><th>Action</th><th>User</th><th>Branch</th><th>Detail</th></tr></thead>
-          <tbody>
-            {filtered.length === 0 && <tr><td colSpan={5} style={{ color: "#9b8e82", textAlign: "center", padding: 24 }}>No entries.</td></tr>}
-            {filtered.map(a => (
-              <tr key={a.id}>
-                <td style={{ fontSize: 11, whiteSpace: "nowrap", color: "#9b8e82" }}>{a.at}</td>
-                <td><span style={{ background: `${actionColor[a.action] || "#9b8e82"}20`, color: actionColor[a.action] || "#9b8e82", borderRadius: 20, fontSize: 11, padding: "2px 9px", fontWeight: 700 }}>{a.action}</span></td>
-                <td style={{ fontWeight: 600 }}>{a.userName}</td>
-                <td style={{ fontSize: 12, color: "#9b8e82" }}>{a.branch}</td>
-                <td style={{ fontSize: 12, color: "#6b5e52" }}>{Object.entries(a.detail || {}).map(([k, v]) => `${k}: ${v}`).join(" · ") || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// DASHBOARD BUILDER
-// ════════════════════════════════════════════════════════════════════════
-function DashboardBuilder({ fieldVis, setFieldVis, accounts, setAccounts }) {
-  const [tab, setTab] = useState("fields");
-  const [section, setSection] = useState("patients");
-
-  const ALL_FIELDS = {
-    patients:    ["timestamp","date","time","mrNo","patientId","name","phone","address","ref","paymentAmount","paymentMode","paymentRefNo","branch","remarks","visitType"],
-    patientBill: ["timestamp","date","time","mrNo","patientId","name","phone","address","gender","age","complaint","pastHistory"],
-    optometrist: ["timestamp","mrNo","patientId","name","complaint","pastHistory"],
-    opticals:    ["timestamp","mrNo","patientId","name","phone","address","totalPrice","advance","advancePaymentMethod","transactionId","balance","optomName"],
-    inventory:   ["sku","name","category","brand","qty","reorder","lensPower","lensType","boxNo","cost","price","location"],
-    invoices:    ["id","date","patientName","items","discount","status"],
-  };
-
-  const toggleField = (sec, field) => {
-    setFieldVis(fv => {
-      const cur = fv[sec] || [];
-      return { ...fv, [sec]: cur.includes(field) ? cur.filter(f => f !== field) : [...cur, field] };
-    });
-  };
-
-  const staff = safeArray(accounts).filter(a => a.role === "staff");
-  const togglePerm = (id, sec, action) => {
-    setAccounts(prev => safeArray(prev).map(a => {
-      if (a.id !== id) return a;
-      return { ...a, perms: { ...a.perms, [sec]: { ...a.perms[sec], [action]: !a.perms[sec]?.[action] } } };
-    }));
-  };
-
-  return (
-    <div>
-      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Dashboard Builder</div>
-      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 20 }}>Control which fields and sections each staff member can access.</div>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 22 }}>
-        {[{ id: "fields", label: "🔲 Field Visibility" }, { id: "perms", label: "🔐 Staff Permissions" }].map(t => (
-          <button key={t.id} className={`btn btn-sm ${tab === t.id ? "btn-dark" : "btn-outline"}`} onClick={() => setTab(t.id)}>{t.label}</button>
-        ))}
-      </div>
-
-      {tab === "fields" && (
-        <div className="card">
-          <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
-            {Object.keys(ALL_FIELDS).map(s => <button key={s} className={`btn btn-sm ${section === s ? "btn-dark" : "btn-outline"}`} onClick={() => setSection(s)}>{SECTION_LABELS[s]}</button>)}
-          </div>
-          <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 14 }}>Toggle which fields are <strong>visible in forms and tables</strong> for the <strong>{SECTION_LABELS[section]}</strong> section. Disabled fields are hidden from staff.</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px,1fr))", gap: 10 }}>
-            {(ALL_FIELDS[section] || []).map(field => {
-              const on = (fieldVis[section] || []).includes(field);
-              return (
-                <div key={field} onClick={() => toggleField(section, field)}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${on ? "#1a1714" : "#e2ddd8"}`, background: on ? "#1a1714" : "#fff", cursor: "pointer", transition: "all .15s" }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: on ? "#f0ede8" : "#1a1714" }}>{field}</span>
-                  <span style={{ fontSize: 18 }}>{on ? "✓" : "○"}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {tab === "perms" && (
-        <div>
-          {staff.length === 0 && <div className="card" style={{ color: "#9b8e82", textAlign: "center", padding: 32 }}>No staff accounts yet. Add staff in Manage Staff.</div>}
-          {staff.map(acc => (
-            <div key={acc.id} className="card" style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name} <span style={{ fontSize: 12, fontWeight: 400, color: "#6b5e52", background: "#f0ede8", padding: "2px 8px", borderRadius: 12, marginLeft: 6 }}>{acc.designation}</span></div>
-                  <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 4 }}>{acc.id} · {acc.branch}</div>
-                </div>
-              </div>
-              <div style={{ overflowX: "auto" }}>
-                <table>
-                  <thead><tr><th>Section</th><th style={{ textAlign: "center" }}>👁 View</th><th style={{ textAlign: "center" }}>➕ Add</th><th style={{ textAlign: "center" }}>✏️ Edit</th></tr></thead>
-                  <tbody>
-                    {SECTIONS.map(sec => (
-                      <tr key={sec}>
-                        <td style={{ fontWeight: 600 }}>{SECTION_LABELS[sec]}</td>
-                        {["view", "add", "edit"].map(action => (
-                          <td key={action} style={{ textAlign: "center" }}>
-                            <button onClick={() => togglePerm(acc.id, sec, action)}
-                              style={{ width: 36, height: 28, borderRadius: 6, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13, background: acc.perms?.[sec]?.[action] ? "#dcfce7" : "#fee2e2", color: acc.perms?.[sec]?.[action] ? "#16a34a" : "#dc2626" }}>
-                              {acc.perms?.[sec]?.[action] ? "✓" : "✗"}
-                            </button>
-                          </td>
-                        ))}
+      if (Array
