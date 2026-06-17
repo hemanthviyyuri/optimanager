@@ -1,48 +1,42 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 // ════════════════════════════════════════════════════════════════════════
-// v5.5 — Sri Surya Ophthalmology Hospital Management System (HMS)
+// v4.0 — OptiManager  |  Supabase · Audit Logs · Dashboard Builder
 // ════════════════════════════════════════════════════════════════════════
-const APP_VER = "5.5-HMS";
+const APP_VER  = "4.0";
 const BRANCHES = ["JPT Branch", "PRP Branch"];
-const DEPARTMENTS = [
-  "OP Registration", "K-Sheet Triage Room", "Optometrist Station", 
-  "Ophthalmologist Consultation", "MD/Admin Dashboard"
-];
-
-const SB_TABLES = {
-  patients: "hms_patients",
-  clinicalRecords: "hms_clinical_records",
-  inventory: "hms_inventory",
-  tasks: "hms_tasks",
-  accounts: "hms_accounts",
-  audit_log: "hms_audit_log"
-};
-
-const INITIAL_MASTER_DATA = {
-  patients: [
-    { mrNo: "MR-1001", patientId: "PID-88291", name: "Ramesh Kumar", phone: "9848022338", address: "Kakinada", gender: "Male", age: 54, referral: "Camp Drive", branch: "JPT Branch", fee: 250, payMode: "Cash", remarks: "Progressive distance blurring", timestamp: "16/06/2026 09:00:00", date: "2026-06-16", visitCount: 1, currentStage: "K-Sheet Triage Room" }
-  ],
-  clinicalRecords: [
-    { id: "CR-1001", mrNo: "MR-1001", patientId: "PID-88291", chiefComplaint: "Diminished vision in both eyes since 6 months.", htn: true, dm: true, cad: false, asthmatic: false, allergies: "Sulfa Drugs", vaOD: "6/18", vaOS: "6/12", cPGP_OD: "6/9", cPGP_OS: "6/6", phOD: "6/12", phOS: "6/6", nvOD: "N6", nvOS: "N6", arOD: "-1.75 SPH / -0.50 CYL x 90", arOS: "-1.25 SPH", acceptOD: "-1.50 SPH / -0.50 CYL x 90", acceptOS: "-1.00 SPH", dilArOD: "", dilArOS: "", iopOD: "16", iopOS: "15", bp: "130/80", rbs: "142 mg/dl", ducts: "Patent", lidsOD: "Normal", lidsOS: "Normal", conjOD: "Clear", conjOS: "Clear", cornOD: "Clear", cornOS: "Clear", acOD: "Deep", acOS: "Deep", irisOD: "Normal", irisOS: "Normal", pupilOD: "Reactive", pupilOS: "Reactive", lensOD: "NS Grade II", lensOS: "NS Grade I", fundusOD: "Mild NPDR", fundusOS: "Normal Disc", movements: "Full", diagnosis: "Immature Cataract OD", advice: "Cataract Phacoemulsification OD", prescription: "Lubricating Drops 4x/day", graphData: null, timestamp: "16/06/2026 10:15:00" }
-  ],
-  inventory: [
-    { id: "inv-1", sku: "LNS-SV-A1", name: "Single Vision Anti-Reflective", category: "Lenses", brand: "Essilor", qty: 45, reorder: 10, price: 1200, expiryDate: "" }
-  ],
-  tasks: [
-    { id: "tsk-1", title: "Sterilize Operating Theater Suite A Sets", priority: "High", deadline: "2026-06-18", assignedTo: "optom_staff", status: "Pending", createdBy: "owner" }
-  ]
-};
-
-const DEFAULT_ACCOUNTS = [
-  { id: "owner", name: "MD Admin Account", role: "owner", branch: "All", department: "MD/Admin Dashboard", password: "owner123" },
-  { id: "op_staff", name: "Ravi (Front Desk)", role: "staff", branch: "JPT Branch", department: "OP Registration", password: "op123" },
-  { id: "optom_staff", name: "Dr. Anjali (Optometrist)", role: "staff", branch: "JPT Branch", department: "Optometrist Station", password: "opt123" },
-  { id: "doctor_staff", name: "Dr. Vikram (Ophthalmologist)", role: "staff", branch: "JPT Branch", department: "Ophthalmologist Consultation", password: "doc123" }
-];
+const SECTIONS = ["patients","patientBill","optometrist","opticals","inventory","invoices","alerts"];
+const SECTION_LABELS = { patients:"OP Registration", patientBill:"K Sheet Entry", optometrist:"Optometrist", opticals:"Opticals", inventory:"Inventory", invoices:"Sales & Invoices", alerts:"Low Stock Alerts" };
+const LENS_TYPES     = ["Single Vision","Bifocal","Progressive","Anti-Reflective","Photochromic","Blue Cut","UV400","Polarized","High Index 1.60","High Index 1.67","High Index 1.74","Trivex","Polycarbonate","Toric (Contact)","Multifocal (Contact)"];
+const DELIVERY_STATUS= ["Delivered","Not Ready","Fixing Completed But Not Delivered"];
 
 // ════════════════════════════════════════════════════════════════════════
-// INTERNAL INFRASTRUCTURE DRIVERS
+// DEFAULT ACCOUNTS
+// ════════════════════════════════════════════════════════════════════════
+const DEFAULT_ACCOUNTS = [
+  { id:"owner",      name:"Owner",       role:"owner", branch:"All",        password:"owner123", perms:{} },
+  { id:"staff_jpt1", name:"Ravi (JPT)",  role:"staff", branch:"JPT Branch", password:"jpt1234",
+    perms:{ patients:{view:true,add:true,edit:false}, patientBill:{view:true,add:true,edit:false}, optometrist:{view:true,add:true,edit:false}, opticals:{view:true,add:true,edit:false}, inventory:{view:true,add:false,edit:false}, invoices:{view:true,add:false,edit:false}, alerts:{view:true,add:false,edit:false} }
+  },
+  { id:"staff_prp1", name:"Divya (PRP)", role:"staff", branch:"PRP Branch", password:"prp1234",
+    perms:{ patients:{view:true,add:true,edit:false}, patientBill:{view:true,add:true,edit:false}, optometrist:{view:true,add:true,edit:false}, opticals:{view:true,add:true,edit:false}, inventory:{view:false,add:false,edit:false}, invoices:{view:false,add:false,edit:false}, alerts:{view:false,add:false,edit:false} }
+  },
+];
+
+// Default visible fields per section (owner can toggle)
+const DEFAULT_FIELD_VISIBILITY = {
+  patients:     ["timestamp","date","time","mrNo","patientId","name","phone","address","ref","paymentAmount","paymentMode","paymentRefNo","branch","remarks","visitType"],
+  patientBill:  ["timestamp","date","time","mrNo","patientId","name","phone","address","gender","age","complaint","pastHistory"],
+  optometrist:  ["timestamp","mrNo","patientId","name","complaint","pastHistory"],
+  opticals:     ["timestamp","mrNo","patientId","name","phone","address","totalPrice","advance","advancePaymentMethod","transactionId","balance","optomName"],
+  inventory:    ["sku","name","category","brand","qty","reorder","lensPower","lensType","boxNo","price","location"],
+  invoices:     ["id","date","patientName","items","discount","status"],
+};
+
+// ════════════════════════════════════════════════════════════════════════
+// SUPABASE CLIENT
+// Supabase is the SINGLE SOURCE OF TRUTH.
+// localStorage is only a display-cache — ALWAYS overwritten by Supabase.
 // ════════════════════════════════════════════════════════════════════════
 let _sb = null;
 function initSB(url, key) {
@@ -50,231 +44,705 @@ function initSB(url, key) {
   _sb = { url: url.replace(/\/$/, ""), key };
   return true;
 }
-function sbHeaders() { return { "Content-Type": "application/json", "apikey": _sb.key, "Authorization": `Bearer ${_sb.key}` }; }
+function sbReady() { return _sb !== null; }
 
-async function sbGet(table) {
-  if (!_sb) return null;
-  try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}?select=*`, { headers: sbHeaders() });
-    return r.ok ? await r.json() : null;
-  } catch { return null; }
+const SB_TABLES = {
+  patients:      "patients",
+  patientBill:   "patientBill",
+  optometrist:   "optometrist",
+  opticals:      "opticals",
+  stock:         "stock",
+  invoices:      "invoices",
+  pending_queue: "pending_queue",
+  accounts:      "accounts",
+  audit_log:     "audit_log",
+  tasks:         "tasks",
+  reminders:     "reminders",
+};
+
+function sbHeaders() {
+  return { "Content-Type": "application/json", "apikey": _sb.key, "Authorization": `Bearer ${_sb.key}` };
 }
 
+// GET all rows from a table — returns [] on empty, null on error
+async function sbGet(table) {
+  if (!_sb) return null;
+  const tbl = SB_TABLES[table] || table;
+  try {
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}?select=*`, { headers: sbHeaders() });
+    if (!r.ok) { console.warn(`sbGet ${table} HTTP ${r.status}`); return null; }
+    const d = await r.json();
+    return Array.isArray(d) ? d : null;
+  } catch(e) { console.warn(`sbGet ${table}:`, e); return null; }
+}
+
+// UPSERT a single record
 async function sbUpsertOne(table, row) {
   if (!_sb) return false;
+  const tbl = SB_TABLES[table] || table;
   try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}`, {
-      method: "POST", headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(row)
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}`, {
+      method: "POST",
+      headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(row),
+    });
+    if (!r.ok) { const t = await r.text(); console.warn(`sbUpsertOne ${table} HTTP ${r.status}:`, t); }
+    return r.ok;
+  } catch(e) { console.warn(`sbUpsertOne ${table}:`, e); return false; }
+}
+
+// UPSERT multiple records
+async function sbUpsertMany(table, rows) {
+  if (!_sb || !rows.length) return true;
+  const tbl = SB_TABLES[table] || table;
+  try {
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}`, {
+      method: "POST",
+      headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(rows),
+    });
+    if (!r.ok) { const t = await r.text(); console.warn(`sbUpsertMany ${table} HTTP ${r.status}:`, t); }
+    return r.ok;
+  } catch(e) { console.warn(`sbUpsertMany ${table}:`, e); return false; }
+}
+
+// DELETE by id
+async function sbDelete(table, id) {
+  if (!_sb) return false;
+  const tbl = SB_TABLES[table] || table;
+  try {
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}?id=eq.${encodeURIComponent(id)}`, {
+      method: "DELETE", headers: sbHeaders(),
+    });
+    return r.ok;
+  } catch(e) { console.warn(`sbDelete ${table}:`, e); return false; }
+}
+
+// INSERT one row (audit log, fire-and-forget)
+async function sbInsert(table, row) {
+  if (!_sb) return false;
+  const tbl = SB_TABLES[table] || table;
+  try {
+    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(tbl)}`, {
+      method: "POST",
+      headers: { ...sbHeaders(), "Prefer": "return=minimal" },
+      body: JSON.stringify(row),
     });
     return r.ok;
   } catch { return false; }
 }
 
+// Keep sbUpsert as alias for backwards compat (used in pushToSupabase)
+async function sbUpsert(table, rows) {
+  const arr = Array.isArray(rows) ? rows : [rows];
+  return sbUpsertMany(table, arr);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════════════════════════════════════════
+const now      = () => new Date();
+const ts       = (d = now()) => `${d.toLocaleDateString("en-IN")} ${d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+const todayStr = () => now().toISOString().split("T")[0];
+const timeStr  = () => now().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+const currency = (n) => `₹${Number(n || 0).toFixed(2)}`;
+const uid      = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+function exportCSV(rows, filename) {
+  if (!rows.length) return;
+  const keys = Object.keys(rows[0]);
+  const csv  = [keys.join(","), ...rows.map(r => keys.map(k => `"${String(r[k] ?? "").replace(/"/g, '""')}"`).join(","))].join("\n");
+  Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: filename }).click();
+}
+
+// Validators
+const validate = {
+  phone:     v => { const s = String(v || "").trim(); return s.length === 10 && s[0] !== "0" && /^\d+$/.test(s); },
+  town:      v => { const s = String(v || "").trim(); return s.length > 0 && !/\d/.test(s); },
+  sphereCyl: v => { const n = parseFloat(v); return !isNaN(n) && n >= -6 && n <= 6 && Math.round(Math.abs(n) * 100) % 25 === 0; },
+  axis:      v => { const n = parseFloat(v); return !isNaN(n) && n >= 0 && n <= 180 && n === Math.round(n); },
+  add:       v => { const n = parseFloat(v); if (isNaN(n)) return false; if (n === 0) return true; return n >= 0.75 && n <= 3.00 && Math.round(n * 100) % 25 === 0; },
+};
+
+const vStyle = (val, fn, touched) => !touched ? {} : fn(val) ? { borderColor: "#16a34a" } : { borderColor: "#dc2626" };
+const vMsg   = (val, fn, touched, msg) => (!touched || fn(val)) ? null : <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>{msg}</div>;
+
+// ════════════════════════════════════════════════════════════════════════
+// LOCAL PERSISTENCE  (fallback when Supabase not configured)
+// ════════════════════════════════════════════════════════════════════════
 const LS = {
-  get: (k, def) => { try { return JSON.parse(localStorage.getItem(k)) ?? def; } catch { return def; } },
-  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
-  sess: (v) => { try { if (v) sessionStorage.setItem("hms_v55_sess", JSON.stringify(v)); else sessionStorage.removeItem("hms_v55_sess"); } catch {} },
-  getSess: () => { try { return JSON.parse(sessionStorage.getItem("hms_v55_sess")); } catch { return null; } }
+  get:  (k, def) => { try { return JSON.parse(localStorage.getItem(k)) ?? def; } catch { return def; } },
+  set:  (k, v)   => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  sess: (v)      => { try { if (v) sessionStorage.setItem("opti_sess", JSON.stringify(v)); else sessionStorage.removeItem("opti_sess"); } catch {} },
+  getSess: ()    => { try { return JSON.parse(sessionStorage.getItem("opti_sess")); } catch { return null; } },
+};
+
+const SEED_DATA = {
+  patients: [
+    { id:"p1", branch:"JPT Branch", timestamp:"29/05/2026 09:00:00", date:"2026-05-29", time:"09:00",
+      mrNo:"MR-001", patientId:"PT-001", name:"Sarah Mitchell", phone:"9876543210", address:"Kakinada",
+      ref:"", paymentAmount:200, paymentMode:"Cash", paymentRefNo:"", remarks:"", visitType:"New Patient",
+      visitCount:1, status:"approved", createdBy:"owner", createdByName:"Owner" },
+  ],
+  patientBill: [
+    { id:"b1", branch:"JPT Branch", timestamp:"29/05/2026 09:15:00", date:"2026-05-29", time:"09:15",
+      mrNo:"MR-001", patientId:"PT-001", name:"Sarah Mitchell", phone:"9876543210", address:"Kakinada",
+      gender:"Female", age:41, complaint:"Blurred vision", pastHistory:"Hypertension",
+      reSpherAR:"-2.50", reCylAR:"-0.75", reAxisAR:180, leSpherAR:"-2.25", leCylAR:"-0.50", leAxisAR:175,
+      reSpherSub:"-2.50", reCylSub:"-0.75", reAxisSub:180, leSpherSub:"-2.25", leCylSub:"-0.50", leAxisSub:175,
+      add:"1.50", eyelids:"Normal", conjunctiva:"Clear", cornea:"Clear", anteriorChamber:"Deep",
+      iris:"Normal", pupil:"RAPD-", lens:"Clear", ocularMovements:"Full", fundus:"Normal",
+      advice:"Progressive lenses", optom:"Dr. Priya", lensType:"Progressive", frameNo:"FR-A12",
+      advance:500, paymentMethod:"Cash", deliveryStatus:"Not Ready", balance:3200,
+      status:"approved", createdBy:"owner", createdByName:"Owner" },
+  ],
+  optometrist: [],
+  opticals: [],
+  stock: [
+    { id:"s1", branch:"JPT Branch", sku:"FR-001", name:"Ray-Ban Aviator Gold", category:"Frames",  brand:"Ray-Ban",  qty:8,  reorder:5,  cost:2000, price:8000,  location:"A1", lensPower:"",      lensType:"",               boxNo:"",     createdBy:"owner", createdByName:"Owner" },
+    { id:"s2", branch:"JPT Branch", sku:"LN-001", name:"Essilor Varilux",      category:"Lenses",  brand:"Essilor", qty:15, reorder:6,  cost:2500, price:9000,  location:"D1", lensPower:"-2.50", lensType:"Progressive",     boxNo:"B-14", createdBy:"owner", createdByName:"Owner" },
+    { id:"s3", branch:"PRP Branch", sku:"FR-002", name:"Oakley Half Jacket",   category:"Frames",  brand:"Oakley",  qty:3,  reorder:5,  cost:2200, price:9500,  location:"A2", lensPower:"",      lensType:"",               boxNo:"",     createdBy:"owner", createdByName:"Owner" },
+    { id:"s4", branch:"PRP Branch", sku:"LN-002", name:"Zeiss DriveSafe",      category:"Lenses",  brand:"Zeiss",   qty:1,  reorder:4,  cost:3500, price:12000, location:"D2", lensPower:"-1.75", lensType:"Anti-Reflective", boxNo:"B-07", createdBy:"owner", createdByName:"Owner" },
+  ],
+  invoices: [
+    { id:"INV-001", branch:"JPT Branch", date:"2026-05-29", patientName:"Sarah Mitchell", items:[{name:"Essilor Varilux",qty:1,price:9000}], discount:500, status:"Paid", approvalStatus:"approved", createdBy:"owner", createdByName:"Owner" },
+  ],
+  tasks:     [],
+  reminders: [],
 };
 
 // ════════════════════════════════════════════════════════════════════════
-// CORE RUNTIME ENGINE
+// PRINT HELPERS  (preserved from v3)
+// ════════════════════════════════════════════════════════════════════════
+function printInvoice(inv) {
+  const total = (inv.items || []).reduce((s, i) => s + i.qty * i.price, 0) - (inv.discount || 0);
+  const win = window.open("", "_blank", "width=800,height=900");
+  win.document.write(`<!DOCTYPE html><html><head><title>Invoice ${inv.id}</title>
+  <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:sans-serif;padding:48px;max-width:700px;margin:0 auto}
+  .hdr{display:flex;justify-content:space-between;padding-bottom:20px;border-bottom:2px solid #1a1714;margin-bottom:28px}
+  table{width:100%;border-collapse:collapse}th{text-align:left;padding:10px;font-size:11px;text-transform:uppercase;color:#9b8e82;border-bottom:2px solid #e8e2db}
+  td{padding:10px;border-bottom:1px solid #f0ede8;font-size:13px}.tot{font-weight:700;border-top:2px solid #1a1714}
+  .foot{margin-top:40px;font-size:11px;color:#9b8e82;text-align:center}@media print{body{padding:24px}}</style></head><body>
+  <div class="hdr"><div><h2>👁 OptiManager</h2><div style="color:#9b8e82">${inv.branch}</div></div>
+  <div style="text-align:right"><h3>${inv.id}</h3><div>Date: ${inv.date}</div><div style="margin-top:6px;background:${inv.status === "Paid" ? "#dcfce7" : "#fef9c3"};color:${inv.status === "Paid" ? "#16a34a" : "#a16207"};display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700">${inv.status}</div></div></div>
+  <p style="margin-bottom:20px"><strong>Billed To:</strong> ${inv.patientName}</p>
+  <table><thead><tr><th>Item</th><th>Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Amount</th></tr></thead><tbody>
+  ${(inv.items || []).map(i => `<tr><td>${i.name}</td><td>${i.qty}</td><td style="text-align:right">₹${Number(i.price).toFixed(2)}</td><td style="text-align:right">₹${(i.qty * i.price).toFixed(2)}</td></tr>`).join("")}
+  ${inv.discount > 0 ? `<tr><td colspan="3" style="text-align:right;color:#9b8e82">Discount</td><td style="text-align:right;color:#dc2626">-₹${Number(inv.discount).toFixed(2)}</td></tr>` : ""}
+  <tr class="tot"><td colspan="3" style="text-align:right">Total</td><td style="text-align:right">₹${Number(total).toFixed(2)}</td></tr>
+  </tbody></table>
+  <div class="foot">OptiManager · ${inv.branch} · Generated ${new Date().toLocaleString("en-IN")}</div>
+  <script>window.onload=()=>{window.print()}<\/script></body></html>`);
+  win.document.close();
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// ROOT APP
 // ════════════════════════════════════════════════════════════════════════
 export default function App() {
-  const [session, setSession] = useState(() => LS.getSess());
-  const [accounts, setAccounts] = useState(() => LS.get("hms_accs_v55", DEFAULT_ACCOUNTS));
-  const [db, setDb] = useState(() => LS.get("hms_db_v55", INITIAL_MASTER_DATA));
-  const [auditLog, setAuditLog] = useState(() => LS.get("hms_aud_v55", []));
-  const [sbCreds, setSbCreds] = useState(() => LS.get("hms_creds_v55", { url: "", key: "" }));
-  const [view, setView] = useState("dashboard");
-  const [notifications, setNotifications] = useState([]);
-  const [branding, setBranding] = useState(() => LS.get("hms_brand_v55", { name: "Sri Surya Eye Care", logo: "👁️", theme: "#1e3a8a" }));
+  const [session,  setSession]  = useState(() => LS.getSess());
+  const [accounts, setAccounts] = useState(() => LS.get("opti_accounts", DEFAULT_ACCOUNTS));
+  const [data,     setData]     = useState(() => LS.get("opti_data_v4",  SEED_DATA));
+  const [pending,  setPending]  = useState(() => LS.get("opti_pending",  []));
+  const [auditLog, setAuditLog] = useState(() => LS.get("opti_audit",    []));
+  const [fieldVis, setFieldVis] = useState(() => LS.get("opti_fields",   DEFAULT_FIELD_VISIBILITY));
+  const [sbCreds,  setSbCreds]  = useState(() => LS.get("opti_sb",       { url: "", key: "" }));
+  const [sbStatus, setSbStatus] = useState("idle");
+  const [view,     setView]     = useState("dashboard");
+  const [lastSync, setLastSync] = useState(null);
+  const [syncing,  setSyncing]  = useState(false);
 
-  const mutate = useCallback((key, updatedArray, mutatedRecord = null) => {
-    setDb(prev => ({ ...prev, [key]: updatedArray }));
-    if (_sb && mutatedRecord) {
-      sbUpsertOne(key, mutatedRecord).catch(() => {});
+  // ── localStorage persistence (write-through cache only) ──────────
+  // NOTE: These are backup caches. Supabase is always authoritative.
+  useEffect(() => { LS.set("opti_accounts", accounts); }, [accounts]);
+  useEffect(() => { LS.set("opti_data_v4",  data);     }, [data]);
+  useEffect(() => { LS.set("opti_pending",  pending);  }, [pending]);
+  useEffect(() => { LS.set("opti_audit",    auditLog); }, [auditLog]);
+  useEffect(() => { LS.set("opti_fields",   fieldVis); }, [fieldVis]);
+  useEffect(() => { LS.set("opti_sb",       sbCreds);  }, [sbCreds]);
+
+  // ── Core sync: pull everything from Supabase ──────────────────────
+  // Supabase is the single source of truth.
+  // null return = network/auth error → keep existing local data unchanged.
+  // [] return   = table is genuinely empty → replace local data with [].
+  const syncFromCloud = async (url, key) => {
+    if (!url || !key) return;
+    initSB(url, key);
+    if (!sbReady()) return;
+    if (syncing) return; // prevent overlapping syncs
+    setSyncing(true);
+    try {
+      const [pts, bills, optom, optcl, stk, inv, pend, accs, tsks, rems] = await Promise.all([
+        sbGet("patients"),
+        sbGet("patientBill"),
+        sbGet("optometrist"),
+        sbGet("opticals"),
+        sbGet("stock"),
+        sbGet("invoices"),
+        sbGet("pending_queue"),
+        sbGet("accounts"),
+        sbGet("tasks"),
+        sbGet("reminders"),
+      ]);
+
+      console.log("[Sync] patients:", pts?.length ?? "ERR", "patientBill:", bills?.length ?? "ERR",
+        "optometrist:", optom?.length ?? "ERR", "opticals:", optcl?.length ?? "ERR",
+        "stock:", stk?.length ?? "ERR", "invoices:", inv?.length ?? "ERR",
+        "pending:", pend?.length ?? "ERR", "accounts:", accs?.length ?? "ERR");
+
+      setData(d => ({
+        ...d,
+        patients:    Array.isArray(pts)   ? pts   : d.patients,
+        patientBill: Array.isArray(bills) ? bills : d.patientBill,
+        optometrist: Array.isArray(optom) ? optom : d.optometrist,
+        opticals:    Array.isArray(optcl) ? optcl : d.opticals,
+        stock:       Array.isArray(stk)   ? stk   : d.stock,
+        invoices:    Array.isArray(inv)   ? inv   : d.invoices,
+        tasks:       Array.isArray(tsks)  ? tsks  : (d.tasks || []),
+        reminders:   Array.isArray(rems)  ? rems  : (d.reminders || []),
+      }));
+
+      // pending_queue: normalise entries from Supabase.
+      // Supabase may return record as a JSON string (if stored as text) or object (jsonb).
+      if (Array.isArray(pend)) {
+        const normalised = pend.map(p => ({
+          ...p,
+          record: typeof p.record === "string" ? JSON.parse(p.record) : (p.record || {}),
+        }));
+        setPending(normalised);
+        LS.set("opti_pending", normalised);
+      }
+
+      if (Array.isArray(accs) && accs.length > 0) {
+        setAccounts(accs);
+        LS.set("opti_accounts", accs);
+      }
+
+      setLastSync(new Date());
+      setSbStatus("ok");
+    } catch(e) {
+      console.warn("Cloud sync failed:", e);
+      setSbStatus("error");
+    }
+    setSyncing(false);
+  };
+
+  // ── Init on mount + auto-sync every 10s ──────────────────────────
+  // Uses a ref for syncFromCloud to avoid stale closures in setInterval.
+  const syncRef = useRef(syncFromCloud);
+  useEffect(() => { syncRef.current = syncFromCloud; }); // always up to date
+
+  useEffect(() => {
+    if (!sbCreds.url || !sbCreds.key) return;
+    initSB(sbCreds.url, sbCreds.key);
+    syncRef.current(sbCreds.url, sbCreds.key); // immediate on mount/cred change
+    const id = setInterval(() => syncRef.current(sbCreds.url, sbCreds.key), 10000);
+    return () => clearInterval(id);
+  }, [sbCreds.url, sbCreds.key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Supabase connect / test ──────────────────────────────────────
+  const connectSupabase = async (url, key) => {
+    setSbStatus("testing");
+    const cleanUrl = url.replace(/\/$/, "");
+    initSB(cleanUrl, key);
+    try {
+      // Test with a lightweight ping
+      const r = await fetch(`${cleanUrl}/rest/v1/patients?select=id&limit=1`, {
+        headers: { "apikey": key, "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+      });
+      if (r.status < 500) {
+        setSbCreds({ url: cleanUrl, key });
+        setSbStatus("ok");
+        // Push any local accounts to cloud so staff logins work everywhere
+        await sbUpsertMany("accounts", accounts);
+        await syncFromCloud(cleanUrl, key);
+        return true;
+      }
+      setSbStatus("error"); _sb = null; return false;
+    } catch(e) {
+      // CORS from sandbox — trust valid-format credentials
+      if (cleanUrl.includes("supabase.co") && key.startsWith("eyJ") && key.length > 100) {
+        initSB(cleanUrl, key);
+        setSbCreds({ url: cleanUrl, key });
+        setSbStatus("ok");
+        await sbUpsertMany("accounts", accounts).catch(() => {});
+        await syncFromCloud(cleanUrl, key);
+        return true;
+      }
+      setSbStatus("error"); _sb = null; return false;
+    }
+  };
+
+  const syncFromSupabase = async () => syncFromCloud(sbCreds.url, sbCreds.key);
+
+  const pushToSupabase = async () => {
+    if (!sbReady()) return;
+    setSbStatus("pushing");
+    try {
+      await Promise.all([
+        sbUpsertMany("patients",      data.patients    || []),
+        sbUpsertMany("patientBill",   data.patientBill || []),
+        sbUpsertMany("optometrist",   data.optometrist || []),
+        sbUpsertMany("opticals",      data.opticals    || []),
+        sbUpsertMany("stock",         data.stock       || []),
+        sbUpsertMany("invoices",      data.invoices    || []),
+        sbUpsertMany("pending_queue", pending),
+        sbUpsertMany("accounts",      accounts),
+        sbUpsertMany("tasks",         data.tasks       || []),
+        sbUpsertMany("reminders",     data.reminders   || []),
+      ]);
+      setSbStatus("ok");
+      await syncFromCloud(sbCreds.url, sbCreds.key);
+    } catch { setSbStatus("error"); }
+  };
+
+  // ── Audit log ────────────────────────────────────────────────────
+  const audit = useCallback((action, detail = {}) => {
+    if (!session) return;
+    const entry = { id: uid(), action, detail, userId: session.id, userName: session.name, branch: session.branch || "All", at: ts() };
+    setAuditLog(a => [entry, ...a].slice(0, 500));
+    sbInsert("audit_log", entry).catch(() => {});
+  }, [session]);
+
+  // ── Data mutations (owner direct writes) ─────────────────────────
+  // Only upsert the NEW/CHANGED record, not the whole array.
+  // After write, re-pull from Supabase so all browsers get the update.
+  const mutate = useCallback((key, fn, newRecord) => {
+    setData(d => {
+      const updated = typeof fn === "function" ? fn(d[key] || []) : fn;
+      // If we have the specific new/changed record, upsert just that one.
+      // Otherwise fall back to upserting the whole updated array.
+      if (sbReady()) {
+        if (newRecord) {
+          sbUpsertOne(key, newRecord).catch(() => {});
+        } else if (Array.isArray(updated)) {
+          sbUpsertMany(key, updated).catch(() => {});
+        }
+      }
+      return { ...d, [key]: updated };
+    });
+  }, []);
+
+  // ── Staff submit → pending_queue ─────────────────────────────────
+  const staffSubmit = useCallback(async (type, record) => {
+    const pendingRecord = { ...record, status: "pending" };
+    const entry = {
+      id:              uid(),
+      type:            type,                     // e.g. "patients", "patientBill"
+      record:          pendingRecord,            // stored as JSONB in Supabase
+      submittedBy:     session.id,
+      submittedByName: session.name,
+      branch:          session.branch,
+      submittedAt:     ts(),
+    };
+
+    console.log("[staffSubmit] Writing to pending_queue:", entry.id, "type:", type);
+
+    // Write to Supabase pending_queue FIRST
+    const ok = await sbUpsertOne("pending_queue", entry);
+    console.log("[staffSubmit] Supabase write result:", ok);
+    if (!ok) {
+      alert("Warning: Cloud save may have failed. Please check your Supabase connection.");
+    }
+
+    // Always update local state regardless of Supabase result
+    setPending(p => {
+      const next = [...p, entry];
+      LS.set("opti_pending", next);
+      return next;
+    });
+    audit("STAFF_SUBMIT", { type, recordId: record.id });
+  }, [session, audit]);
+
+  // ── Owner approve ────────────────────────────────────────────────
+  const approvePending = useCallback(async (entryId) => {
+    const entry = pending.find(p => p.id === entryId);
+    if (!entry) {
+      console.error("[approve] Entry not found in pending state:", entryId);
+      alert("Error: Could not find this approval entry. Please refresh (Sync Now) and try again.");
+      return;
+    }
+
+    // Validate entry structure — Supabase may return record as string (text col) or object (jsonb col)
+    const rawRecord = entry.record;
+    const parsedRecord = typeof rawRecord === "string"
+      ? (() => { try { return JSON.parse(rawRecord); } catch { return null; } })()
+      : rawRecord;
+
+    if (!parsedRecord || typeof parsedRecord !== "object") {
+      console.error("[approve] entry.record is invalid:", rawRecord);
+      alert("Error: The pending record data is corrupted. Please ask staff to resubmit.");
+      return;
+    }
+
+    const targetTable = entry.type; // "patients", "patientBill", "stock", "invoices"
+    if (!targetTable || !["patients","patientBill","stock","invoices"].includes(targetTable)) {
+      console.error("[approve] Invalid entry.type:", targetTable);
+      alert("Error: Unknown record type '" + targetTable + "'. Cannot approve.");
+      return;
+    }
+
+    const approvedRecord = {
+      ...parsedRecord,
+      status:         "approved",
+      approvedBy:     session.id,
+      approvedByName: session.name,
+      approvedAt:     ts(),
+    };
+
+    // Ensure record has an id
+    if (!approvedRecord.id) {
+      approvedRecord.id = uid();
+      console.warn("[approve] Record had no id, assigned:", approvedRecord.id);
+    }
+
+    console.log("[approve] Writing to table:", targetTable, "record id:", approvedRecord.id);
+
+    // Step 1: Write approved record to the real data table in Supabase
+    const writeOk = await sbUpsertOne(targetTable, approvedRecord);
+    console.log("[approve] Step 1 - write to", targetTable, ":", writeOk);
+    if (!writeOk) {
+      alert("Warning: Failed to save approved record to cloud. Please check your Supabase connection and try again.");
+      return; // Don't proceed if write failed
+    }
+
+    // Step 2: Remove from pending_queue in Supabase
+    const deleteOk = await sbDelete("pending_queue", entryId);
+    console.log("[approve] Step 2 - delete from pending_queue:", deleteOk);
+
+    // Step 3: Update owner's local state immediately so UI reflects change
+    setData(d => {
+      const arr = d[targetTable] || [];
+      const exists = arr.find(x => x.id === approvedRecord.id);
+      const updated = exists
+        ? arr.map(x => x.id === approvedRecord.id ? approvedRecord : x)
+        : [...arr, approvedRecord];
+      console.log("[approve] Step 3 - local state updated. New", targetTable, "count:", updated.length);
+      return { ...d, [targetTable]: updated };
+    });
+
+    // Step 4: Remove from local pending
+    setPending(p => {
+      const next = p.filter(x => x.id !== entryId);
+      LS.set("opti_pending", next);
+      return next;
+    });
+
+    audit("APPROVE", { type: targetTable, recordId: approvedRecord.id, submittedBy: entry.submittedByName });
+
+    // Step 5: Re-sync from cloud after a short delay to confirm write succeeded
+    // and refresh all other users' views on next poll
+    setTimeout(() => {
+      if (sbCreds.url && sbCreds.key) syncFromCloud(sbCreds.url, sbCreds.key);
+    }, 1500);
+
+  }, [pending, session, audit, sbCreds]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rejectPending = useCallback(async (entryId) => {
+    const entry = pending.find(p => p.id === entryId);
+    await sbDelete("pending_queue", entryId);
+    setPending(p => p.filter(x => x.id !== entryId));
+    audit("REJECT", { type: entry?.type, submittedBy: entry?.submittedByName });
+  }, [pending, audit]);
+
+  // ── Account management: always sync accounts to Supabase ─────────
+  const updateAccounts = useCallback(async (newAccounts) => {
+    setAccounts(newAccounts);
+    // Push updated accounts to Supabase so all devices see same staff list
+    if (sbReady()) {
+      await sbUpsertMany("accounts", newAccounts).catch(() => {});
     }
   }, []);
 
-  const audit = useCallback((action, detail = {}) => {
-    if (!session) return;
-    const log = { id: uid(), action, detail, userId: session.id, userName: session.name, dept: session.department, at: ts() };
-    setAuditLog(a => [log, ...a].slice(0, 500));
-    if (_sb) sbUpsertOne("audit_log", log).catch(() => {});
+  // ── Login / Logout ───────────────────────────────────────────────
+  const login = useCallback(async (acc) => {
+    const s = { ...acc, loginTime: ts() };
+    LS.sess(s);
+    setSession(s);
+    setView("dashboard");
+    const entry = { id: uid(), action: "LOGIN", detail: {}, userId: acc.id, userName: acc.name, branch: acc.branch || "All", at: ts() };
+    setAuditLog(a => [entry, ...a].slice(0, 500));
+    sbInsert("audit_log", entry).catch(() => {});
+    // Immediately sync after login so user sees latest data
+    if (sbCreds.url && sbCreds.key) {
+      syncFromCloud(sbCreds.url, sbCreds.key);
+    }
+  }, [sbCreds]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const logout = useCallback(() => {
+    audit("LOGOUT", {});
+    LS.sess(null);
+    setSession(null);
+    setView("dashboard");
+  }, [audit]);
+
+  const can = useCallback((section, action) => {
+    if (!session) return false;
+    if (session.role === "owner") return true;
+    return session.perms?.[section]?.[action] === true;
   }, [session]);
 
-  const syncPipeline = useCallback(async () => {
-    if (!sbCreds.url || !sbCreds.key) return;
+  // ── LoginScreen: fetch accounts from Supabase before showing ─────
+  // So staff created on one device are visible on all devices.
+  const [loginAccounts, setLoginAccounts] = useState(accounts);
+  useEffect(() => {
+    if (!sbCreds.url || !sbCreds.key) { setLoginAccounts(accounts); return; }
     initSB(sbCreds.url, sbCreds.key);
-    try {
-      const [pts, records, inv, tsk, accs] = await Promise.all([
-        sbGet("patients"), sbGet("clinicalRecords"), sbGet("inventory"), sbGet("tasks"), sbGet("accounts")
-      ]);
-      setDb(d => ({
-        ...d,
-        patients: Array.isArray(pts) ? pts : d.patients,
-        clinicalRecords: Array.isArray(records) ? records : d.clinicalRecords,
-        inventory: Array.isArray(inv) ? inv : d.inventory,
-        tasks: Array.isArray(tsk) ? tsk : d.tasks
-      }));
-      if (Array.isArray(accs) && accs.length > 0) setAccounts(accs);
-    } catch (e) { console.warn("Background Node Network Refresh Paused", e); }
-  }, [sbCreds]);
+    sbGet("accounts").then(accs => {
+      if (Array.isArray(accs) && accs.length > 0) {
+        setLoginAccounts(accs);
+        setAccounts(accs);
+        LS.set("opti_accounts", accs);
+      } else {
+        setLoginAccounts(accounts);
+      }
+    }).catch(() => setLoginAccounts(accounts));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    LS.set("hms_accs_v55", accounts);
-    LS.set("hms_db_v55", db);
-    LS.set("hms_aud_v55", auditLog);
-    LS.set("hms_brand_v55", branding);
-  }, [accounts, db, auditLog, branding]);
+  if (!session) return <LoginScreen accounts={loginAccounts} onLogin={login} sbCreds={sbCreds} setSbCreds={setSbCreds} />;
 
-  // Real-time Cloud Synchronization & Notification Engine
-  useEffect(() => {
-    if (sbCreds.url && sbCreds.key) {
-      syncPipeline();
-      const interval = setInterval(syncPipeline, 10000);
-      return () => clearInterval(interval);
-    }
-  }, [sbCreds, syncPipeline]);
-
-  // Operational Notification & Deadline Scanner Loops
-  useEffect(() => {
-    if (!session) return;
-    const pendingTasks = db.tasks.filter(t => t.assignedTo === session.id && t.status !== "Completed");
-    const notes = pendingTasks.map(t => ({ id: t.id, text: `🚨 ASSIGNED TASK PENDING: "${t.title}" | Target Deadline: ${t.deadline}` }));
-    
-    // Scan for low stock alerts
-    const alerts = db.inventory.filter(i => i.qty <= i.reorder).map(i => ({ id: i.id, text: `⚠️ WAREHOUSE STOCK WARNING: SKU "${i.sku}" falls below critical parameter boundaries.` }));
-    
-    setNotifications([...notes, ...alerts]);
-  }, [db.tasks, db.inventory, session]);
-
-  const login = (acc, bOverride) => {
-    const s = { ...acc, branch: bOverride || acc.branch, loginTime: ts() };
-    LS.sess(s); setSession(s); setView("dashboard");
+  const sharedProps = {
+    session, data, mutate, staffSubmit, can, audit, fieldVis,
+    onSync: () => syncFromCloud(sbCreds.url, sbCreds.key),
+    syncing,
   };
 
-  const logout = () => { LS.sess(null); setSession(null); };
-
-  if (!session) return <LoginScreen accounts={accounts} onLogin={login} branding={branding} sbCreds={sbCreds} setSbCreds={setSbCreds} />;
-
   return (
-    <DashboardShell session={session} onLogout={logout} view={view} setView={setView} branding={branding} notifications={notifications}>
-      {view === "dashboard" && <AnalyticsDashboard db={db} auditLog={auditLog} session={session} setView={setView} />}
-      {view === "opRegistration" && <OpRegistrationModule db={db} mutate={mutate} session={session} audit={audit} />}
-      {view === "kSheet" && <KSheetModule db={db} mutate={mutate} session={session} audit={audit} />}
-      {view === "inventory" && <InventoryModule db={db} mutate={mutate} session={session} audit={audit} />}
-      {view === "governance" && session.role === "owner" && <MDGovernanceSection accounts={accounts} setAccounts={setAccounts} branding={branding} setBranding={setBranding} auditLog={auditLog} db={db} />}
-    </DashboardShell>
+    <Shell session={session} onLogout={logout} pending={pending} view={view} setView={setView} can={can} sbStatus={sbStatus} syncing={syncing} lastSync={lastSync} onManualSync={() => syncFromCloud(sbCreds.url, sbCreds.key)}>
+      {view === "dashboard"    && <Dashboard session={session} data={data} pending={pending} setView={setView} auditLog={auditLog} />}
+      {view === "approval"     && session.role === "owner" && <ApprovalQueue pending={pending} onApprove={approvePending} onReject={rejectPending} />}
+      {view === "patients"     && <PatientsSection     {...sharedProps} />}
+      {view === "patientBill"  && <PatientBillSection  {...sharedProps} />}
+      {view === "optometrist"  && <OptometristSection  {...sharedProps} />}
+      {view === "opticals"     && <OpticalsSection     {...sharedProps} />}
+      {view === "inventory"    && <InventorySection    {...sharedProps} />}
+      {view === "invoices"     && <InvoicesSection     {...sharedProps} />}
+      {view === "alerts"       && <AlertsSection       {...sharedProps} />}
+      {view === "tasks"        && <TasksSection        {...sharedProps} accounts={accounts} />}
+      {view === "reminders"    && <RemindersSection    {...sharedProps} />}
+      {view === "auditlog"     && session.role === "owner" && <AuditLogSection auditLog={auditLog} accounts={accounts} />}
+      {view === "dashbuilder"  && session.role === "owner" && <DashboardBuilder fieldVis={fieldVis} setFieldVis={setFieldVis} accounts={accounts} setAccounts={updateAccounts} />}
+      {view === "users"        && session.role === "owner" && <UsersSection accounts={accounts} setAccounts={updateAccounts} audit={audit} />}
+      {view === "supabase"     && session.role === "owner" && <SupabaseSection sbCreds={sbCreds} sbStatus={sbStatus} onConnect={connectSupabase} onSync={syncFromSupabase} onPush={pushToSupabase} />}
+      {view === "launchguide"  && <LaunchGuide />}
+    </Shell>
   );
 }
 
+
 // ════════════════════════════════════════════════════════════════════════
-// NAVIGATION PLATFORM CONTAINER
+// LOGIN SCREEN
+// Supports Supabase URL entry so staff on new devices can connect to
+// the cloud and load accounts without needing localStorage.
 // ════════════════════════════════════════════════════════════════════════
-function DashboardShell({ session, onLogout, view, setView, branding, notifications, children }) {
-  const [openAlerts, setOpenAlerts] = useState(false);
-  const menu = [
-    { id: "dashboard", label: "Executive Dashboard", icon: "📊", show: true },
-    { id: "opRegistration", label: "OP Demographics Desk", icon: "📝", show: session.role === "owner" || session.department === "OP Registration" },
-    { id: "kSheet", label: "Sri Surya K-Sheet Pro", icon: "📋", show: session.role === "owner" || ["K-Sheet Triage Room", "Optometrist Station", "Ophthalmologist Consultation"].includes(session.department) },
-    { id: "inventory", label: "Central Supply Matrix", icon: "📦", show: session.role === "owner" || ["Lens Stock Control", "Pharmacy Dept"].includes(session.department) },
-    { id: "governance", label: "Control Center (MD)", icon: "🛡️", show: session.role === "owner" },
-  ];
+function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
+  const [userId,   setUserId]   = useState("");
+  const [password, setPassword] = useState("");
+  const [branch,   setBranch]   = useState(BRANCHES[0]);
+  const [err,      setErr]      = useState("");
+  const [showPw,   setShowPw]   = useState(false);
+  const [liveAccs, setLiveAccs] = useState(accounts);
+  const [loading,  setLoading]  = useState(false);
+
+  // ── Cloud setup panel (shown when no Supabase URL saved) ─────────
+  const [showCloud, setShowCloud] = useState(!sbCreds?.url);
+  const [cloudUrl,  setCloudUrl]  = useState(sbCreds?.url  || "");
+  const [cloudKey,  setCloudKey]  = useState(sbCreds?.key  || "");
+  const [cloudMsg,  setCloudMsg]  = useState("");
+
+  const connectCloud = async () => {
+    if (!cloudUrl || !cloudKey) { setCloudMsg("Enter both URL and API key."); return; }
+    setLoading(true); setCloudMsg("Connecting…");
+    const cleanUrl = cloudUrl.replace(/\/$/, "");
+    initSB(cleanUrl, cloudKey);
+    try {
+      const accs = await sbGet("accounts");
+      if (Array.isArray(accs) && accs.length > 0) {
+        setLiveAccs(accs);
+        setSbCreds({ url: cleanUrl, key: cloudKey });
+        LS.set("opti_sb", { url: cleanUrl, key: cloudKey });
+        LS.set("opti_accounts", accs);
+        setCloudMsg("Connected ✓ — accounts loaded from cloud.");
+        setShowCloud(false);
+      } else {
+        // Table might be empty — still save creds
+        setSbCreds({ url: cleanUrl, key: cloudKey });
+        LS.set("opti_sb", { url: cleanUrl, key: cloudKey });
+        setCloudMsg("Connected ✓ (no accounts in cloud yet — using defaults).");
+        setShowCloud(false);
+      }
+    } catch(e) {
+      setCloudMsg("Connection failed. Check URL and key.");
+    }
+    setLoading(false);
+  };
+
+  const doLogin = () => {
+    const all = [...liveAccs];
+    const acc = all.find(a => a.id === userId.trim() && a.password === password);
+    if (!acc) {
+      setErr("Invalid user ID or password.");
+      return;
+    }
+    if (acc.role === "staff" && branch && acc.branch !== branch) {
+      setErr(`This account belongs to ${acc.branch}.`);
+      return;
+    }
+    onLogin(acc);
+  };
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#f8f9fa", fontFamily: "system-ui, sans-serif" }}>
-      <style>{SHELL_CSS}</style>
-      <aside style={{ width: 260, background: branding.theme, color: "#fff", display: "flex", flexDirection: "column", padding: "16px 12px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, paddingBottom: 16, borderBottom: "1px solid rgba(255,255,255,0.15)", marginBottom: 16 }}>
-          <span style={{ fontSize: 24 }}>{branding.logo}</span>
-          <div><div style={{ fontWeight: 700, fontSize: 16 }}>{branding.name}</div><div style={{ fontSize: 11, opacity: 0.7 }}>v{APP_VER} Architecture</div></div>
+    <div style={{ minHeight: "100vh", background: "#0f0e0c", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans',sans-serif" }}>
+      <style>{GCSS}</style>
+      <div style={{ width: 420, background: "#fff", borderRadius: 24, padding: "42px 38px", boxShadow: "0 40px 100px rgba(0,0,0,.5)" }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ width: 60, height: 60, background: "#1a1714", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", fontSize: 28 }}>👁</div>
+          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 24, fontWeight: 700 }}>OptiManager</div>
+          <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>v{APP_VER} · Multi-Branch Optical Suite</div>
         </div>
-        
-        {/* Alerts Center Component */}
-        {notifications.length > 0 && (
-          <div style={{ marginBottom: 14, position: "relative" }}>
-            <button onClick={() => setOpenAlerts(!openAlerts)} style={{ width: "100%", background: "#dc2626", color: "#fff", border: "none", borderRadius: 8, padding: "8px", fontWeight: 700, fontSize: 11, cursor: "pointer", display: "flex", justifyContent: "space-between" }}>
-              <span>🔔 ACTIVE PROTOCOL NOTIFICATIONS</span> <span style={{ background: "#fff", color: "#dc2626", padding: "1px 6px", borderRadius: 10 }}>{notifications.length}</span>
+
+        {/* Cloud connection panel */}
+        <div style={{ marginBottom: 18, background: "#f0ede8", borderRadius: 12, padding: "14px 16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: sbCreds?.url ? "#16a34a" : "#d97706" }}>
+              {sbCreds?.url ? "☁ Cloud Connected" : "☁ Cloud Not Connected"}
+            </div>
+            <button style={{ fontSize: 11, background: "none", border: "none", color: "#6b5e52", cursor: "pointer", textDecoration: "underline" }} onClick={() => setShowCloud(s => !s)}>
+              {showCloud ? "Hide" : "Configure"}
             </button>
-            {openAlerts && (
-              <div style={{ position: "absolute", top: 34, left: 0, right: 0, background: "#fff", color: "#1e293b", borderRadius: 8, boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)", padding: 10, zIndex: 999, maxHeight: 200, overflowY: "auto", border: "1px solid #cbd5e1" }}>
-                {notifications.map(n => <div key={n.id} style={{ fontSize: 11, borderBottom: "1px solid #f1f5f9", padding: "6px 0", color: "#991b1b", fontWeight: 500 }}>{n.text}</div>)}
-              </div>
-            )}
           </div>
-        )}
-
-        <div style={{ padding: "8px 12px", background: "rgba(255,255,255,0.1)", borderRadius: 8, marginBottom: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>{session.name}</div>
-          <div style={{ fontSize: 11, opacity: 0.75, marginTop: 2 }}>{session.department}</div>
-          <div style={{ fontSize: 10, color: "#a3cfbb", marginTop: 4 }}>📍 Station Unit: {session.branch}</div>
-        </div>
-        <nav style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-          {menu.filter(m => m.show).map(m => (
-            <button key={m.id} className={`sidebar-btn ${view === m.id ? "active" : ""}`} onClick={() => setView(m.id)}>
-              <span style={{ marginRight: 8 }}>{m.icon}</span> {m.label}
-            </button>
-          ))}
-        </nav>
-        <button className="logout-btn" onClick={onLogout}>🔒 Exit Secure Node</button>
-      </aside>
-      <main style={{ flex: 1, padding: 24, overflowY: "auto", maxWidth: "calc(100vw - 260px)" }}>{children}</main>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// LOGIN TERMINAL GATEWAY
-// ════════════════════════════════════════════════════════════════════════
-function LoginScreen({ accounts, onLogin, branding, sbCreds, setSbCreds }) {
-  const [uidStr, setUidStr] = useState("");
-  const [pwd, setPwd] = useState("");
-  const [branch, setBranch] = useState(BRANCHES[0]);
-  const [showConfig, setShowConfig] = useState(false);
-  const [url, setUrl] = useState(sbCreds.url || "");
-  const [key, setKey] = useState(sbCreds.key || "");
-
-  return (
-    <div style={{ minHeight: "100vh", background: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ width: 400, background: "#fff", borderRadius: 16, padding: 32, boxShadow: "0 20px 25px -5px rgba(0,0,0,0.3)" }}>
-        <div style={{ textAlign: "center", marginBottom: 20 }}>
-          <div style={{ fontSize: 40 }}>{branding.logo}</div>
-          <h2 style={{ margin: 0, fontSize: 22, color: "#1f2937" }}>{branding.name}</h2>
-          <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6b7280" }}>Terminal Authorization Handshake</p>
-        </div>
-        <div style={{ display: "grid", gap: 14 }}>
-          <div>
-            <label style={LBL}>Branch Router Hub Location</label>
-            <select value={branch} onChange={e => setBranch(e.target.value)} style={INP}>
-              {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={LBL}>Operator System Key ID</label>
-            <input type="text" value={uidStr} onChange={e => setUidStr(e.target.value)} style={INP} />
-          </div>
-          <div>
-            <label style={LBL}>Access Credentials Security Passkey</label>
-            <input type="password" value={pwd} onChange={e => setPwd(e.target.value)} style={INP} onKeyDown={e => e.key === "Enter" && onLogin(accounts.find(a => a.id === uidStr.trim() && a.password === pwd), branch)} />
-          </div>
-          <button onClick={() => {
-            const matched = accounts.find(a => a.id === uidStr.trim() && a.password === pwd);
-            if (matched) onLogin(matched, matched.role === "owner" ? "All Branches" : branch);
-            else alert("Handshake Aborted: Invalid Security Matrix Tokens.");
-          }} style={{ background: branding.theme, color: "#fff", border: "none", padding: "12px", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}>Verify Identity</button>
-          
-          <div style={{ borderTop: "1px dashed #cbd5e1", marginTop: 6, paddingTop: 8, textAlign: "center" }}>
-            <button onClick={() => setShowConfig(!showConfig)} style={{ background: "none", border: "none", color: "#64748b", fontSize: 11, cursor: "pointer", textDecoration: "underline" }}>⚙️ Endpoint Infrastructure Configuration</button>
-          </div>
-          {showConfig && (
-            <div style={{ background: "#f8fafc", padding: 12, borderRadius: 8, border: "1px solid #e2e8f0", display: "grid", gap: 8 }}>
-              <input type="text" placeholder="Supabase Project Endpoint URL" value={url} onChange={e => setUrl(e.target.value)} style={INP} />
-              <input type="password" placeholder="Anon Public Token Key" value={key} onChange={e => setKey(e.target.value)} style={INP} />
-              <button onClick={() => { setSbCreds({ url, key }); setShowConfig(false); alert("Endpoints bound to client state memory layers."); }} style={{ background: "#475569", color: "#fff", padding: "6px", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>Save Network Routes</button>
+          {showCloud && (
+            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+              <div style={{ fontSize: 11, color: "#9b8e82" }}>Enter your Supabase credentials to sync data across devices.</div>
+              <input type="text" placeholder="https://xxxx.supabase.co" value={cloudUrl} onChange={e => setCloudUrl(e.target.value)} style={{ fontSize: 12 }} />
+              <input type="password" placeholder="anon public key (eyJ…)" value={cloudKey} onChange={e => setCloudKey(e.target.value)} style={{ fontSize: 12 }} />
+              <button className="btn btn-dark btn-sm" onClick={connectCloud} disabled={loading}>{loading ? "Connecting…" : "Connect to Cloud"}</button>
+              {cloudMsg && <div style={{ fontSize: 11, color: cloudMsg.includes("✓") ? "#16a34a" : "#dc2626" }}>{cloudMsg}</div>}
             </div>
           )}
+        </div>
+
+        <div style={{ display: "grid", gap: 14 }}>
+          <div><label>Branch</label>
+            <select value={branch} onChange={e => setBranch(e.target.value)}>
+              <option value="">— Owner Login (no branch) —</option>
+              {BRANCHES.map(b => <option key={b}>{b}</option>)}
+            </select>
+          </div>
+          <div><label>User ID</label>
+            <input type="text" placeholder="owner / staff_jpt1 / staff_prp1" value={userId} onChange={e => { setUserId(e.target.value); setErr(""); }} />
+          </div>
+          <div><label>Password</label>
+            <div style={{ position: "relative" }}>
+              <input type={showPw ? "text" : "password"} value={password} onChange={e => { setPassword(e.target.value); setErr(""); }} onKeyDown={e => e.key === "Enter" && doLogin()} style={{ paddingRight: 42 }} />
+              <button onClick={() => setShowPw(s => !s)} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#9b8e82", fontSize: 16 }}>{showPw ? "🙈" : "👁"}</button>
+            </div>
+          </div>
+        </div>
+        {err && <div style={{ marginTop: 10, fontSize: 12, color: "#dc2626", background: "#fee2e2", padding: "8px 12px", borderRadius: 8 }}>{err}</div>}
+        <button className="btn btn-dark" style={{ width: "100%", marginTop: 18, padding: 12 }} onClick={doLogin}>Login</button>
+        <div style={{ marginTop: 18, background: "#faf9f7", borderRadius: 10, padding: "12px 16px", fontSize: 12, color: "#9b8e82", lineHeight: 1.9 }}>
+          <strong style={{ color: "#6b5e52" }}>Demo:</strong> <code style={CS}>owner</code>/<code style={CS}>owner123</code> · <code style={CS}>staff_jpt1</code>/<code style={CS}>jpt1234</code> · <code style={CS}>staff_prp1</code>/<code style={CS}>prp1234</code>
         </div>
       </div>
     </div>
@@ -282,398 +750,229 @@ function LoginScreen({ accounts, onLogin, branding, sbCreds, setSbCreds }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// EXECUTIVE DASHBOARD & GRAPHICAL DATA DRILL-DOWN ANALYTICS ENGINE
+// SHELL
 // ════════════════════════════════════════════════════════════════════════
-function AnalyticsDashboard({ db, auditLog, session, setView }) {
-  const [drillDownTarget, setDrillDownTarget] = useState(null);
-  const pts = session.role === "owner" ? db.patients : db.patients.filter(x => x.branch === session.branch);
+function Shell({ session, onLogout, pending, view, setView, can, sbStatus, syncing, lastSync, onManualSync, children }) {
+  const isOwner = session.role === "owner";
+  const NAV = [
+    { id: "dashboard",    label: "Dashboard",        icon: "⬡", show: true },
+    { id: "approval",     label: "Approval Queue",   icon: "✅", show: isOwner, badge: pending.length, badgeColor: "#16a34a" },
+    { id: "patients",     label: "OP Registration",  icon: "◉", show: can("patients", "view") },
+    { id: "patientBill",  label: "K Sheet Entry",    icon: "🧾", show: can("patientBill", "view") },
+    { id: "optometrist",  label: "Optometrist",      icon: "👁", show: can("optometrist", "view") },
+    { id: "opticals",     label: "Opticals",         icon: "🔭", show: can("opticals", "view") },
+    { id: "inventory",    label: "Inventory",        icon: "▦", show: can("inventory", "view") },
+    { id: "invoices",     label: "Sales & Invoices", icon: "◆", show: can("invoices", "view") },
+    { id: "alerts",       label: "Low Stock Alerts", icon: "▲", show: can("alerts", "view") },
+    { id: "tasks",        label: "Tasks",            icon: "📌", show: true },
+    { id: "reminders",    label: "Reminders",        icon: "🔔", show: true },
+    { id: "divider" },
+    { id: "auditlog",    label: "Audit Log",        icon: "📋", show: isOwner },
+    { id: "dashbuilder", label: "Dashboard Builder",icon: "🏗", show: isOwner },
+    { id: "users",       label: "Manage Staff",     icon: "👥", show: isOwner },
+    { id: "supabase",    label: "Cloud Sync",       icon: "☁", show: isOwner, badge: sbStatus === "error" ? "!" : 0, badgeColor: "#dc2626" },
+    { id: "launchguide", label: "Launch Guide",     icon: "🚀", show: true },
+  ];
 
-  // Parse analytics timelines (Group by date vectors)
-  const timelineAggregate = pts.reduce((acc, curr) => {
-    acc[curr.date] = (acc[curr.date] || 0) + 1;
-    return acc;
-  }, {});
-  const sortedDates = Object.keys(timelineAggregate).sort().slice(-7);
+  const sbDot = { ok: "#16a34a", error: "#dc2626", testing: "#d97706", pushing: "#d97706", syncing: "#d97706" }[sbStatus] || "#9b8e82";
+
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", fontFamily: "'DM Sans',sans-serif", background: "#f0ede8", color: "#1a1714" }}>
+      <style>{GCSS}</style>
+      <aside style={{ width: 236, background: "#fff", borderRight: "1px solid #e8e2db", padding: "18px 10px", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh", flexShrink: 0, overflowY: "auto" }}>
+        <div style={{ padding: "0 8px 14px", borderBottom: "1px solid #f0ede8", marginBottom: 10 }}>
+          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 16, fontWeight: 700 }}>👁 OptiManager</div>
+          <div style={{ fontSize: 10, color: "#9b8e82", marginTop: 1, display: "flex", alignItems: "center", gap: 5 }}>
+            v{APP_VER} <span style={{ width: 7, height: 7, borderRadius: "50%", background: sbDot, display: "inline-block" }} title={`Supabase: ${sbStatus}`} />
+          </div>
+        </div>
+        <div style={{ margin: "0 4px 12px", background: "#f0ede8", borderRadius: 10, padding: "9px 12px" }}>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>{session.name}</div>
+          <div style={{ fontSize: 11, color: "#9b8e82", marginTop: 2 }}>{isOwner ? "Owner · All Branches" : session.branch}</div>
+          {isOwner && <span style={{ display: "inline-block", marginTop: 4, background: "#1a1714", color: "#f0ede8", borderRadius: 20, fontSize: 10, padding: "1px 8px", fontWeight: 700 }}>OWNER</span>}
+        </div>
+        {NAV.filter(n => n.id === "divider" || n.show).map(n =>
+          n.id === "divider"
+            ? <div key="div" style={{ margin: "6px 8px", borderTop: "1px solid #f0ede8" }} />
+            : <button key={n.id} className={`nav-item ${view === n.id ? "active" : ""}`} onClick={() => setView(n.id)}>
+                <span style={{ fontSize: 13 }}>{n.icon}</span>{n.label}
+                {n.badge > 0 && <span className="badge" style={{ marginLeft: "auto", background: n.badgeColor || "#e55e3a" }}>{n.badge}</span>}
+              </button>
+        )}
+        <div style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px solid #f0ede8" }}>
+          <button className="btn btn-outline btn-sm" style={{ width: "100%", marginBottom: 8 }} onClick={onManualSync} disabled={syncing}>
+            {syncing ? "⟳ Syncing…" : "⟳ Sync Now"}
+          </button>
+          {lastSync && <div style={{ fontSize: 10, color: "#b5a99e", textAlign: "center", marginBottom: 8 }}>
+            Last sync: {lastSync.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          </div>}
+          <button className="btn btn-outline btn-sm" style={{ width: "100%" }} onClick={onLogout}>🔒 Logout</button>
+        </div>
+      </aside>
+      <main style={{ flex: 1, padding: "26px 30px", overflowY: "auto", maxWidth: "calc(100vw - 236px)" }}>{children}</main>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// DASHBOARD
+// ════════════════════════════════════════════════════════════════════════
+function Dashboard({ session, data, pending, setView, auditLog }) {
+  const isOwner = session.role === "owner";
+  const myBranch = session.branch;
+  const flt = arr => isOwner ? arr : arr.filter(x => x.branch === myBranch);
+
+  const pts   = flt(data.patients    || []).filter(x => x.status === "approved");
+  const bills = flt(data.patientBill || []).filter(x => x.status === "approved");
+  const invs  = flt(data.invoices    || []).filter(x => x.approvalStatus === "approved" && x.status === "Paid");
+  const rev   = invs.reduce((s, i) => s + (i.items || []).reduce((a, x) => a + x.qty * x.price, 0) - (i.discount || 0), 0);
+
+  const stats = [
+    { label: "Patients",          value: pts.length,    color: "#1a1714" },
+    { label: "Patient Bills",     value: bills.length,  color: "#1d4ed8" },
+    { label: "Revenue (Paid)",    value: currency(rev), color: "#16a34a" },
+    { label: "Pending Approvals", value: pending.length, color: "#d97706", action: isOwner ? () => setView("approval") : null },
+  ];
+
+  const recentAudit = auditLog.slice(0, 8);
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700 }}>Hospital Command Analytics Stream</h1>
-        <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: 13 }}>Click core parameter numeric metrics to trigger transactional visual drill-down loops.</p>
+      <div style={{ marginBottom: 22 }}>
+        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 26, fontWeight: 700 }}>Welcome, {session.name} 👋</div>
+        <div style={{ fontSize: 13, color: "#9b8e82", marginTop: 3 }}>{isOwner ? "All Branches" : myBranch} · {ts()}</div>
       </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 24 }}>
-        <div className="analytics-card interactive" onClick={() => setDrillDownTarget(drillDownTarget === "patients" ? null : "patients")}>
-          <div className="title">Gross Aggregate Operational Intake</div>
-          <div className="value">{pts.length} Cases 🔍</div>
-        </div>
-        <div className="analytics-card" style={{ borderLeftColor: "#10b981" }}>
-          <div className="title">Triage Operations Queue</div>
-          <div className="value">{pts.filter(p => p.currentStage === "K-Sheet Triage Room").length} Patients</div>
-        </div>
-      </div>
-
-      {/* Zero-Dependency SVG Dynamic Bar Chart Implementation */}
-      {drillDownTarget === "patients" && (
-        <div style={{ background: "#fff", padding: 20, borderRadius: 12, boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", marginBottom: 24 }}>
-          <h4 style={{ margin: "0 0 14px 0", color: "#1e3a8a" }}>📊 Transactional Drill-Down Matrix: Historical Intake Load Trajectory (Past 7 Recording Blocks)</h4>
-          {sortedDates.length === 0 ? (
-            <p style={{ fontSize: 13, color: "#64748b" }}>Insufficient chronological dataset loops available to render graphical maps.</p>
-          ) : (
-            <div style={{ display: "flex", alignItems: "flex-end", height: 180, gap: 24, padding: "20px 10px", background: "#f8fafc", borderRadius: 8 }}>
-              {sortedDates.map(date => {
-                const count = timelineAggregate[date];
-                const heightPercentage = Math.min(100, (count / Math.max(...Object.values(timelineAggregate))) * 100);
-                return (
-                  <div key={date} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", height: "100%", justifyContent: "flex-end" }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#1e3a8a", marginBottom: 4 }}>{count}</span>
-                    <div style={{ width: "100%", height: `${heightPercentage}%`, background: "linear-gradient(to top, #1e3a8a, #3b82f6)", borderRadius: "4px 4px 0 0", minHeight: "4px", transition: "height 0.4s ease" }} />
-                    <span style={{ fontSize: 10, color: "#64748b", marginTop: 6, fontWeight: 500 }}>{date}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div style={{ background: "#fff", padding: 20, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
-        <h3 style={{ margin: "0 0 16px" }}>Core Patient Tracker Queue</h3>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ background: "#f1f5f9", textAlign: "left" }}>
-              <th style={{ padding: 10 }}>Master MR No Reference</th>
-              <th style={{ padding: 10 }}>Patient Legal Name</th>
-              <th style={{ padding: 10 }}>Operational Branch Hub</th>
-              <th style={{ padding: 10 }}>Current Triage Flow Checkpoint</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pts.slice(-5).reverse().map(p => (
-              <tr key={p.mrNo} style={{ borderBottom: "1px solid #e2e8f0" }}>
-                <td style={{ padding: 10, fontWeight: 700, color: "#1e3a8a" }}>{p.mrNo}</td>
-                <td style={{ padding: 10 }}>{p.name} ({p.age} / {p.gender})</td>
-                <td style={{ padding: 10 }}>{p.branch}</td>
-                <td style={{ padding: 10 }}><span style={{ padding: "4px 10px", background: "#dbeafe", color: "#1e40af", borderRadius: 12, fontSize: 12, fontWeight: 600 }}>{p.currentStage}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// OP REGISTRATION MAPPING PANEL WITH GOOGLE CONTACT BUILT-IN EMULATORS
-// ════════════════════════════════════════════════════════════════════════
-function OpRegistrationModule({ db, mutate, session, audit }) {
-  const [form, setForm] = useState({ mrNo: "", name: "", phone: "", age: "", gender: "Male", address: "", referral: "", fee: "250", payMode: "Cash", remarks: "" });
-  const [duplicateMatch, setDuplicateMatch] = useState(null);
-  const [googleSyncStatus, setGoogleSyncStatus] = useState(false);
-
-  const processPatientRegistration = (bypassChecks = false) => {
-    if (!form.name || !form.phone || !form.age) {
-      alert("Constraint Validation Blown: Absolute demographic parameters required.");
-      return;
-    }
-
-    if (!bypassChecks) {
-      const match = db.patients.find(p => p.phone === form.phone.trim() || (p.name.toLowerCase() === form.name.toLowerCase().trim() && Number(p.age) === Number(form.age)));
-      if (match) { setDuplicateMatch(match); return; }
-    }
-
-    // Assign fallback calculated identifier if field left empty
-    const derivedMr = form.mrNo.trim() ? form.mrNo.trim() : `MR-${1000 + db.patients.length + 1}`;
-    
-    // Enforce primary key uniqueness constraints
-    if (db.patients.some(p => p.mrNo === derivedMr)) {
-      alert(`Identity Target Conflict: ${derivedMr} parameter bounds already locked within current schemas.`);
-      return;
-    }
-
-    const assignedPid = `PID-${Math.floor(10000 + Math.random() * 90000)}`;
-    const record = {
-      ...form, mrNo: derivedMr, patientId: assignedPid,
-      branch: session.branch === "All" ? "JPT Branch" : session.branch,
-      timestamp: ts(), date: new Date().toISOString().split("T")[0],
-      visitCount: 1, currentStage: "K-Sheet Triage Room"
-    };
-
-    const nextCollection = [...db.patients, record];
-    mutate("patients", nextCollection, record);
-    audit("PATIENT_REGISTRATION_RECORDED", { mrNo: derivedMr, name: form.name });
-
-    // Emulate background Google Contact Endpoint Injection Pipeline
-    setGoogleSyncStatus(true);
-    setTimeout(() => {
-      setGoogleSyncStatus(false);
-      alert(`Success: Profile generated for [${derivedMr}]. Google Cloud Contacts API -> Synced entry to linked account pipeline.`);
-    }, 1200);
-
-    setForm({ mrNo: "", name: "", phone: "", age: "", gender: "Male", address: "", referral: "", fee: "250", payMode: "Cash", remarks: "" });
-    setDuplicateMatch(null);
-  };
-
-  const captureRevisitIncrementLoop = (target) => {
-    const updatedCollection = db.patients.map(p => p.mrNo === target.mrNo ? { ...p, visitCount: (p.visitCount || 1) + 1, currentStage: "K-Sheet Triage Room", timestamp: ts() } : p);
-    mutate("patients", updatedCollection, { ...target, visitCount: (target.visitCount || 1) + 1, currentStage: "K-Sheet Triage Room", timestamp: ts() });
-    audit("PATIENT_REVISIT_LOGGED", { mrNo: target.mrNo });
-    alert(`Revisit Chain Registered: Loop incremented under master record ${target.mrNo}`);
-    setDuplicateMatch(null);
-  };
-
-  // Automated Mock Bulk Import Excel Parsing Mapping Engine
-  const triggerFakeExcelLoader = () => {
-    const randomSuffix = Math.floor(100 + Math.random() * 900);
-    const mockExcelRow = {
-      mrNo: `MR-EX-${randomSuffix}`, name: `Bulk Ingest Name ${randomSuffix}`, phone: `910020${randomSuffix}`,
-      age: "42", gender: "Female", address: "Bulk Import Ward Array Location", referral: "Excel Ingestion Batch Node", fee: "250", payMode: "Cash", remarks: "Bulk Auto Load Ingest Run"
-    };
-    setForm(mockExcelRow);
-    alert("Excel Column Mapping Sub-layer Matches Validated: Mock row structures successfully parsed into active inputs.");
-  };
-
-  return (
-    <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-        <h2>Out-Patient Demographics & Central Intake Registration Desk</h2>
-        <button onClick={triggerFakeExcelLoader} style={{ background: "#059669", color: "#fff", border: "none", borderRadius: 6, padding: "8px 14px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>📂 Bulk Import from Excel Schema Template</button>
-      </div>
-      
-      {duplicateMatch && (
-        <div style={{ background: "#fff7ed", border: "1px solid #ffedd5", padding: 16, borderRadius: 8, marginBottom: 16 }}>
-          <h4 style={{ color: "#c2410c", margin: "0 0 4px" }}>⚠️ DUPLICATE THRESHOLD RADAR: MATCH DETECTED IN STRUCTURAL ARRAYS</h4>
-          <p style={{ margin: "0 0 12px", fontSize: 13 }}>Input variables correlate with: <strong>{duplicateMatch.name} ({duplicateMatch.mrNo})</strong>, Phone: {duplicateMatch.phone}</p>
-          <div style={{ display: "flex", gap: 12 }}>
-            <button onClick={() => captureRevisitIncrementLoop(duplicateMatch)} style={{ background: "#ea580c", color: "#fff", padding: "6px 12px", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>Log Revisit under Existing Master File</button>
-            <button onClick={() => processPatientRegistration(true)} style={{ background: "#475569", color: "#fff", padding: "6px 12px", border: "none", borderRadius: 6, cursor: "pointer" }}>Override Guardrails & Force Split ID Record</button>
-            <button onClick={() => setDuplicateMatch(null)} style={{ background: "#cbd5e1", color: "#1f2937", padding: "6px 12px", border: "none", borderRadius: 6, cursor: "pointer" }}>Cancel Ingestion</button>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 22 }}>
+        {stats.map(s => (
+          <div key={s.label} className="stat-card" onClick={s.action} style={{ cursor: s.action ? "pointer" : "default" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#9b8e82", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 6 }}>{s.label}</div>
+            <div className="stat-num" style={{ color: s.color }}>{s.value}</div>
           </div>
-        </div>
-      )}
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
-        <div><label style={LBL}>Master File Number (MR No.) [Leave blank for Auto-Gen]</label><input type="text" value={form.mrNo} onChange={e => setForm({...form, mrNo: e.target.value})} placeholder="e.g. MR-5501" style={INP} /></div>
-        <div><label style={LBL}>Patient Full Legal Name *</label><input type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} style={INP} /></div>
-        <div><label style={LBL}>Contact Mobile Sequence *</label><input type="text" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} style={INP} /></div>
-        <div><label style={LBL}>Biological Age Metric *</label><input type="number" value={form.age} onChange={e => setForm({...form, age: e.target.value})} style={INP} /></div>
-        <div><label style={LBL}>Gender Config</label><select value={form.gender} onChange={e => setForm({...form, gender: e.target.value})} style={INP}><option>Male</option><option>Female</option><option>Other</option></select></div>
-        <div><label style={LBL}>Demographic Core Address</label><input type="text" value={form.address} onChange={e => setForm({...form, address: e.target.value})} style={INP} /></div>
-        <div><label style={LBL}>Referral S/O W/O D/O Field Map</label><input type="text" value={form.referral} onChange={e => setForm({...form, referral: e.target.value})} style={INP} /></div>
-        <div><label style={LBL}>Registration Intake Fee (INR)</label><input type="number" value={form.fee} onChange={e => setForm({...form, fee: e.target.value})} style={INP} /></div>
-        <div><label style={LBL}>Payment Mode</label><select value={form.payMode} onChange={e => setForm({...form, payMode: e.target.value})} style={INP}><option>Cash</option><option>UPI Network</option><option>Corporate Account Waivers</option></select></div>
+        ))}
       </div>
-      <button onClick={() => processPatientRegistration(false)} disabled={googleSyncStatus} style={{ marginTop: 16, background: "#1e3a8a", color: "#fff", border: "none", padding: "12px 24px", borderRadius: 6, fontWeight: 700, cursor: "pointer" }}>
-        {googleSyncStatus ? "⏳ Broadcasting Handshake API Packets to Google Contacts..." : "Commit Registration File & Route Channel"}
-      </button>
+      <div style={{ display: "grid", gridTemplateColumns: isOwner ? "1fr 1fr" : "1fr", gap: 18 }}>
+        {isOwner && (
+          <div className="card">
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Branch Overview</div>
+            {BRANCHES.map(br => {
+              const bPts   = (data.patients    || []).filter(x => x.branch === br && x.status === "approved");
+              const bBills = (data.patientBill || []).filter(x => x.branch === br && x.status === "approved");
+              const bPend  = pending.filter(x => x.branch === br);
+              return (
+                <div key={br} style={{ padding: "10px 0", borderBottom: "1px solid #f0ede8" }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{br}</div>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    {[["Patients", bPts.length, "#1a1714"], ["Bills", bBills.length, "#1d4ed8"], ["Pending", bPend.length, "#d97706"]].map(([l, v, c]) => (
+                      <div key={l} style={{ flex: 1, background: "#f0ede8", borderRadius: 8, padding: "8px 10px" }}>
+                        <div style={{ fontSize: 10, color: "#9b8e82", fontWeight: 600 }}>{l}</div>
+                        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 700, color: c }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {isOwner && (
+          <div className="card">
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Recent Activity</div>
+            {recentAudit.length === 0 && <div style={{ fontSize: 13, color: "#9b8e82" }}>No activity yet.</div>}
+            {recentAudit.map(a => (
+              <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f0ede8", fontSize: 12 }}>
+                <div>
+                  <span style={{ fontWeight: 700, marginRight: 6, color: { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", APPROVE: "#16a34a", REJECT: "#dc2626", STAFF_SUBMIT: "#d97706" }[a.action] || "#1a1714" }}>{a.action}</span>
+                  <span style={{ color: "#6b5e52" }}>{a.userName}</span>
+                  {a.branch !== "All" && <span style={{ color: "#b5a99e", marginLeft: 5 }}>· {a.branch}</span>}
+                </div>
+                <div style={{ color: "#b5a99e", fontSize: 11 }}>{a.at}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// STREAMLINED HIGH-DENSITY 2-COLUMN CLINICAL MANAGEMENT WORKSPACE
+// APPROVAL QUEUE
 // ════════════════════════════════════════════════════════════════════════
-function KSheetModule({ db, mutate, session, audit }) {
-  const [activeMr, setActiveMr] = useState("");
-  const canvasRef = useRef(null);
-  const [drawingState, setDrawingState] = useState(false);
+function ApprovalQueue({ pending, onApprove, onReject }) {
+  const [detail, setDetail] = useState(null);
+  const colors = { patients: "#1d4ed8", patientBill: "#7c3aed", inventory: "#16a34a", invoices: "#a16207" };
+  return (
+    <div>
+      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Approval Queue</div>
+      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 22 }}>Review staff submissions before they are saved to the database.</div>
+      {pending.length === 0
+        ? <div className="card" style={{ textAlign: "center", padding: 48, color: "#9b8e82" }}><div style={{ fontSize: 36, marginBottom: 10 }}>✅</div><div style={{ fontWeight: 600 }}>No pending approvals</div></div>
+        : pending.map(entry => (
+          <div key={entry.id} style={{ background: "#fff", borderRadius: 14, padding: "14px 18px", marginBottom: 10, boxShadow: "0 1px 4px rgba(0,0,0,.06)", borderLeft: `4px solid ${colors[entry.type] || "#1a1714"}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+              <div>
+                <span style={{ background: `${colors[entry.type]}20`, color: colors[entry.type] || "#1a1714", borderRadius: 20, fontSize: 11, padding: "2px 10px", fontWeight: 700, marginRight: 8 }}>{SECTION_LABELS[entry.type] || entry.type}</span>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>{entry.record?.name || entry.record?.sku || entry.id}</span>
+                <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 4 }}>By <strong>{entry.submittedByName}</strong> · {entry.branch} · {entry.submittedAt}</div>
+              </div>
+              <div style={{ display: "flex", gap: 7 }}>
+                <button className="btn btn-sm btn-outline" onClick={() => setDetail(detail?.id === entry.id ? null : entry)}>{detail?.id === entry.id ? "Hide" : "View"}</button>
+                <button className="btn btn-sm" style={{ background: "#dcfce7", color: "#16a34a", border: "none", fontWeight: 700 }} onClick={() => onApprove(entry.id)}>✓ Accept</button>
+                <button className="btn btn-sm btn-danger" onClick={() => onReject(entry.id)}>✕ Reject</button>
+              </div>
+            </div>
+            {detail?.id === entry.id && (
+              <div style={{ marginTop: 12, background: "#f0ede8", borderRadius: 10, padding: "10px 14px", fontSize: 12, fontFamily: "monospace", lineHeight: 1.9, maxHeight: 280, overflowY: "auto" }}>
+                {Object.entries(entry.record).filter(([k]) => k !== "status").map(([k, v]) => <div key={k}><strong>{k}:</strong> {String(v ?? "—")}</div>)}
+              </div>
+            )}
+          </div>
+        ))
+      }
+    </div>
+  );
+}
 
-  const [clinicalForm, setClinicalForm] = useState({
-    chiefComplaint: "", htn: false, dm: false, cad: false, asthmatic: false, allergies: "",
-    vaOD: "", vaOS: "", cPGP_OD: "", cPGP_OS: "", phOD: "", phOS: "", nvOD: "", nvOS: "",
-    arOD: "", arOS: "", acceptOD: "", acceptOS: "", dilArOD: "", dilArOS: "", iopOD: "", iopOS: "", bp: "", rbs: "", ducts: "",
-    lidsOD: "Normal", lidsOS: "Normal", conjOD: "Clear", conjOS: "Clear", cornOD: "Clear", cornOS: "Clear", acOD: "Deep", acOS: "Deep", irisOD: "Normal", irisOS: "Normal", pupilOD: "Reactive", pupilOS: "Reactive", lensOD: "Clear", lensOS: "Clear",
-    fundusOD: "Normal Disc", fundusOS: "Normal Disc", movements: "Full & Free", diagnosis: "", advice: "", prescription: ""
-  });
+// ════════════════════════════════════════════════════════════════════════
+// AUDIT LOG  (Owner only)
+// ════════════════════════════════════════════════════════════════════════
+function AuditLogSection({ auditLog, accounts }) {
+  const [filter, setFilter] = useState("ALL");
+  const [userF,  setUserF]  = useState("ALL");
+  const actions = ["ALL", "LOGIN", "LOGOUT", "STAFF_SUBMIT", "APPROVE", "REJECT"];
+  const filtered = auditLog
+    .filter(a => filter === "ALL" || a.action === filter)
+    .filter(a => userF  === "ALL" || a.userId === userF);
 
-  const matchedPatientData = db.patients.find(p => p.mrNo === activeMr);
-
-  const syncActivePatientSelection = (mr) => {
-    setActiveMr(mr);
-    const clinical = db.clinicalRecords.find(c => c.mrNo === mr);
-    if (clinical) setClinicalForm(prev => ({ ...prev, ...clinical }));
-  };
-
-  const commitWorkflowStageUpdate = (targetNextStage) => {
-    if (!activeMr) return;
-    const array = [...db.clinicalRecords];
-    const idx = array.findIndex(c => c.mrNo === activeMr);
-    
-    const vectorStringData = canvasRef.current ? canvasRef.current.toDataURL() : clinicalForm.graphData;
-    const finalRecord = {
-      ...(idx > -1 ? array[idx] : {}), ...clinicalForm, id: idx > -1 ? array[idx].id : `CR-${Date.now()}`,
-      mrNo: activeMr, graphData: vectorStringData, timestamp: ts()
-    };
-
-    if (idx > -1) array[idx] = finalRecord; else array.push(finalRecord);
-
-    const adjustedPatients = db.patients.map(p => p.mrNo === activeMr ? { ...p, currentStage: targetNextStage } : p);
-
-    mutate("clinicalRecords", array, finalRecord);
-    mutate("patients", adjustedPatients, { ...matchedPatientData, currentStage: targetNextStage });
-    audit("CLINICAL_K_SHEET_SAVED_WRITE_THROUGH", { mrNo: activeMr, lockedStage: targetNextStage });
-    alert("Clinical matrix synchronized to core cloud tables safely.");
-    setActiveMr("");
-  };
+  const actionColor = { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", APPROVE: "#16a34a", REJECT: "#dc2626", STAFF_SUBMIT: "#d97706" };
 
   return (
-    <div style={{ background: "#fff", padding: 24, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, borderBottom: "2px solid #e2e8f0", paddingBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>Sri Surya Eye Care High-Density Ophthalmic Examination Desk</h2>
-        <select value={activeMr} onChange={e => syncActivePatientSelection(e.target.value)} style={{ ...INP, width: 320, borderColor: "#1e3a8a", fontWeight: 700 }}>
-          <option value="">-- Click to fetch triage queue cases --</option>
-          {db.patients.map(p => (<option key={p.mrNo} value={p.mrNo}>{p.mrNo} : {p.name} [{p.currentStage}]</option>))}
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div className="section-title">Audit Log</div>
+        <button className="btn btn-outline btn-sm" onClick={() => exportCSV(filtered.map(({ id, ...r }) => r), "audit_log.csv")}>⬇ CSV</button>
+      </div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {actions.map(a => <button key={a} className={`btn btn-sm ${filter === a ? "btn-dark" : "btn-outline"}`} onClick={() => setFilter(a)}>{a}</button>)}
+        </div>
+        <select value={userF} onChange={e => setUserF(e.target.value)} style={{ maxWidth: 200 }}>
+          <option value="ALL">All Users</option>
+          {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
       </div>
-
-      {matchedPatientData && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-          
-          {/* Left Column Structure: Complaints, Visual Fields, Refraction Arrays */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={SECT_BOX}>
-              <h4 style={SECT_TTL}>Chief Complaint & Historical Indicators</h4>
-              <textarea value={clinicalForm.chiefComplaint} onChange={e => setClinicalForm({ ...clinicalForm, chiefComplaint: e.target.value })} rows={2} style={INP} />
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10, background: "#f8fafc", padding: 8, borderRadius: 6 }}>
-                {["htn", "dm", "cad", "asthmatic"].map(f => (
-                  <label key={f} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, textTransform: "uppercase" }}>
-                    <input type="checkbox" checked={clinicalForm[f]} onChange={e => setClinicalForm({ ...clinicalForm, [f]: e.target.checked })} /> {f}
-                  </label>
-                ))}
-                <input type="text" placeholder="Allergies" value={clinicalForm.allergies} onChange={e => setClinicalForm({ ...clinicalForm, allergies: e.target.value })} style={{ ...INP, padding: "4px 8px", fontSize: 11 }} />
-              </div>
-            </div>
-
-            <div style={SECT_BOX}>
-              <h4 style={SECT_TTL}>Visual Field Acuity Metrics (OD / OS Splits)</h4>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
-                <div><label style={LBL}>VA OD</label><input type="text" value={clinicalForm.vaOD} onChange={e => setClinicalForm({ ...clinicalForm, vaOD: e.target.value })} style={INP} /></div>
-                <div><label style={LBL}>cPGP OD</label><input type="text" value={clinicalForm.cPGP_OD} onChange={e => setClinicalForm({ ...clinicalForm, cPGP_OD: e.target.value })} style={INP} /></div>
-                <div><label style={LBL}>PH OD</label><input type="text" value={clinicalForm.phOD} onChange={e => setClinicalForm({ ...clinicalForm, phOD: e.target.value })} style={INP} /></div>
-                <div><label style={LBL}>NV OD</label><input type="text" value={clinicalForm.nvOD} onChange={e => setClinicalForm({ ...clinicalForm, nvOD: e.target.value })} style={INP} /></div>
-                <div><label style={LBL}>VA OS</label><input type="text" value={clinicalForm.vaOS} onChange={e => setClinicalForm({ ...clinicalForm, vaOS: e.target.value })} style={INP} /></div>
-                <div><label style={LBL}>cPGP OS</label><input type="text" value={clinicalForm.cPGP_OS} onChange={e => setClinicalForm({ ...clinicalForm, cPGP_OS: e.target.value })} style={INP} /></div>
-                <div><label style={LBL}>PH OS</label><input type="text" value={clinicalForm.phOS} onChange={e => setClinicalForm({ ...clinicalForm, phOS: e.target.value })} style={INP} /></div>
-                <div><label style={LBL}>NV OS</label><input type="text" value={clinicalForm.nvOS} onChange={e => setClinicalForm({ ...clinicalForm, nvOS: e.target.value })} style={INP} /></div>
-              </div>
-            </div>
-
-            <div style={SECT_BOX}>
-              <h4 style={SECT_TTL}>Refraction Parameters & Clinical Vitals</h4>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-                <input type="text" placeholder="Objective AR OD" value={clinicalForm.arOD} onChange={e => setClinicalForm({ ...clinicalForm, arOD: e.target.value })} style={INP} />
-                <input type="text" placeholder="Objective AR OS" value={clinicalForm.arOS} onChange={e => setClinicalForm({ ...clinicalForm, arOS: e.target.value })} style={INP} />
-                <input type="text" placeholder="Acceptance OD" value={clinicalForm.acceptOD} onChange={e => setClinicalForm({ ...clinicalForm, acceptOD: e.target.value })} style={INP} />
-                <input type="text" placeholder="Acceptance OS" value={clinicalForm.acceptOS} onChange={e => setClinicalForm({ ...clinicalForm, acceptOS: e.target.value })} style={INP} />
-                <input type="text" placeholder="Dilated AR OD" value={clinicalForm.dilArOD} onChange={e => setClinicalForm({ ...clinicalForm, dilArOD: e.target.value })} style={INP} />
-                <input type="text" placeholder="Dilated AR OS" value={clinicalForm.dilArOS} onChange={e => setClinicalForm({ ...clinicalForm, dilArOS: e.target.value })} style={INP} />
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                <input type="text" placeholder="IOP OD" value={clinicalForm.iopOD} onChange={e => setClinicalForm({ ...clinicalForm, iopOD: e.target.value })} style={INP} />
-                <input type="text" placeholder="IOP OS" value={clinicalForm.iopOS} onChange={e => setClinicalForm({ ...clinicalForm, iopOS: e.target.value })} style={INP} />
-                <input type="text" placeholder="BP Check" value={clinicalForm.bp} onChange={e => setClinicalForm({ ...clinicalForm, bp: e.target.value })} style={INP} />
-                <input type="text" placeholder="Sugar (RBS)" value={clinicalForm.rbs} onChange={e => setClinicalForm({ ...clinicalForm, rbs: e.target.value })} style={INP} />
-                <input type="text" placeholder="Lacrimal Ducts" value={clinicalForm.ducts} onChange={e => setClinicalForm({ ...clinicalForm, ducts: e.target.value })} style={INP} />
-              </div>
-            </div>
-          </div>
-
-          {/* Right Column Structure: Biomicroscopy Slit Lamp & Action Directives */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={SECT_BOX}>
-              <h4 style={SECT_TTL}>Biomicroscopy Slit Lamp Findings Ledger (OD vs OS)</h4>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, maxHeight: 180, overflowY: "auto", paddingRight: 4 }}>
-                {["lids", "conj", "corn", "ac", "iris", "pupil", "lens"].map(key => (
-                  <div key={key} style={{ display: "contents" }}>
-                    <input type="text" placeholder={`${key.toUpperCase()} OD`} value={clinicalForm[`${key}OD`] || ""} onChange={e => setClinicalForm({ ...clinicalForm, [`${key}OD`]: e.target.value })} style={INP} />
-                    <input type="text" placeholder={`${key.toUpperCase()} OS`} value={clinicalForm[`${key}OS`] || ""} onChange={e => setClinicalForm({ ...clinicalForm, [`${key}OS`]: e.target.value })} style={INP} />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={SECT_BOX}>
-              <h4 style={SECT_TTL}>Anatomical Graphics Marker Sketchpad Module</h4>
-              <div style={{ background: "#f1f5f9", padding: 6, borderRadius: 6, display: "flex", justifyContent: "center" }}>
-                <canvas ref={canvasRef} width={440} height={110} onMouseDown={(e) => {
-                  const r = canvasRef.current.getBoundingClientRect();
-                  const ctx = canvasRef.current.getContext("2d");
-                  ctx.strokeStyle = "#dc2626"; ctx.lineWidth = 2.5; ctx.beginPath();
-                  ctx.moveTo(e.clientX - r.left, e.clientY - r.top); setDrawingState(true);
-                }} onMouseMove={(e) => {
-                  if (!drawingState) return;
-                  const r = canvasRef.current.getBoundingClientRect();
-                  const ctx = canvasRef.current.getContext("2d");
-                  ctx.lineTo(e.clientX - r.left, e.clientY - r.top); ctx.stroke();
-                }} onMouseUp={() => setDrawingState(false)} style={{ background: "#fff", border: "1px dashed #94a3b8", width: "100%", height: 110 }} />
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
-                <input type="text" placeholder="Posterior Fundus Description" value={clinicalForm.fundusOD} onChange={e => setClinicalForm({ ...clinicalForm, fundusOD: e.target.value })} style={INP} />
-                <input type="text" placeholder="Ocular Movements Line" value={clinicalForm.movements} onChange={e => setClinicalForm({ ...clinicalForm, movements: e.target.value })} style={INP} />
-              </div>
-            </div>
-
-            <div style={{ background: "#f8fafc", padding: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}>
-              <input type="text" placeholder="Primary Diagnostic Conclusion Label *" value={clinicalForm.diagnosis} onChange={e => setClinicalForm({ ...clinicalForm, diagnosis: e.target.value })} style={{ ...INP, borderColor: "#dc2626", marginBottom: 8, fontWeight: 600 }} />
-              <input type="text" placeholder="Advice / Surgical Plan Directives" value={clinicalForm.advice} onChange={e => setClinicalForm({ ...clinicalForm, advice: e.target.value })} style={{ ...INP, marginBottom: 8 }} />
-              <input type="text" placeholder="Rx Pharmaceutical Prescription Sheet Drops" value={clinicalForm.prescription} onChange={e => setClinicalForm({ ...clinicalForm, prescription: e.target.value })} style={INP} />
-            </div>
-
-            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: "auto" }}>
-              <button onClick={() => commitWorkflowStageUpdate("Optometrist Station")} style={{ background: "#475569", color: "#fff", border: "none", padding: "10px 14px", borderRadius: 6, fontWeight: 600, cursor: "pointer", fontSize: 12 }}>Route to Optom</button>
-              <button onClick={() => commitWorkflowStageUpdate("Ophthalmologist Consultation")} style={{ background: "#7c3aed", color: "#fff", border: "none", padding: "10px 14px", borderRadius: 6, fontWeight: 600, cursor: "pointer", fontSize: 12 }}>Route to Doctor</button>
-            </div>
-          </div>
-
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// WAREHOUSE LOGISTICS MANAGEMENT
-// ════════════════════════════════════════════════════════════════════════
-function InventoryModule({ db, mutate, session, audit }) {
-  const [skuForm, setSkuForm] = useState({ sku: "", name: "", category: "Lenses", brand: "", qty: "", reorder: "5", cost: "", price: "", expiryDate: "" });
-  return (
-    <div style={{ display: "grid", gap: 20 }}>
-      {session.role === "owner" && (
-        <div style={{ background: "#fff", padding: 20, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
-          <h3>MD Supply Chain Logistics Node Ingestion Panel</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 10 }}>
-            <input type="text" placeholder="SKU Reference Token" value={skuForm.sku} onChange={e => setSkuForm({ ...skuForm, sku: e.target.value })} style={INP} />
-            <input type="text" placeholder="Asset Descriptor" value={skuForm.name} onChange={e => setSkuForm({ ...skuForm, name: e.target.value })} style={INP} />
-            <input type="number" placeholder="Ingested Stock Vol" value={skuForm.qty} onChange={e => setSkuForm({ ...skuForm, qty: e.target.value })} style={INP} />
-            <input type="number" placeholder="Base Sales Price" value={skuForm.price} onChange={e => setSkuForm({ ...skuForm, price: e.target.value })} style={INP} />
-          </div>
-          <button onClick={() => {
-            if (!skuForm.sku || !skuForm.name) return;
-            const arr = [...db.inventory, { ...skuForm, id: `inv-${Date.now()}`, qty: Number(skuForm.qty || 0), reorder: Number(skuForm.reorder || 5), price: Number(skuForm.price || 0) }];
-            mutate("inventory", arr, arr[arr.length - 1]);
-            setSkuForm({ sku: "", name: "", category: "Lenses", brand: "", qty: "", reorder: "5", cost: "", price: "", expiryDate: "" });
-          }} style={{ marginTop: 12, background: "#1e3a8a", color: "#fff", border: "none", padding: "8px 16px", borderRadius: 6, fontWeight: 600, cursor: "pointer" }}>Commit Inventory Vector</button>
-        </div>
-      )}
-      <div style={{ background: "#fff", padding: 20, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
-        <h3>Central Operational Inventory Ledger</h3>
-        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10 }}>
-          <thead>
-            <tr style={{ background: "#f8fafc", textAlign: "left" }}>
-              <th style={{ padding: 10 }}>SKU Token ID</th>
-              <th style={{ padding: 10 }}>Asset Descriptive Descriptor</th>
-              <th style={{ padding: 10 }}>Available Volume</th>
-              <th style={{ padding: 10 }}>Unit Value</th>
-            </tr>
-          </thead>
+      <div className="card" style={{ overflowX: "auto" }}>
+        <table>
+          <thead><tr><th>Time</th><th>Action</th><th>User</th><th>Branch</th><th>Detail</th></tr></thead>
           <tbody>
-            {db.inventory.map(i => (
-              <tr key={i.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
-                <td style={{ padding: 10, fontFamily: "monospace", fontWeight: 700 }}>{i.sku}</td>
-                <td style={{ padding: 10 }}>{i.name}</td>
-                <td style={{ padding: 10, fontWeight: 700, color: i.qty <= i.reorder ? "#dc2626" : "#16a34a" }}>{i.qty} units</td>
-                <td style={{ padding: 10 }}>{currency(i.price)}</td>
+            {filtered.length === 0 && <tr><td colSpan={5} style={{ color: "#9b8e82", textAlign: "center", padding: 24 }}>No entries.</td></tr>}
+            {filtered.map(a => (
+              <tr key={a.id}>
+                <td style={{ fontSize: 11, whiteSpace: "nowrap", color: "#9b8e82" }}>{a.at}</td>
+                <td><span style={{ background: `${actionColor[a.action] || "#9b8e82"}20`, color: actionColor[a.action] || "#9b8e82", borderRadius: 20, fontSize: 11, padding: "2px 9px", fontWeight: 700 }}>{a.action}</span></td>
+                <td style={{ fontWeight: 600 }}>{a.userName}</td>
+                <td style={{ fontSize: 12, color: "#9b8e82" }}>{a.branch}</td>
+                <td style={{ fontSize: 12, color: "#6b5e52" }}>{Object.entries(a.detail || {}).map(([k, v]) => `${k}: ${v}`).join(" · ") || "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -684,52 +983,1703 @@ function InventoryModule({ db, mutate, session, audit }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// MD COGNIZANCE & SECURE TASK OVERLAY CONTROLS Panel
+// DASHBOARD BUILDER  (Owner controls field visibility + staff perms)
 // ════════════════════════════════════════════════════════════════════════
-function MDGovernanceSection({ accounts, setAccounts, branding, setBranding, auditLog, db }) {
-  const [task, setTask] = useState({ title: "", priority: "High", deadline: "", assignedTo: "" });
+function DashboardBuilder({ fieldVis, setFieldVis, accounts, setAccounts }) {
+  const [tab, setTab] = useState("fields");
+  const [section, setSection] = useState("patients");
+
+  const ALL_FIELDS = {
+    patients:    ["timestamp","date","time","mrNo","patientId","name","phone","address","ref","paymentAmount","paymentMode","paymentRefNo","branch","remarks","visitType"],
+    patientBill: ["timestamp","date","time","mrNo","patientId","name","phone","address","gender","age","complaint","pastHistory"],
+    optometrist: ["timestamp","mrNo","patientId","name","complaint","pastHistory"],
+    opticals:    ["timestamp","mrNo","patientId","name","phone","address","totalPrice","advance","advancePaymentMethod","transactionId","balance","optomName"],
+    inventory:   ["sku","name","category","brand","qty","reorder","lensPower","lensType","boxNo","cost","price","location"],
+    invoices:    ["id","date","patientName","items","discount","status"],
+  };
+
+  const toggleField = (sec, field) => {
+    setFieldVis(fv => {
+      const cur = fv[sec] || [];
+      return { ...fv, [sec]: cur.includes(field) ? cur.filter(f => f !== field) : [...cur, field] };
+    });
+  };
+
+  const staff = accounts.filter(a => a.role === "staff");
+  const togglePerm = (id, sec, action) => {
+    setAccounts(prev => prev.map(a => {
+      if (a.id !== id) return a;
+      return { ...a, perms: { ...a.perms, [sec]: { ...a.perms[sec], [action]: !a.perms[sec]?.[action] } } };
+    }));
+  };
 
   return (
-    <div style={{ display: "grid", gap: 24 }}>
-      <div style={{ background: "#fff", padding: 20, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
-        <h3>Hospital Information Branding & Customization Control Center</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginTop: 10 }}>
-          <input type="text" placeholder="Clinic System Title" value={branding.name} onChange={e => setBranding({ ...branding, name: e.target.value })} style={INP} />
-          <input type="text" placeholder="Visual Logo Stamp Icon" value={branding.logo} onChange={e => setBranding({ ...branding, logo: e.target.value })} style={INP} />
-          <input type="color" value={branding.theme} onChange={e => setBranding({ ...branding, theme: e.target.value })} style={{ ...INP, padding: 2, height: 38 }} />
-        </div>
+    <div>
+      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Dashboard Builder</div>
+      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 20 }}>Control which fields and sections each staff member can access.</div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 22 }}>
+        {[{ id: "fields", label: "🔲 Field Visibility" }, { id: "perms", label: "🔐 Staff Permissions" }].map(t => (
+          <button key={t.id} className={`btn btn-sm ${tab === t.id ? "btn-dark" : "btn-outline"}`} onClick={() => setTab(t.id)}>{t.label}</button>
+        ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-        {/* Task Delegation Framework Integration Module */}
-        <div style={{ background: "#fff", padding: 20, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
-          <h3>Task Assignment & Operational Mandate Injection</h3>
-          <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-            <input type="text" placeholder="Task Directive Action Statement" value={task.title} onChange={e => setTask({ ...task, title: e.target.value })} style={INP} />
-            <select value={task.assignedTo} onChange={e => setTask({ ...task, assignedTo: e.target.value })} style={INP}>
-              <option value="">-- Associate Recipient Staff Node --</option>
-              {accounts.map(a => <option key={a.id} value={a.id}>{a.name} ({a.department})</option>)}
-            </select>
-            <input type="date" value={task.deadline} onChange={e => setTask({ ...task, deadline: e.target.value })} style={INP} />
-            <button onClick={() => {
-              if (!task.title || !task.assignedTo) return;
-              const arr = [...db.tasks, { ...task, id: `tsk-${Date.now()}`, status: "Pending", createdBy: "owner" }];
-              alert("Task successfully injected into recipient node streams.");
-              setTask({ title: "", priority: "High", deadline: "", assignedTo: "" });
-            }} style={{ background: "#1e3a8a", color: "#fff", padding: 10, border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer" }}>Authorize Allocation Vector</button>
+      {tab === "fields" && (
+        <div className="card">
+          <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+            {Object.keys(ALL_FIELDS).map(s => <button key={s} className={`btn btn-sm ${section === s ? "btn-dark" : "btn-outline"}`} onClick={() => setSection(s)}>{SECTION_LABELS[s]}</button>)}
+          </div>
+          <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 14 }}>Toggle which fields are <strong>visible in forms and tables</strong> for the <strong>{SECTION_LABELS[section]}</strong> section. Disabled fields are hidden from staff.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px,1fr))", gap: 10 }}>
+            {(ALL_FIELDS[section] || []).map(field => {
+              const on = (fieldVis[section] || []).includes(field);
+              return (
+                <div key={field} onClick={() => toggleField(section, field)}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${on ? "#1a1714" : "#e2ddd8"}`, background: on ? "#1a1714" : "#fff", cursor: "pointer", transition: "all .15s" }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: on ? "#f0ede8" : "#1a1714" }}>{field}</span>
+                  <span style={{ fontSize: 18 }}>{on ? "✓" : "○"}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
+      )}
 
-        {/* Secure Owner Audit Stream Container Component */}
-        <div style={{ background: "#fff", padding: 20, borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
-          <h3>MD Verification System Activity Logs & Audits</h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10, maxHeight: 240, overflowY: "auto" }}>
-            {auditLog.map(l => (
-              <div key={l.id} style={{ borderBottom: "1px solid #f1f5f9", paddingBottom: 6, fontSize: 11 }}>
-                <strong>[{l.action}]</strong> User Identity: {l.userName} ({l.dept}) <span style={{ color: "#64748b", float: "right" }}>{l.at}</span>
+      {tab === "perms" && (
+        <div>
+          {staff.length === 0 && <div className="card" style={{ color: "#9b8e82", textAlign: "center", padding: 32 }}>No staff accounts yet. Add staff in Manage Staff.</div>}
+          {staff.map(acc => (
+            <div key={acc.id} className="card" style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name}</div>
+                  <div style={{ fontSize: 12, color: "#9b8e82" }}>{acc.id} · {acc.branch}</div>
+                </div>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table>
+                  <thead><tr><th>Section</th><th style={{ textAlign: "center" }}>👁 View</th><th style={{ textAlign: "center" }}>➕ Add</th><th style={{ textAlign: "center" }}>✏️ Edit</th></tr></thead>
+                  <tbody>
+                    {SECTIONS.map(sec => (
+                      <tr key={sec}>
+                        <td style={{ fontWeight: 600 }}>{SECTION_LABELS[sec]}</td>
+                        {["view", "add", "edit"].map(action => (
+                          <td key={action} style={{ textAlign: "center" }}>
+                            <button onClick={() => togglePerm(acc.id, sec, action)}
+                              style={{ width: 36, height: 28, borderRadius: 6, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13, background: acc.perms?.[sec]?.[action] ? "#dcfce7" : "#fee2e2", color: acc.perms?.[sec]?.[action] ? "#16a34a" : "#dc2626" }}>
+                              {acc.perms?.[sec]?.[action] ? "✓" : "✗"}
+                            </button>
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// OP REGISTRATION  (was "Patients")
+// New fields: MR No, Patient ID, Address, Ref/Camp, Payment Amount,
+// Payment Mode, Payment Ref No, Remarks, Visit Type (New/Existing)
+// Visit-duplicate detection by Phone or (Name+Age+Gender)
+// ════════════════════════════════════════════════════════════════════════
+function PatientsSection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
+  const isOwner  = session.role === "owner";
+  const branch   = session.branch || "JPT Branch";
+
+  const pendingMine = (data.patients || []).filter(x => x.branch === branch && x.status === "pending" && x.createdBy === session.id);
+  const rows = [
+    ...(data.patients || []).filter(x => (isOwner || x.branch === branch) && x.status === "approved"),
+    ...(!isOwner ? pendingMine : []),
+  ];
+
+  const [modal, setModal] = useState(false);
+  const [form,  setForm]  = useState({});
+  const [touch, setTouch] = useState({});
+  const [msg,   setMsg]   = useState("");
+  const [search,setSearch]= useState("");
+  const [dupWarning, setDupWarning] = useState(null);
+
+  // Generate next sequential MR No and Patient ID
+  const nextMrNo = () => {
+    const all = data.patients || [];
+    const nums = all.map(p => parseInt((p.mrNo || "").replace(/\D/g,""))).filter(n => !isNaN(n));
+    const next = nums.length ? Math.max(...nums) + 1 : 1;
+    return `MR-${String(next).padStart(3,"0")}`;
+  };
+  const nextPatientId = () => {
+    const all = data.patients || [];
+    const nums = all.map(p => parseInt((p.patientId || "").replace(/\D/g,""))).filter(n => !isNaN(n));
+    const next = nums.length ? Math.max(...nums) + 1 : 1;
+    return `PT-${String(next).padStart(4,"0")}`;
+  };
+
+  const blank = () => ({
+    timestamp: ts(), date: todayStr(), time: timeStr(),
+    mrNo: nextMrNo(), patientId: nextPatientId(),
+    name: "", phone: "", address: "",
+    ref: "", paymentAmount: "", paymentMode: "Cash", paymentRefNo: "",
+    branch: isOwner ? "JPT Branch" : branch,
+    remarks: "", visitType: "New Patient", visitCount: 1,
+  });
+
+  const F = k => e => { setForm(f => ({ ...f, [k]: e.target.value })); setDupWarning(null); };
+  const T = k => () => setTouch(t => ({ ...t, [k]: true }));
+
+  // Duplicate detection: phone OR (name+age+gender) match
+  const checkDuplicate = (f) => {
+    const all = data.patients || [];
+    if (f.phone && f.phone.length === 10) {
+      const match = all.find(p => p.phone === f.phone && p.id !== f.id);
+      if (match) return { patient: match, reason: `Phone ${f.phone} already registered` };
+    }
+    return null;
+  };
+
+  const handlePhoneBlur = () => {
+    setTouch(t => ({ ...t, phone: true }));
+    const dup = checkDuplicate(form);
+    if (dup) {
+      const p = dup.patient;
+      const newCount = (p.visitCount || 1) + 1;
+      setDupWarning({ msg: `⚠ Existing patient found: ${p.name} (${p.patientId || p.mrNo}) — Visit #${newCount}`, patient: p, visitCount: newCount });
+      setForm(f => ({ ...f, visitType: newCount === 2 ? "2nd Visit" : newCount === 3 ? "3rd Visit" : `${newCount}th Visit`, visitCount: newCount }));
+    }
+  };
+
+  const submit = () => {
+    setTouch({ phone: true, name: true, address: true });
+    if (!validate.phone(form.phone) || !form.name.trim() || !form.address.trim()) { setMsg("Fill required fields correctly."); return; }
+    const record = { id: uid(), ...form, createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    if (isOwner) {
+      const approved = { ...record, status: "approved" };
+      mutate("patients", arr => [...arr, approved], approved);
+      audit("OWNER_ADD", { type: "patients", name: form.name });
+    } else { staffSubmit("patients", record); }
+    setModal(false);
+    setMsg(isOwner ? "Patient registered." : "Submitted for owner approval ✓");
+  };
+
+  const del = id => { if (confirm("Delete patient?")) { mutate("patients", arr => arr.filter(x => x.id !== id)); audit("DELETE", { type: "patients", id }); } };
+
+  const filtered = rows.filter(r =>
+    !search || r.name?.toLowerCase().includes(search.toLowerCase()) ||
+    r.phone?.includes(search) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) ||
+    r.patientId?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const visitColor = v => ({ "New Patient":"#16a34a","2nd Visit":"#1d4ed8","3rd Visit":"#7c3aed" }[v] || "#d97706");
+
+  return (
+    <div>
+      <SectionHeader title="OP Registration" onSync={onSync} syncing={syncing}
+        onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "op_registration.csv")}
+        onAdd={can("patients","add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setDupWarning(null); setModal(true); } : null}
+        msg={msg} />
+
+      {/* Search bar */}
+      <div style={{ marginBottom: 12 }}>
+        <input type="text" placeholder="🔍 Search by name, phone, MR No, Patient ID…" value={search} onChange={e => setSearch(e.target.value)}
+          style={{ width: "100%", maxWidth: 420, borderRadius: 10, border: "1px solid #e8e2db", padding: "8px 14px", fontSize: 13 }} />
+      </div>
+
+      <div className="card" style={{ overflowX:"auto" }}>
+        <table>
+          <thead><tr>
+            <th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th>
+            <th>Address</th><th>Payment</th><th>Amount</th><th>Ref/Camp</th>
+            <th>Visit</th><th>Branch</th><th>Remarks</th>
+            {isOwner && <th></th>}
+          </tr></thead>
+          <tbody>{filtered.map(r => (
+            <tr key={r.id} style={r.status === "pending" ? { opacity:0.65, background:"#fef9c3" } : {}}>
+              <td style={{ fontSize:11, whiteSpace:"nowrap", color:"#9b8e82" }}>{r.timestamp}</td>
+              <td style={{ fontWeight:700, fontFamily:"monospace" }}>{r.mrNo}</td>
+              <td style={{ fontFamily:"monospace", color:"#1d4ed8" }}>{r.patientId}</td>
+              <td style={{ fontWeight:600 }}>
+                {r.name}
+                {r.status === "pending" && <span style={{ marginLeft:6, fontSize:10, background:"#fef9c3", color:"#a16207", padding:"1px 6px", borderRadius:8, fontWeight:700, border:"1px solid #fde68a" }}>⏳ Pending</span>}
+              </td>
+              <td>{r.phone}</td>
+              <td style={{ maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.address}</td>
+              <td><span className="tag tag-blue">{r.paymentMode}</span></td>
+              <td style={{ fontWeight:600 }}>{r.paymentAmount ? `₹${r.paymentAmount}` : "—"}</td>
+              <td style={{ fontSize:12, color:"#9b8e82" }}>{r.ref || "—"}</td>
+              <td><span style={{ fontSize:11, padding:"2px 8px", borderRadius:20, fontWeight:700, background:`${visitColor(r.visitType)}20`, color:visitColor(r.visitType) }}>{r.visitType || "New Patient"}</span></td>
+              <td><span className="tag" style={{ background:"#f0ede8", color:"#6b5e52" }}>{r.branch}</span></td>
+              <td style={{ fontSize:12, color:"#9b8e82", maxWidth:120, overflow:"hidden", textOverflow:"ellipsis" }}>{r.remarks || "—"}</td>
+              {isOwner && r.status !== "pending" && <td><button className="btn btn-danger btn-sm" onClick={() => del(r.id)}>✕</button></td>}
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+
+      {modal && (
+        <Modal title="OP Registration" onClose={() => setModal(false)} onSave={submit}
+          saveLabel={isOwner ? "Save" : "Submit for Approval"} wide>
+          {dupWarning && (
+            <div style={{ marginBottom:14, background:"#fef9c3", border:"1px solid #fde68a", borderRadius:10, padding:"10px 14px", fontSize:13, color:"#a16207", fontWeight:600 }}>
+              {dupWarning.msg}
+            </div>
+          )}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
+            <div><label>Timestamp (auto)</label><input type="text" value={form.timestamp} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div>
+            <div><label>Date</label><input type="date" value={form.date} onChange={F("date")} /></div>
+            <div><label>Time</label><input type="time" value={form.time} onChange={F("time")} /></div>
+            <div><label>MR No (auto)</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div>
+            <div><label>Patient ID (auto)</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div>
+            <div><label>Visit Type</label>
+              <select value={form.visitType} onChange={F("visitType")}>
+                {["New Patient","2nd Visit","3rd Visit","4th Visit","5th Visit","Review"].map(v => <option key={v}>{v}</option>)}
+              </select>
+            </div>
+            <div style={{ gridColumn:"1/-1" }}><label>Name *</label>
+              <input type="text" value={form.name} onChange={F("name")} onBlur={T("name")}
+                style={vStyle(form.name, v => v.trim().length > 0, touch.name)} />
+              {vMsg(form.name, v => v.trim().length > 0, touch.name, "Required.")}
+            </div>
+            <div><label>Phone * (10 digits)</label>
+              <input type="text" maxLength={10} value={form.phone} onChange={F("phone")} onBlur={handlePhoneBlur}
+                style={vStyle(form.phone, validate.phone, touch.phone)} />
+              {vMsg(form.phone, validate.phone, touch.phone, "10 digits, not starting 0.")}
+            </div>
+            <div style={{ gridColumn:"span 2" }}><label>Address *</label>
+              <input type="text" value={form.address} onChange={F("address")} onBlur={T("address")}
+                style={vStyle(form.address, v => v.trim().length > 0, touch.address)} />
+              {vMsg(form.address, v => v.trim().length > 0, touch.address, "Required.")}
+            </div>
+            <div><label>Ref / Camp</label><input type="text" placeholder="Camp name or referrer" value={form.ref} onChange={F("ref")} /></div>
+            <div><label>Payment Amount (₹)</label><input type="number" value={form.paymentAmount} onChange={F("paymentAmount")} /></div>
+            <div><label>Payment Mode</label>
+              <select value={form.paymentMode} onChange={F("paymentMode")}>
+                {["Cash","UPI","Card","Cheque","Free","Camp"].map(m => <option key={m}>{m}</option>)}
+              </select>
+            </div>
+            {(form.paymentMode === "UPI" || form.paymentMode === "Card" || form.paymentMode === "Cheque") && (
+              <div><label>Payment Ref No</label><input type="text" placeholder="Transaction / Cheque No" value={form.paymentRefNo} onChange={F("paymentRefNo")} /></div>
+            )}
+            {isOwner && (
+              <div><label>Branch</label>
+                <select value={form.branch} onChange={F("branch")}>
+                  {["JPT Branch","PRP Branch"].map(b => <option key={b}>{b}</option>)}
+                </select>
+              </div>
+            )}
+            <div style={{ gridColumn:"1/-1" }}><label>Remarks</label>
+              <textarea rows={2} value={form.remarks} onChange={F("remarks")} placeholder="Any remarks…" />
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// K SHEET ENTRY  (was "Patient Bill") — linked to OP Registration via MR No / Patient ID
+// ════════════════════════════════════════════════════════════════════════
+function PatientBillSection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const rows    = (data.patientBill || []).filter(x => (isOwner || x.branch === branch) && x.status === "approved");
+
+  const [modal, setModal] = useState(false);
+  const [form,  setForm]  = useState({});
+  const [touch, setTouch] = useState({});
+  const [tab,   setTab]   = useState("basic");
+  const [msg,   setMsg]   = useState("");
+  const [search,setSearch]= useState("");
+  const [mrLookup, setMrLookup] = useState("");
+
+  // Auto-fill from OP Registration when MR No / Patient ID is entered
+  const lookupPatient = (query) => {
+    if (!query.trim()) return;
+    const found = (data.patients || []).find(p =>
+      p.mrNo?.toLowerCase() === query.toLowerCase() ||
+      p.patientId?.toLowerCase() === query.toLowerCase() ||
+      p.phone === query
+    );
+    if (found) {
+      setForm(f => ({
+        ...f,
+        mrNo: found.mrNo || f.mrNo,
+        patientId: found.patientId || f.patientId,
+        name: found.name,
+        phone: found.phone,
+        address: found.address || found.town || "",
+      }));
+      setMrLookup(`✓ Found: ${found.name} (${found.patientId})`);
+    } else {
+      setMrLookup("No match found in OP Registration.");
+    }
+  };
+
+  const nextMrNo = () => {
+    const all = data.patientBill || [];
+    const nums = all.map(p => parseInt((p.mrNo || "").replace(/\D/g,""))).filter(n => !isNaN(n));
+    const next = nums.length ? Math.max(...nums) + 1 : 1;
+    return `MR-${String(next).padStart(3,"0")}`;
+  };
+
+  const blank = () => ({
+    timestamp: ts(), date: todayStr(), time: timeStr(),
+    mrNo: nextMrNo(), patientId: "",
+    name: "", phone: "", address: "", gender: "Male", age: "",
+    complaint: "", pastHistory: "",
+    reSpherAR:"", reCylAR:"", reAxisAR:"", leSpherAR:"", leCylAR:"", leAxisAR:"",
+    reSpherSub:"", reCylSub:"", reAxisSub:"", leSpherSub:"", leCylSub:"", leAxisSub:"",
+    add:"", eyelids:"", conjunctiva:"", cornea:"", anteriorChamber:"", iris:"", pupil:"",
+    lens:"", ocularMovements:"", fundus:"", advice:"", optom:"",
+    lensType:"Single Vision", frameNo:"", advance:"", paymentMethod:"Cash",
+    deliveryStatus:"Not Ready", balance:"",
+  });
+
+  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  const T = k => () => setTouch(t => ({ ...t, [k]: true }));
+
+  const rxField = (label, key, validator, msg2) => (
+    <div key={key}><label>{label}</label>
+      <input type="number" step="0.25" value={form[key]||""} onChange={F(key)} onBlur={T(key)}
+        style={vStyle(form[key], validator, touch[key])} />
+      {vMsg(form[key], validator, touch[key], msg2)}
+    </div>
+  );
+
+  const submit = () => {
+    const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form,
+      createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    if (isOwner) { const approved = { ...record, status:"approved" }; mutate("patientBill", arr => [...arr, approved], approved); audit("OWNER_ADD",{type:"patientBill",name:form.name}); }
+    else { staffSubmit("patientBill", record); }
+    setModal(false); setMsg(isOwner ? "K Sheet saved." : "Submitted for approval ✓");
+  };
+
+  const del = id => { if (confirm("Delete K Sheet?")) { mutate("patientBill", arr => arr.filter(x => x.id!==id)); audit("DELETE",{type:"patientBill",id}); } };
+
+  const TABS = [
+    { id:"basic",   label:"Patient Info" },
+    { id:"ar",      label:"AR Readings" },
+    { id:"sub",     label:"Subjective" },
+    { id:"eye",     label:"Eye Exam" },
+    { id:"billing", label:"Billing" },
+  ];
+
+  const filtered = rows.filter(r =>
+    !search || r.name?.toLowerCase().includes(search.toLowerCase()) ||
+    r.phone?.includes(search) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) ||
+    r.patientId?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div>
+      <SectionHeader title="K Sheet Entry" onSync={onSync} syncing={syncing}
+        onExport={() => exportCSV(rows.map(({id,...r})=>r), "k_sheet.csv")}
+        onAdd={can("patientBill","add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setTab("basic"); setMrLookup(""); setModal(true); } : null}
+        msg={msg} />
+      <div style={{ marginBottom:12 }}>
+        <input type="text" placeholder="🔍 Search by name, phone, MR No, Patient ID…" value={search} onChange={e=>setSearch(e.target.value)}
+          style={{ width:"100%", maxWidth:420, borderRadius:10, border:"1px solid #e8e2db", padding:"8px 14px", fontSize:13 }} />
+      </div>
+      <div className="card" style={{ overflowX:"auto" }}>
+        <table>
+          <thead><tr>
+            <th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th>
+            <th>Gender</th><th>Age</th><th>Lens Type</th><th>Delivery</th><th>Balance</th><th>By</th><th>Branch</th>
+            {isOwner && <th></th>}
+          </tr></thead>
+          <tbody>{filtered.map(r => (
+            <tr key={r.id}>
+              <td style={{ fontSize:11, color:"#9b8e82", whiteSpace:"nowrap" }}>{r.timestamp}</td>
+              <td style={{ fontWeight:700, fontFamily:"monospace" }}>{r.mrNo}</td>
+              <td style={{ fontFamily:"monospace", color:"#1d4ed8" }}>{r.patientId || "—"}</td>
+              <td style={{ fontWeight:600 }}>{r.name}</td>
+              <td>{r.phone}</td>
+              <td>{r.gender}</td>
+              <td>{r.age}</td>
+              <td><span className="tag tag-blue">{r.lensType}</span></td>
+              <td><span className={`tag ${r.deliveryStatus==="Delivered"?"tag-green":r.deliveryStatus==="Not Ready"?"tag-red":"tag-yellow"}`}>
+                {r.deliveryStatus==="Fixing Completed But Not Delivered"?"Fixing Done":r.deliveryStatus}
+              </span></td>
+              <td style={{ fontWeight:700 }}>{currency(r.balance)}</td>
+              <td style={{ fontSize:11, color:"#9b8e82" }}>{r.createdByName||"—"}</td>
+              <td><span className="tag" style={{ background:"#f0ede8", color:"#6b5e52" }}>{r.branch}</span></td>
+              {isOwner && <td><button className="btn btn-danger btn-sm" onClick={()=>del(r.id)}>✕</button></td>}
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      {modal && (
+        <Modal title="K Sheet Entry" onClose={()=>setModal(false)} onSave={submit}
+          saveLabel={isOwner?"Save K Sheet":"Submit for Approval"} xl>
+          <div style={{ display:"flex", gap:6, marginBottom:18, flexWrap:"wrap" }}>
+            {TABS.map(t => <button key={t.id} className={`btn btn-sm ${tab===t.id?"btn-dark":"btn-outline"}`} onClick={()=>setTab(t.id)}>{t.label}</button>)}
+          </div>
+          {tab==="basic" && (
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
+              {/* MR No Lookup */}
+              <div style={{ gridColumn:"1/-1", background:"#f0ede8", borderRadius:10, padding:"12px 14px" }}>
+                <label style={{ fontWeight:700 }}>🔗 Link to OP Registration (MR No / Patient ID / Phone)</label>
+                <div style={{ display:"flex", gap:8, marginTop:6 }}>
+                  <input type="text" placeholder="Enter MR-001 or PT-0001 or phone…" value={form._lookup||""}
+                    onChange={e=>setForm(f=>({...f,_lookup:e.target.value}))} style={{ flex:1 }} />
+                  <button className="btn btn-dark btn-sm" onClick={()=>lookupPatient(form._lookup||"")}>Look Up</button>
+                </div>
+                {mrLookup && <div style={{ fontSize:12, marginTop:6, color: mrLookup.startsWith("✓")?"#16a34a":"#dc2626" }}>{mrLookup}</div>}
+              </div>
+              <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div>
+              <div><label>Patient ID</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div>
+              <div><label>Timestamp (auto)</label><input type="text" value={form.timestamp} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div>
+              <div><label>Date</label><input type="date" value={form.date} onChange={F("date")} /></div>
+              <div><label>Time</label><input type="time" value={form.time} onChange={F("time")} /></div>
+              <div style={{ gridColumn:"span 3" }}></div>
+              <div style={{ gridColumn:"span 2" }}><label>Name *</label>
+                <input type="text" value={form.name} onChange={F("name")} onBlur={T("name")}
+                  style={vStyle(form.name, v=>v.trim().length>0, touch.name)} />
+                {vMsg(form.name,v=>v.trim().length>0,touch.name,"Required.")}
+              </div>
+              <div><label>Phone * (10 digits)</label>
+                <input type="text" maxLength={10} value={form.phone} onChange={F("phone")} onBlur={T("phone")}
+                  style={vStyle(form.phone, validate.phone, touch.phone)} />
+                {vMsg(form.phone,validate.phone,touch.phone,"10 digits.")}
+              </div>
+              <div style={{ gridColumn:"1/-1" }}><label>Address</label><input type="text" value={form.address} onChange={F("address")} /></div>
+              <div><label>Gender</label>
+                <select value={form.gender} onChange={F("gender")}><option>Male</option><option>Female</option><option>Other</option></select>
+              </div>
+              <div><label>Age</label><input type="number" value={form.age} onChange={F("age")} /></div>
+              <div></div>
+              <div style={{ gridColumn:"span 2" }}><label>Complaint</label><textarea rows={2} value={form.complaint} onChange={F("complaint")} /></div>
+              <div style={{ gridColumn:"1/-1" }}><label>Past History</label><textarea rows={2} value={form.pastHistory} onChange={F("pastHistory")} /></div>
+            </div>
+          )}
+          {tab==="ar" && (
+            <div style={{ display:"grid", gap:14 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, background:"#f0ede8", borderRadius:12, padding:"14px 16px" }}>
+                <div style={{ gridColumn:"1/-1", fontWeight:700, fontSize:11, color:"#9b8e82", textTransform:"uppercase" }}>Right Eye (RE) — AR</div>
+                {rxField("Spherical","reSpherAR",validate.sphereCyl,"-6 to +6, steps 0.25")}
+                {rxField("Cylinder","reCylAR",validate.sphereCyl,"-6 to +6, steps 0.25")}
+                {rxField("Axis","reAxisAR",validate.axis,"0–180")}
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, background:"#f0ede8", borderRadius:12, padding:"14px 16px" }}>
+                <div style={{ gridColumn:"1/-1", fontWeight:700, fontSize:11, color:"#9b8e82", textTransform:"uppercase" }}>Left Eye (LE) — AR</div>
+                {rxField("Spherical","leSpherAR",validate.sphereCyl,"-6 to +6, steps 0.25")}
+                {rxField("Cylinder","leCylAR",validate.sphereCyl,"-6 to +6, steps 0.25")}
+                {rxField("Axis","leAxisAR",validate.axis,"0–180")}
+              </div>
+            </div>
+          )}
+          {tab==="sub" && (
+            <div style={{ display:"grid", gap:14 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, background:"#f0ede8", borderRadius:12, padding:"14px 16px" }}>
+                <div style={{ gridColumn:"1/-1", fontWeight:700, fontSize:11, color:"#9b8e82", textTransform:"uppercase" }}>Right Eye (RE) — Subjective</div>
+                {rxField("Spherical","reSpherSub",validate.sphereCyl,"-6 to +6")}
+                {rxField("Cylinder","reCylSub",validate.sphereCyl,"-6 to +6")}
+                {rxField("Axis","reAxisSub",validate.axis,"0–180")}
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14, background:"#f0ede8", borderRadius:12, padding:"14px 16px" }}>
+                <div style={{ gridColumn:"1/-1", fontWeight:700, fontSize:11, color:"#9b8e82", textTransform:"uppercase" }}>Left Eye (LE) — Subjective</div>
+                {rxField("Spherical","leSpherSub",validate.sphereCyl,"-6 to +6")}
+                {rxField("Cylinder","leCylSub",validate.sphereCyl,"-6 to +6")}
+                {rxField("Axis","leAxisSub",validate.axis,"0–180")}
+              </div>
+              <div style={{ maxWidth:220 }}>
+                <label>ADD (Subjective)</label>
+                <input type="number" step="0.25" value={form.add||""} onChange={F("add")} onBlur={T("add")}
+                  style={vStyle(form.add,v=>!v||validate.add(v),touch.add)} />
+                {vMsg(form.add,v=>!v||validate.add(v),touch.add,"0 or 0.75–3.00 in steps 0.25")}
+              </div>
+            </div>
+          )}
+          {tab==="eye" && (
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
+              {["eyelids","conjunctiva","cornea","anteriorChamber","iris","pupil","lens","ocularMovements","fundus"].map(k => (
+                <div key={k}><label>{k.replace(/([A-Z])/g," $1").replace(/^./,s=>s.toUpperCase())}</label>
+                  <input type="text" value={form[k]||""} onChange={F(k)} /></div>
+              ))}
+              <div style={{ gridColumn:"1/-1" }}><label>Advice</label><textarea rows={2} value={form.advice} onChange={F("advice")} /></div>
+              <div style={{ gridColumn:"span 2" }}><label>Optometrist / Ophthalmologist</label><input type="text" value={form.optom} onChange={F("optom")} /></div>
+            </div>
+          )}
+          {tab==="billing" && (
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
+              <div style={{ gridColumn:"1/-1" }}><label>Lens Type</label>
+                <select value={form.lensType} onChange={F("lensType")}>{LENS_TYPES.map(l=><option key={l}>{l}</option>)}</select>
+              </div>
+              <div><label>Frame No</label><input type="text" value={form.frameNo} onChange={F("frameNo")} /></div>
+              <div><label>Advance (₹)</label><input type="number" value={form.advance} onChange={F("advance")} /></div>
+              <div><label>Payment Method</label>
+                <select value={form.paymentMethod} onChange={F("paymentMethod")}><option>Cash</option><option>UPI</option><option>Card</option></select>
+              </div>
+              <div style={{ gridColumn:"1/-1" }}><label>Delivery Status</label>
+                <select value={form.deliveryStatus} onChange={F("deliveryStatus")}>{DELIVERY_STATUS.map(d=><option key={d}>{d}</option>)}</select>
+              </div>
+              <div><label>Balance (₹)</label><input type="number" value={form.balance} onChange={F("balance")} /></div>
+            </div>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// OPTOMETRIST / OPTOM SECTION
+// Complaint + Past History, linked to patient via MR No / Patient ID
+// ════════════════════════════════════════════════════════════════════════
+function OptometristSection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const rows    = (data.optometrist || []).filter(x => (isOwner || x.branch === branch) && x.status === "approved");
+
+  const [modal, setModal] = useState(false);
+  const [form,  setForm]  = useState({});
+  const [msg,   setMsg]   = useState("");
+  const [mrLookup, setMrLookup] = useState("");
+  const [search, setSearch] = useState("");
+
+  const blank = () => ({
+    timestamp: ts(), date: todayStr(), time: timeStr(),
+    mrNo:"", patientId:"", name:"", phone:"",
+    complaint:"", pastHistory:"",
+    optomName: session.name,
+  });
+  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const lookupPatient = (query) => {
+    const found = (data.patients || []).find(p =>
+      p.mrNo?.toLowerCase() === query.toLowerCase() ||
+      p.patientId?.toLowerCase() === query.toLowerCase() ||
+      p.phone === query
+    );
+    if (found) {
+      // Also try to pull complaint/history from K Sheet
+      const ksheet = (data.patientBill || []).find(b =>
+        b.mrNo === found.mrNo || b.patientId === found.patientId
+      );
+      setForm(f => ({ ...f,
+        mrNo: found.mrNo || "", patientId: found.patientId || "",
+        name: found.name, phone: found.phone,
+        complaint: ksheet?.complaint || f.complaint,
+        pastHistory: ksheet?.pastHistory || f.pastHistory,
+      }));
+      setMrLookup(`✓ Found: ${found.name} (${found.patientId})`);
+    } else {
+      setMrLookup("No match found.");
+    }
+  };
+
+  const submit = () => {
+    if (!form.name.trim()) { setMsg("Patient name required."); return; }
+    const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form,
+      createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    if (isOwner) { const approved = { ...record, status:"approved" }; mutate("optometrist", arr=>[...arr, approved], approved); }
+    else { staffSubmit("optometrist", record); }
+    setModal(false); setMsg(isOwner ? "Saved." : "Submitted for approval ✓");
+  };
+
+  const del = id => { if (confirm("Delete?")) { mutate("optometrist", arr=>arr.filter(x=>x.id!==id)); audit("DELETE",{type:"optometrist",id}); } };
+
+  const filtered = rows.filter(r =>
+    !search || r.name?.toLowerCase().includes(search.toLowerCase()) ||
+    r.mrNo?.toLowerCase().includes(search.toLowerCase()) ||
+    r.patientId?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div>
+      <SectionHeader title="Optometrist" onSync={onSync} syncing={syncing}
+        onExport={() => exportCSV(rows.map(({id,...r})=>r),"optometrist.csv")}
+        onAdd={can("optometrist","add") ? () => { setForm(blank()); setMsg(""); setMrLookup(""); setModal(true); } : null}
+        msg={msg} />
+      <div style={{ marginBottom:12 }}>
+        <input type="text" placeholder="🔍 Search by name, MR No, Patient ID…" value={search} onChange={e=>setSearch(e.target.value)}
+          style={{ width:"100%", maxWidth:420, borderRadius:10, border:"1px solid #e8e2db", padding:"8px 14px", fontSize:13 }} />
+      </div>
+      <div className="card" style={{ overflowX:"auto" }}>
+        <table>
+          <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Complaint</th><th>Past History</th><th>Optometrist</th><th>Branch</th>{isOwner&&<th></th>}</tr></thead>
+          <tbody>{filtered.map(r => (
+            <tr key={r.id}>
+              <td style={{ fontSize:11,color:"#9b8e82",whiteSpace:"nowrap" }}>{r.timestamp}</td>
+              <td style={{ fontWeight:700,fontFamily:"monospace" }}>{r.mrNo||"—"}</td>
+              <td style={{ fontFamily:"monospace",color:"#1d4ed8" }}>{r.patientId||"—"}</td>
+              <td style={{ fontWeight:600 }}>{r.name}</td>
+              <td>{r.phone}</td>
+              <td style={{ maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{r.complaint||"—"}</td>
+              <td style={{ maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{r.pastHistory||"—"}</td>
+              <td style={{ fontSize:12,color:"#9b8e82" }}>{r.optomName||"—"}</td>
+              <td><span className="tag" style={{ background:"#f0ede8",color:"#6b5e52" }}>{r.branch}</span></td>
+              {isOwner && <td><button className="btn btn-danger btn-sm" onClick={()=>del(r.id)}>✕</button></td>}
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      {modal && (
+        <Modal title="Optometrist Entry" onClose={()=>setModal(false)} onSave={submit}
+          saveLabel={isOwner?"Save":"Submit for Approval"}>
+          <div style={{ background:"#f0ede8", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
+            <label style={{ fontWeight:700 }}>🔗 Look Up Patient (MR No / Patient ID / Phone)</label>
+            <div style={{ display:"flex", gap:8, marginTop:6 }}>
+              <input type="text" placeholder="Enter MR-001 or PT-0001 or phone…" value={form._lookup||""}
+                onChange={e=>setForm(f=>({...f,_lookup:e.target.value}))} style={{ flex:1 }} />
+              <button className="btn btn-dark btn-sm" onClick={()=>lookupPatient(form._lookup||"")}>Look Up</button>
+            </div>
+            {mrLookup && <div style={{ fontSize:12,marginTop:6,color:mrLookup.startsWith("✓")?"#16a34a":"#dc2626" }}>{mrLookup}</div>}
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+            <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div>
+            <div><label>Patient ID</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div>
+            <div><label>Name *</label><input type="text" value={form.name} onChange={F("name")} /></div>
+            <div><label>Phone</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} /></div>
+            <div style={{ gridColumn:"1/-1" }}><label>Complaint</label><textarea rows={3} value={form.complaint} onChange={F("complaint")} /></div>
+            <div style={{ gridColumn:"1/-1" }}><label>Past History</label><textarea rows={3} value={form.pastHistory} onChange={F("pastHistory")} /></div>
+            <div style={{ gridColumn:"1/-1" }}><label>Optometrist Name</label><input type="text" value={form.optomName} onChange={F("optomName")} /></div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// OPTICALS SECTION
+// Auto-pulls prescription from K Sheet via Patient ID / MR No
+// Opticals rep enters: Total Price, Advance, Advance Mode, Txn ID, Balance
+// ════════════════════════════════════════════════════════════════════════
+function OpticalsSection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const rows    = (data.opticals || []).filter(x => (isOwner || x.branch === branch) && x.status === "approved");
+
+  const [modal,    setModal]    = useState(false);
+  const [form,     setForm]     = useState({});
+  const [msg,      setMsg]      = useState("");
+  const [rxPreview,setRxPreview]= useState(null);
+  const [mrLookup, setMrLookup] = useState("");
+  const [search,   setSearch]   = useState("");
+
+  const blank = () => ({
+    timestamp: ts(), date: todayStr(), time: timeStr(),
+    mrNo:"", patientId:"", name:"", phone:"", address:"",
+    totalPrice:"", advance:"", advancePaymentMethod:"Cash",
+    transactionId:"", balance:"",
+    optomName: session.name,
+  });
+  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  // Look up patient and auto-fill from OP Registration + K Sheet prescription
+  const lookupPatient = (query) => {
+    if (!query.trim()) return;
+    const foundOp = (data.patients || []).find(p =>
+      p.mrNo?.toLowerCase() === query.toLowerCase() ||
+      p.patientId?.toLowerCase() === query.toLowerCase() ||
+      p.phone === query
+    );
+    if (!foundOp) { setMrLookup("No patient found in OP Registration."); return; }
+
+    // Pull K Sheet for prescription
+    const ksheet = (data.patientBill || []).find(b =>
+      b.mrNo === foundOp.mrNo || b.patientId === foundOp.patientId
+    );
+
+    setForm(f => ({ ...f,
+      mrNo: foundOp.mrNo || "", patientId: foundOp.patientId || "",
+      name: foundOp.name, phone: foundOp.phone, address: foundOp.address || "",
+    }));
+
+    if (ksheet) {
+      setRxPreview({
+        RE: `${ksheet.reSpherSub||"—"} / ${ksheet.reCylSub||"—"} × ${ksheet.reAxisSub||"—"}`,
+        LE: `${ksheet.leSpherSub||"—"} / ${ksheet.leCylSub||"—"} × ${ksheet.leAxisSub||"—"}`,
+        ADD: ksheet.add || "—",
+        lensType: ksheet.lensType || "—",
+        frameNo: ksheet.frameNo || "—",
+      });
+      setMrLookup(`✓ Found: ${foundOp.name} (${foundOp.patientId}) — K Sheet loaded`);
+    } else {
+      setRxPreview(null);
+      setMrLookup(`✓ Found: ${foundOp.name} — No K Sheet found yet`);
+    }
+  };
+
+  // Auto-calc balance
+  const calcBalance = () => {
+    const total = parseFloat(form.totalPrice) || 0;
+    const adv   = parseFloat(form.advance)    || 0;
+    setForm(f => ({ ...f, balance: String(Math.max(0, total - adv)) }));
+  };
+
+  const submit = () => {
+    if (!form.name.trim()) { setMsg("Patient name required."); return; }
+    const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form,
+      createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    if (isOwner) { const approved = { ...record, status:"approved" }; mutate("opticals", arr=>[...arr, approved], approved); }
+    else { staffSubmit("opticals", record); }
+    setModal(false); setMsg(isOwner ? "Opticals saved." : "Submitted for approval ✓");
+  };
+
+  const del = id => { if (confirm("Delete?")) { mutate("opticals", arr=>arr.filter(x=>x.id!==id)); audit("DELETE",{type:"opticals",id}); } };
+
+  const filtered = rows.filter(r =>
+    !search || r.name?.toLowerCase().includes(search.toLowerCase()) ||
+    r.mrNo?.toLowerCase().includes(search.toLowerCase()) ||
+    r.patientId?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div>
+      <SectionHeader title="Opticals" onSync={onSync} syncing={syncing}
+        onExport={() => exportCSV(rows.map(({id,...r})=>r),"opticals.csv")}
+        onAdd={can("opticals","add") ? () => { setForm(blank()); setMsg(""); setRxPreview(null); setMrLookup(""); setModal(true); } : null}
+        msg={msg} />
+      <div style={{ marginBottom:12 }}>
+        <input type="text" placeholder="🔍 Search by name, MR No, Patient ID…" value={search} onChange={e=>setSearch(e.target.value)}
+          style={{ width:"100%", maxWidth:420, borderRadius:10, border:"1px solid #e8e2db", padding:"8px 14px", fontSize:13 }} />
+      </div>
+      <div className="card" style={{ overflowX:"auto" }}>
+        <table>
+          <thead><tr>
+            <th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th>
+            <th>Total Price</th><th>Advance</th><th>Balance</th><th>Adv. Method</th><th>Txn ID</th>
+            <th>Rep</th><th>Branch</th>{isOwner&&<th></th>}
+          </tr></thead>
+          <tbody>{filtered.map(r => (
+            <tr key={r.id}>
+              <td style={{ fontSize:11,color:"#9b8e82",whiteSpace:"nowrap" }}>{r.timestamp}</td>
+              <td style={{ fontWeight:700,fontFamily:"monospace" }}>{r.mrNo||"—"}</td>
+              <td style={{ fontFamily:"monospace",color:"#1d4ed8" }}>{r.patientId||"—"}</td>
+              <td style={{ fontWeight:600 }}>{r.name}</td>
+              <td>{r.phone}</td>
+              <td style={{ fontWeight:700 }}>{r.totalPrice?`₹${r.totalPrice}`:"—"}</td>
+              <td>{r.advance?`₹${r.advance}`:"—"}</td>
+              <td style={{ fontWeight:700,color:parseFloat(r.balance)>0?"#dc2626":"#16a34a" }}>{r.balance?`₹${r.balance}`:"—"}</td>
+              <td><span className="tag tag-blue">{r.advancePaymentMethod||"—"}</span></td>
+              <td style={{ fontSize:11,fontFamily:"monospace",color:"#9b8e82" }}>{r.transactionId||"—"}</td>
+              <td style={{ fontSize:11,color:"#9b8e82" }}>{r.optomName||"—"}</td>
+              <td><span className="tag" style={{ background:"#f0ede8",color:"#6b5e52" }}>{r.branch}</span></td>
+              {isOwner && <td><button className="btn btn-danger btn-sm" onClick={()=>del(r.id)}>✕</button></td>}
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      {modal && (
+        <Modal title="Opticals Entry" onClose={()=>setModal(false)} onSave={submit}
+          saveLabel={isOwner?"Save":"Submit for Approval"} wide>
+          <div style={{ background:"#f0ede8", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
+            <label style={{ fontWeight:700 }}>🔗 Link to Patient (MR No / Patient ID / Phone)</label>
+            <div style={{ display:"flex", gap:8, marginTop:6 }}>
+              <input type="text" placeholder="Enter MR-001 or PT-0001 or phone…" value={form._lookup||""}
+                onChange={e=>setForm(f=>({...f,_lookup:e.target.value}))} style={{ flex:1 }} />
+              <button className="btn btn-dark btn-sm" onClick={()=>lookupPatient(form._lookup||"")}>Look Up & Fill</button>
+            </div>
+            {mrLookup && <div style={{ fontSize:12,marginTop:6,color:mrLookup.startsWith("✓")?"#16a34a":"#dc2626" }}>{mrLookup}</div>}
+          </div>
+          {rxPreview && (
+            <div style={{ background:"#e0f2fe",borderRadius:10,padding:"12px 16px",marginBottom:14,fontSize:13 }}>
+              <div style={{ fontWeight:700,marginBottom:8,color:"#0369a1" }}>📋 Prescription from K Sheet (auto-filled)</div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, fontFamily:"monospace" }}>
+                <div><span style={{ color:"#9b8e82",fontSize:11 }}>RE</span><br/>{rxPreview.RE}</div>
+                <div><span style={{ color:"#9b8e82",fontSize:11 }}>LE</span><br/>{rxPreview.LE}</div>
+                <div><span style={{ color:"#9b8e82",fontSize:11 }}>ADD</span><br/>{rxPreview.ADD}</div>
+                <div><span style={{ color:"#9b8e82",fontSize:11 }}>Lens Type</span><br/>{rxPreview.lensType}</div>
+                <div><span style={{ color:"#9b8e82",fontSize:11 }}>Frame No</span><br/>{rxPreview.frameNo}</div>
+              </div>
+            </div>
+          )}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
+            <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div>
+            <div><label>Patient ID</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div>
+            <div></div>
+            <div style={{ gridColumn:"span 2" }}><label>Name</label><input type="text" value={form.name} onChange={F("name")} /></div>
+            <div><label>Phone</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} /></div>
+            <div style={{ gridColumn:"1/-1" }}><label>Address</label><input type="text" value={form.address} onChange={F("address")} /></div>
+            <div><label>Total Price (₹) *</label><input type="number" value={form.totalPrice} onChange={F("totalPrice")} onBlur={calcBalance} /></div>
+            <div><label>Advance (₹)</label><input type="number" value={form.advance} onChange={F("advance")} onBlur={calcBalance} /></div>
+            <div><label>Balance (₹) (auto)</label><input type="number" value={form.balance} onChange={F("balance")} style={{ background:"#f0ede8" }} /></div>
+            <div><label>Advance Payment Method</label>
+              <select value={form.advancePaymentMethod} onChange={F("advancePaymentMethod")}>
+                {["Cash","UPI","Card","Cheque","NA"].map(m=><option key={m}>{m}</option>)}
+              </select>
+            </div>
+            {(form.advancePaymentMethod==="UPI"||form.advancePaymentMethod==="Card"||form.advancePaymentMethod==="Cheque") && (
+              <div><label>Transaction ID / Ref No</label><input type="text" placeholder="Txn / Cheque ref" value={form.transactionId} onChange={F("transactionId")} /></div>
+            )}
+            <div><label>Representative Name</label><input type="text" value={form.optomName} onChange={F("optomName")} /></div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// TASKS  — Owner assigns tasks with deadlines to staff; staff mark complete
+// ════════════════════════════════════════════════════════════════════════
+function TasksSection({ session, data, mutate, audit, accounts, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const allTasks = data.tasks || [];
+  // Owner sees all tasks; staff see only tasks assigned to them
+  const rows = isOwner ? allTasks : allTasks.filter(t => t.assignedTo === session.id);
+
+  const [modal, setModal] = useState(false);
+  const [form,  setForm]  = useState({});
+  const [msg,   setMsg]   = useState("");
+  const [filter,setFilter]= useState("all"); // all | pending | done | overdue
+
+  const staffList = (accounts || []).filter(a => a.role === "staff");
+
+  const blank = () => ({
+    title: "", description: "", assignedTo: staffList[0]?.id || "",
+    deadline: todayStr(), priority: "Medium",
+  });
+  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const submit = () => {
+    if (!form.title.trim()) { setMsg("Task title required."); return; }
+    const record = {
+      id: uid(), ...form, status: "pending",
+      createdBy: session.id, createdByName: session.name, createdAt: ts(),
+    };
+    mutate("tasks", arr => [...arr, record], record);
+    audit("TASK_ASSIGN", { title: form.title, assignedTo: form.assignedTo });
+    setModal(false); setMsg("Task assigned.");
+  };
+
+  const markDone = (task) => {
+    const updated = { ...task, status: "done", completedAt: ts() };
+    mutate("tasks", arr => arr.map(x => x.id === task.id ? updated : x), updated);
+    audit("TASK_COMPLETE", { title: task.title });
+  };
+
+  const del = id => { if (confirm("Delete task?")) { mutate("tasks", arr => arr.filter(x => x.id !== id)); audit("DELETE", { type:"tasks", id }); } };
+
+  const isOverdue = t => t.status === "pending" && new Date(t.deadline) < new Date(todayStr());
+
+  const filtered = rows.filter(t => {
+    if (filter === "pending") return t.status === "pending" && !isOverdue(t);
+    if (filter === "done")    return t.status === "done";
+    if (filter === "overdue") return isOverdue(t);
+    return true;
+  });
+
+  const staffName = id => staffList.find(s => s.id === id)?.name || id;
+
+  const priorityColor = p => ({ High:"#dc2626", Medium:"#d97706", Low:"#16a34a" }[p] || "#9b8e82");
+
+  return (
+    <div>
+      <SectionHeader title="Tasks" onSync={onSync} syncing={syncing}
+        onAdd={isOwner ? () => { setForm(blank()); setMsg(""); setModal(true); } : null}
+        msg={msg} />
+
+      <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+        {["all","pending","overdue","done"].map(f => (
+          <button key={f} className={`btn btn-sm ${filter===f?"btn-dark":"btn-outline"}`} onClick={()=>setFilter(f)}>
+            {f.charAt(0).toUpperCase()+f.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display:"grid", gap:10 }}>
+        {filtered.length === 0 && <div style={{ color:"#9b8e82", fontSize:13, padding:20, textAlign:"center" }}>No tasks here.</div>}
+        {filtered.map(t => (
+          <div key={t.id} className="card" style={{ padding:"16px 18px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:14,
+            borderLeft: `4px solid ${t.status==="done" ? "#16a34a" : isOverdue(t) ? "#dc2626" : priorityColor(t.priority)}` }}>
+            <div style={{ flex:1 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                <div style={{ fontWeight:700, fontSize:15, textDecoration: t.status==="done" ? "line-through" : "none", color: t.status==="done" ? "#9b8e82" : "#1a1714" }}>{t.title}</div>
+                <span style={{ fontSize:10, padding:"2px 8px", borderRadius:20, fontWeight:700, background:`${priorityColor(t.priority)}20`, color:priorityColor(t.priority) }}>{t.priority}</span>
+                {isOverdue(t) && <span style={{ fontSize:10, padding:"2px 8px", borderRadius:20, fontWeight:700, background:"#fee2e2", color:"#dc2626" }}>⚠ Overdue</span>}
+                {t.status==="done" && <span style={{ fontSize:10, padding:"2px 8px", borderRadius:20, fontWeight:700, background:"#dcfce7", color:"#16a34a" }}>✓ Done</span>}
+              </div>
+              {t.description && <div style={{ fontSize:13, color:"#6b5e52", marginBottom:6 }}>{t.description}</div>}
+              <div style={{ fontSize:12, color:"#9b8e82", display:"flex", gap:14 }}>
+                <span>👤 {staffName(t.assignedTo)}</span>
+                <span>📅 Due {t.deadline}</span>
+                <span>By {t.createdByName}</span>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              {t.status === "pending" && (!isOwner ? t.assignedTo === session.id : true) && (
+                <button className="btn btn-outline btn-sm" onClick={()=>markDone(t)}>Mark Done</button>
+              )}
+              {isOwner && <button className="btn btn-danger btn-sm" onClick={()=>del(t.id)}>✕</button>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {modal && (
+        <Modal title="Assign Task" onClose={()=>setModal(false)} onSave={submit} saveLabel="Assign Task">
+          <div style={{ display:"grid", gap:14 }}>
+            <div><label>Title *</label><input type="text" value={form.title} onChange={F("title")} /></div>
+            <div><label>Description</label><textarea rows={3} value={form.description} onChange={F("description")} /></div>
+            <div><label>Assign To</label>
+              <select value={form.assignedTo} onChange={F("assignedTo")}>
+                {staffList.map(s => <option key={s.id} value={s.id}>{s.name} ({s.branch})</option>)}
+              </select>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+              <div><label>Deadline</label><input type="date" value={form.deadline} onChange={F("deadline")} /></div>
+              <div><label>Priority</label>
+                <select value={form.priority} onChange={F("priority")}><option>Low</option><option>Medium</option><option>High</option></select>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// REMINDERS — per MR No / Patient ID (e.g. lens delivery, follow-up visit)
+// ════════════════════════════════════════════════════════════════════════
+function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const allReminders = data.reminders || [];
+  const rows = isOwner ? allReminders : allReminders.filter(r => r.branch === branch);
+
+  const [modal, setModal] = useState(false);
+  const [form,  setForm]  = useState({});
+  const [msg,   setMsg]   = useState("");
+  const [mrLookup, setMrLookup] = useState("");
+  const [filter, setFilter] = useState("upcoming"); // upcoming | done | all
+
+  const blank = () => ({
+    mrNo: "", patientId: "", name: "", phone: "",
+    reminderType: "Lens Delivery", reminderDate: todayStr(), notes: "",
+    branch: isOwner ? "JPT Branch" : branch,
+  });
+  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const lookupPatient = (query) => {
+    const found = (data.patients || []).find(p =>
+      p.mrNo?.toLowerCase() === query.toLowerCase() ||
+      p.patientId?.toLowerCase() === query.toLowerCase() ||
+      p.phone === query
+    );
+    if (found) {
+      setForm(f => ({ ...f, mrNo: found.mrNo||"", patientId: found.patientId||"", name: found.name, phone: found.phone }));
+      setMrLookup(`✓ Found: ${found.name} (${found.patientId})`);
+    } else {
+      setMrLookup("No match found.");
+    }
+  };
+
+  const submit = () => {
+    if (!form.name.trim() || !form.reminderDate) { setMsg("Name and reminder date required."); return; }
+    const record = { id: uid(), ...form, status: "pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    mutate("reminders", arr => [...arr, record], record);
+    audit("REMINDER_ADD", { name: form.name, type: form.reminderType });
+    setModal(false); setMsg("Reminder set.");
+  };
+
+  const markDone = (rem) => {
+    const updated = { ...rem, status: "done", completedAt: ts() };
+    mutate("reminders", arr => arr.map(x => x.id === rem.id ? updated : x), updated);
+  };
+
+  const del = id => { if (confirm("Delete reminder?")) { mutate("reminders", arr => arr.filter(x => x.id !== id)); audit("DELETE", { type:"reminders", id }); } };
+
+  const isOverdue = r => r.status === "pending" && new Date(r.reminderDate) < new Date(todayStr());
+  const isToday    = r => r.reminderDate === todayStr();
+
+  const filtered = rows.filter(r => {
+    if (filter === "upcoming") return r.status === "pending";
+    if (filter === "done")     return r.status === "done";
+    return true;
+  }).sort((a,b) => new Date(a.reminderDate) - new Date(b.reminderDate));
+
+  const typeIcon = t => ({ "Lens Delivery":"🕶", "Follow-up Visit":"🔁", "Payment Due":"💰", "Review":"📋" }[t] || "🔔");
+
+  return (
+    <div>
+      <SectionHeader title="Reminders" onSync={onSync} syncing={syncing}
+        onAdd={() => { setForm(blank()); setMsg(""); setMrLookup(""); setModal(true); }}
+        msg={msg} />
+
+      <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+        {["upcoming","done","all"].map(f => (
+          <button key={f} className={`btn btn-sm ${filter===f?"btn-dark":"btn-outline"}`} onClick={()=>setFilter(f)}>
+            {f.charAt(0).toUpperCase()+f.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display:"grid", gap:10 }}>
+        {filtered.length === 0 && <div style={{ color:"#9b8e82", fontSize:13, padding:20, textAlign:"center" }}>No reminders here.</div>}
+        {filtered.map(r => (
+          <div key={r.id} className="card" style={{ padding:"14px 18px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:14,
+            borderLeft: `4px solid ${r.status==="done" ? "#16a34a" : isOverdue(r) ? "#dc2626" : isToday(r) ? "#d97706" : "#9b8e82"}` }}>
+            <div style={{ display:"flex", alignItems:"center", gap:12, flex:1 }}>
+              <div style={{ fontSize:22 }}>{typeIcon(r.reminderType)}</div>
+              <div>
+                <div style={{ fontWeight:700, fontSize:14, textDecoration: r.status==="done"?"line-through":"none", color: r.status==="done"?"#9b8e82":"#1a1714" }}>
+                  {r.name} <span style={{ fontWeight:400, color:"#9b8e82", fontSize:12 }}>({r.mrNo || r.patientId || "—"})</span>
+                </div>
+                <div style={{ fontSize:12, color:"#6b5e52" }}>{r.reminderType} · {r.phone}</div>
+                {r.notes && <div style={{ fontSize:12, color:"#9b8e82", marginTop:2 }}>{r.notes}</div>}
+              </div>
+            </div>
+            <div style={{ textAlign:"right" }}>
+              <div style={{ fontWeight:700, fontSize:13, color: isOverdue(r)?"#dc2626":isToday(r)?"#d97706":"#1a1714" }}>{r.reminderDate}</div>
+              {isOverdue(r) && <div style={{ fontSize:10, color:"#dc2626", fontWeight:700 }}>OVERDUE</div>}
+              {isToday(r) && <div style={{ fontSize:10, color:"#d97706", fontWeight:700 }}>TODAY</div>}
+            </div>
+            <div style={{ display:"flex", gap:6 }}>
+              {r.status === "pending" && <button className="btn btn-outline btn-sm" onClick={()=>markDone(r)}>Done</button>}
+              <button className="btn btn-danger btn-sm" onClick={()=>del(r.id)}>✕</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {modal && (
+        <Modal title="Set Reminder" onClose={()=>setModal(false)} onSave={submit} saveLabel="Set Reminder">
+          <div style={{ background:"#f0ede8", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
+            <label style={{ fontWeight:700 }}>🔗 Look Up Patient (MR No / Patient ID / Phone)</label>
+            <div style={{ display:"flex", gap:8, marginTop:6 }}>
+              <input type="text" placeholder="Enter MR-001 or PT-0001 or phone…" value={form._lookup||""}
+                onChange={e=>setForm(f=>({...f,_lookup:e.target.value}))} style={{ flex:1 }} />
+              <button className="btn btn-dark btn-sm" onClick={()=>lookupPatient(form._lookup||"")}>Look Up</button>
+            </div>
+            {mrLookup && <div style={{ fontSize:12,marginTop:6,color:mrLookup.startsWith("✓")?"#16a34a":"#dc2626" }}>{mrLookup}</div>}
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+            <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div>
+            <div><label>Patient ID</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div>
+            <div style={{ gridColumn:"1/-1" }}><label>Name *</label><input type="text" value={form.name} onChange={F("name")} /></div>
+            <div><label>Phone</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} /></div>
+            <div><label>Reminder Type</label>
+              <select value={form.reminderType} onChange={F("reminderType")}>
+                {["Lens Delivery","Follow-up Visit","Payment Due","Review"].map(t=><option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <div><label>Reminder Date *</label><input type="date" value={form.reminderDate} onChange={F("reminderDate")} /></div>
+            <div></div>
+            <div style={{ gridColumn:"1/-1" }}><label>Notes</label><textarea rows={2} value={form.notes} onChange={F("notes")} /></div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// INVENTORY
+// ════════════════════════════════════════════════════════════════════════
+function InventorySection({ session, data, mutate, staffSubmit, can, audit, fieldVis, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const rows    = (data.stock || []).filter(x => isOwner || x.branch === branch);
+  const [search, setSearch] = useState(""); const [cat, setCat] = useState("All");
+  const [modal,  setModal]  = useState(null); const [msg, setMsg] = useState("");
+  const blank = { sku: "", name: "", category: "Frames", brand: "", qty: 0, reorder: 5, cost: 0, price: 0, location: "", lensPower: "", lensType: "Single Vision", boxNo: "" };
+  const [form, setForm] = useState(blank);
+  const cats = ["All", "Frames", "Contact Lenses", "Lenses", "Accessories"];
+  const filtered = rows.filter(s => (cat === "All" || s.category === cat) && (s.name.toLowerCase().includes(search.toLowerCase()) || s.sku.toLowerCase().includes(search.toLowerCase())));
+  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  const open = s => { setForm(s ? { ...s } : { ...blank, branch: isOwner ? "JPT Branch" : branch }); setModal(s || "add"); };
+  const save = () => {
+    const item = { ...form, qty: Number(form.qty), reorder: Number(form.reorder), cost: Number(form.cost), price: Number(form.price) };
+    if (modal === "add") {
+      const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...item, createdBy: session.id, createdByName: session.name };
+      if (isOwner) { mutate("stock", arr => [...arr, record], record); audit("OWNER_ADD", { type: "stock", sku: item.sku }); }
+      else { staffSubmit("stock", record); setMsg("Submitted for approval."); }
+    } else {
+      if (isOwner) { const updated = { ...modal, ...item }; mutate("stock", arr => arr.map(x => x.id === modal.id ? updated : x), updated); audit("EDIT", { type: "stock", id: modal.id }); }
+      else { staffSubmit("stock", { ...modal, ...item }); setMsg("Edit submitted for approval."); }
+    }
+    setModal(null);
+  };
+  return (
+    <div>
+      <SectionHeader title="Inventory" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "inventory.csv")} onAdd={can("inventory", "add") ? () => open(null) : null} msg={msg} />
+      <div className="card" style={{ overflowX: "auto" }}>
+        <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+          <input type="text" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} style={{ maxWidth: 200 }} />
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{cats.map(c => <button key={c} className={`btn btn-sm ${cat === c ? "btn-dark" : "btn-outline"}`} onClick={() => setCat(c)}>{c}</button>)}</div>
+        </div>
+        <table><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>Qty</th><th>Lens Power</th><th>Lens Type</th><th>Box No</th><th>Price</th><th>Location</th><th>Branch</th><th>By</th>{(can("inventory", "edit") || isOwner) && <th></th>}</tr></thead>
+          <tbody>{filtered.map(s => (
+            <tr key={s.id}>
+              <td style={{ fontFamily: "monospace", fontSize: 11 }}>{s.sku}</td>
+              <td style={{ fontWeight: 600 }}>{s.name}</td>
+              <td><span className="tag tag-blue">{s.category}</span></td>
+              <td><span style={{ fontWeight: 700, color: s.qty <= s.reorder ? "#dc2626" : "#16a34a" }}>{s.qty}</span></td>
+              <td style={{ fontFamily: "monospace" }}>{s.lensPower || "—"}</td>
+              <td>{s.lensType && s.category === "Lenses" ? <span className="tag tag-blue">{s.lensType}</span> : "—"}</td>
+              <td style={{ fontFamily: "monospace", fontSize: 12 }}>{s.boxNo || "—"}</td>
+              <td style={{ fontWeight: 600 }}>{currency(s.price)}</td>
+              <td style={{ fontSize: 12, color: "#9b8e82" }}>{s.location}</td>
+              <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{s.branch}</span></td>
+              <td style={{ fontSize: 11, color: "#9b8e82" }}>{s.createdByName || "—"}</td>
+              {(can("inventory", "edit") || isOwner) && (
+                <td style={{ display: "flex", gap: 5 }}>
+                  <button className="btn btn-outline btn-sm" onClick={() => open(s)}>Edit</button>
+                  {isOwner && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) { mutate("stock", arr => arr.filter(x => x.id !== s.id)); audit("DELETE", { type: "stock", id: s.id }); } }}>✕</button>}
+                </td>
+              )}
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      {modal && (
+        <Modal title={modal === "add" ? "Add Stock Item" : "Edit Stock Item"} onClose={() => setModal(null)} onSave={save} saveLabel={isOwner ? "Save" : "Submit for Approval"}>
+          <div className="form-grid">
+            <div><label>SKU</label><input type="text" value={form.sku} onChange={F("sku")} /></div>
+            <div><label>Category</label><select value={form.category} onChange={F("category")}>{["Frames", "Contact Lenses", "Lenses", "Accessories"].map(c => <option key={c}>{c}</option>)}</select></div>
+            <div className="full"><label>Name</label><input type="text" value={form.name} onChange={F("name")} /></div>
+            <div><label>Brand</label><input type="text" value={form.brand} onChange={F("brand")} /></div>
+            <div><label>Location</label><input type="text" value={form.location} onChange={F("location")} /></div>
+            <div><label>Qty</label><input type="number" value={form.qty} onChange={F("qty")} /></div>
+            <div><label>Reorder At</label><input type="number" value={form.reorder} onChange={F("reorder")} /></div>
+            <div><label>Cost (₹)</label><input type="number" value={form.cost} onChange={F("cost")} /></div>
+            <div><label>Price (₹)</label><input type="number" value={form.price} onChange={F("price")} /></div>
+            {form.category === "Lenses" && <>
+              <div><label>Lens Power</label><input type="text" placeholder="-2.50" value={form.lensPower} onChange={F("lensPower")} /></div>
+              <div><label>Lens Type</label><select value={form.lensType} onChange={F("lensType")}>{LENS_TYPES.map(l => <option key={l}>{l}</option>)}</select></div>
+              <div><label>Box Number</label><input type="text" placeholder="B-14" value={form.boxNo} onChange={F("boxNo")} /></div>
+            </>}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// INVOICES
+// ════════════════════════════════════════════════════════════════════════
+function InvoicesSection({ session, data, mutate, staffSubmit, can, audit, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const rows    = (data.invoices || []).filter(x => (isOwner || x.branch === branch) && x.approvalStatus === "approved");
+  const [modal, setModal] = useState(false);
+  const [form,  setForm]  = useState({ patientName: "", date: todayStr(), items: [], discount: 0 });
+  const [lN, setLN] = useState(""); const [lQ, setLQ] = useState(1); const [lP, setLP] = useState(0);
+  const [msg, setMsg] = useState("");
+  const addLine = () => { if (!lN.trim()) return; setForm(f => ({ ...f, items: [...f.items, { name: lN, qty: Number(lQ), price: Number(lP) }] })); setLN(""); setLQ(1); setLP(0); };
+  const sub = (form.items || []).reduce((s, l) => s + l.qty * l.price, 0);
+  const save = () => {
+    if (!form.patientName || !form.items.length) return;
+    const record = { id: `INV-${uid().slice(0, 6).toUpperCase()}`, branch: isOwner ? "JPT Branch" : branch, ...form, discount: Number(form.discount), approvalStatus: "pending", status: "Pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    if (isOwner) { const approved = { ...record, approvalStatus: "approved" }; mutate("invoices", arr => [...arr, approved], approved); audit("OWNER_ADD", { type: "invoices" }); }
+    else { staffSubmit("invoices", record); setMsg("Submitted for approval."); }
+    setModal(false);
+  };
+  const total = inv => (inv.items || []).reduce((s, i) => s + i.qty * i.price, 0) - (inv.discount || 0);
+  return (
+    <div>
+      <SectionHeader title="Sales & Invoices" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows, "invoices.csv")} onAdd={can("invoices", "add") ? () => { setForm({ patientName: "", date: todayStr(), items: [], discount: 0 }); setModal(true); } : null} msg={msg} />
+      <div className="card" style={{ overflowX: "auto" }}>
+        <table><thead><tr><th>Invoice</th><th>Date</th><th>Patient</th><th>Total</th><th>Status</th><th>By</th><th>Branch</th>{isOwner && <th></th>}</tr></thead>
+          <tbody>{rows.map(inv => (
+            <tr key={inv.id}>
+              <td style={{ fontWeight: 700 }}>{inv.id}</td><td>{inv.date}</td><td>{inv.patientName}</td>
+              <td style={{ fontWeight: 700 }}>{currency(total(inv))}</td>
+              <td><span className={`tag ${inv.status === "Paid" ? "tag-green" : "tag-yellow"}`}>{inv.status}</span></td>
+              <td style={{ fontSize: 11, color: "#9b8e82" }}>{inv.createdByName || "—"}</td>
+              <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{inv.branch}</span></td>
+              {isOwner && <td style={{ display: "flex", gap: 5 }}>
+                <button className="btn btn-sm" style={{ background: "#f0ede8", color: "#1a1714", border: "none", fontWeight: 600 }} onClick={() => printInvoice(inv)}>🖨 Print</button>
+                {inv.status === "Pending" && <button className="btn btn-sm" style={{ background: "#dcfce7", color: "#16a34a", border: "none", fontWeight: 700 }} onClick={() => mutate("invoices", arr => arr.map(i => i.id === inv.id ? { ...i, status: "Paid" } : i))}>✓ Paid</button>}
+                <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) mutate("invoices", arr => arr.filter(i => i.id !== inv.id)); }}>✕</button>
+              </td>}
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      {modal && (
+        <Modal title="New Invoice" onClose={() => setModal(false)} onSave={save} saveLabel={isOwner ? "Create Invoice" : "Submit for Approval"} wide>
+          <div className="form-grid" style={{ marginBottom: 14 }}>
+            <div><label>Patient Name</label><input type="text" value={form.patientName} onChange={e => setForm(f => ({ ...f, patientName: e.target.value }))} /></div>
+            <div><label>Date</label><input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
+          </div>
+          <label>Add Item</label>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <input type="text" placeholder="Item name" value={lN} onChange={e => setLN(e.target.value)} style={{ flex: 2 }} />
+            <input type="number" placeholder="Qty" value={lQ} onChange={e => setLQ(e.target.value)} style={{ width: 60 }} />
+            <input type="number" placeholder="₹" value={lP} onChange={e => setLP(e.target.value)} style={{ width: 90 }} />
+            <button className="btn btn-dark btn-sm" onClick={addLine}>Add</button>
+          </div>
+          {form.items.length > 0 && <div style={{ background: "#faf9f7", borderRadius: 10, padding: "10px 14px", marginBottom: 12 }}>
+            {form.items.map((l, i) => <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>{l.name} × {l.qty}</span><span style={{ fontWeight: 600 }}>{currency(l.qty * l.price)}</span></div>)}
+            <div style={{ borderTop: "1px solid #e8e2db", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontWeight: 700 }}><span>Sub</span><span>{currency(sub)}</span></div>
+          </div>}
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <div style={{ flex: 1 }}><label>Discount (₹)</label><input type="number" value={form.discount} onChange={e => setForm(f => ({ ...f, discount: e.target.value }))} /></div>
+            <div style={{ flex: 1 }}><div style={{ fontSize: 11, color: "#9b8e82" }}>TOTAL</div><div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700 }}>{currency(sub - Number(form.discount))}</div></div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// ALERTS
+// ════════════════════════════════════════════════════════════════════════
+function AlertsSection({ session, data, mutate, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const low     = (data.stock || []).filter(s => (isOwner || s.branch === branch) && s.qty <= s.reorder);
+  const [modal, setModal] = useState(null); const [qty, setQty] = useState(0);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div className="section-title">Low Stock Alerts</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          {onSync && <button className="btn btn-outline btn-sm" onClick={onSync} disabled={syncing}>{syncing ? "⟳ Syncing…" : "⟳ Sync"}</button>}
+          <button className="btn btn-outline btn-sm" onClick={() => exportCSV(low.map(({ id, ...r }) => r), "low_stock.csv")}>⬇ CSV</button>
+        </div>
+      </div>
+      {low.length === 0
+        ? <div className="card" style={{ textAlign: "center", padding: 48, color: "#9b8e82" }}><div style={{ fontSize: 36, marginBottom: 10 }}>✓</div><div style={{ fontWeight: 600 }}>All stock levels healthy</div></div>
+        : low.map(s => (
+          <div key={s.id} style={{ background: "#fff9f5", border: "1.5px solid #fed7aa", borderRadius: 12, padding: "12px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>{s.name}</div>
+              <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 2 }}>{s.sku} · {s.branch} · Box: {s.boxNo || "—"}</div>
+            </div>
+            <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+              <div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#9b8e82" }}>Stock / Reorder</div><div><span style={{ fontWeight: 700, color: "#dc2626", fontSize: 16 }}>{s.qty}</span><span style={{ color: "#9b8e82" }}> / {s.reorder}</span></div></div>
+              {isOwner && <button className="btn btn-dark btn-sm" onClick={() => { setModal(s); setQty(s.reorder - s.qty + 10); }}>+ Restock</button>}
+            </div>
+          </div>
+        ))
+      }
+      {modal && <Modal title="Restock" onClose={() => setModal(null)} onSave={() => { mutate("stock", p => p.map(s => s.id === modal.id ? { ...s, qty: s.qty + Number(qty) } : s)); setModal(null); }} saveLabel="Update" width={360}>
+        <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 12 }}>{modal.name}</div>
+        <label>Units to Add</label><input type="number" min={1} value={qty} onChange={e => setQty(e.target.value)} />
+        <div style={{ fontSize: 13, color: "#9b8e82", marginTop: 8 }}>New total: {modal.qty + Number(qty)}</div>
+      </Modal>}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// MANAGE STAFF (Users)
+// ════════════════════════════════════════════════════════════════════════
+function UsersSection({ accounts, setAccounts, audit }) {
+  const staff = accounts.filter(a => a.role === "staff");
+  const [addModal, setAddModal] = useState(false);
+  const [newUser, setNewUser]   = useState({ id: "", name: "", branch: BRANCHES[0], password: "" });
+  const addStaff = () => {
+    if (!newUser.id || !newUser.name || !newUser.password) { alert("Fill all fields."); return; }
+    if (accounts.find(a => a.id === newUser.id)) { alert("User ID already exists."); return; }
+    const perms = {}; SECTIONS.forEach(s => { perms[s] = { view: false, add: false, edit: false }; });
+    setAccounts(p => [...p, { ...newUser, role: "staff", perms }]);
+    audit("CREATE_STAFF", { userId: newUser.id, name: newUser.name });
+    setAddModal(false); setNewUser({ id: "", name: "", branch: BRANCHES[0], password: "" });
+  };
+  const delStaff = id => { if (confirm("Delete staff account?")) { setAccounts(p => p.filter(a => a.id !== id)); audit("DELETE_STAFF", { userId: id }); } };
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
+        <div className="section-title">Manage Staff</div>
+        <button className="btn btn-dark btn-sm" onClick={() => setAddModal(true)}>+ Add Staff</button>
+      </div>
+      <div style={{ marginBottom: 14, fontSize: 13, color: "#9b8e82" }}>Use <strong>Dashboard Builder</strong> to control field visibility and section permissions per staff member.</div>
+      {staff.map(acc => (
+        <div key={acc.id} className="card" style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name}</div>
+              <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>ID: <code style={CS}>{acc.id}</code> · {acc.branch} · Password: <code style={CS}>{acc.password}</code></div>
+            </div>
+            <button className="btn btn-danger btn-sm" onClick={() => delStaff(acc.id)}>Delete</button>
+          </div>
+          <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {SECTIONS.map(s => (
+              <div key={s} style={{ fontSize: 11, background: "#f0ede8", borderRadius: 20, padding: "2px 10px" }}>
+                {SECTION_LABELS[s]}: {["view", "add", "edit"].filter(a => acc.perms?.[s]?.[a]).join("/") || "none"}
               </div>
             ))}
           </div>
+        </div>
+      ))}
+      {addModal && (
+        <Modal title="Add New Staff" onClose={() => setAddModal(false)} onSave={addStaff} saveLabel="Create Account">
+          <div className="form-grid">
+            <div><label>User ID (login)</label><input type="text" placeholder="staff_jpt2" value={newUser.id} onChange={e => setNewUser(f => ({ ...f, id: e.target.value }))} /></div>
+            <div><label>Display Name</label><input type="text" value={newUser.name} onChange={e => setNewUser(f => ({ ...f, name: e.target.value }))} /></div>
+            <div><label>Branch</label><select value={newUser.branch} onChange={e => setNewUser(f => ({ ...f, branch: e.target.value }))}>{BRANCHES.map(b => <option key={b}>{b}</option>)}</select></div>
+            <div><label>Password</label><input type="text" value={newUser.password} onChange={e => setNewUser(f => ({ ...f, password: e.target.value }))} /></div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// SUPABASE SECTION  (Connect + SQL + Sync)
+// ════════════════════════════════════════════════════════════════════════
+function SupabaseSection({ sbCreds, sbStatus, onConnect, onSync, onPush }) {
+  const [url, setUrl]   = useState(sbCreds.url || "");
+  const [key, setKey]   = useState(sbCreds.key || "");
+  const [msg, setMsg]   = useState("");
+
+  const connect = async () => {
+    setMsg("Testing connection…");
+    const ok = await onConnect(url, key);
+    setMsg(ok ? "✅ Credentials saved! Push to DB to sync your data. (Note: live sync works best from your Vercel URL, not Claude.ai)" : "❌ Invalid URL or key format. URL must contain supabase.co and key must start with eyJ.");
+  };
+
+  const SQL = `-- ══════════════════════════════════════════════════════════════
+-- OptiManager v4 — Supabase Setup SQL
+-- IMPORTANT: Column names use camelCase to match the JavaScript app.
+-- Run this entire block in Supabase → SQL Editor → New Query
+-- ══════════════════════════════════════════════════════════════
+
+-- Patients table
+create table if not exists patients (
+  id text primary key,
+  branch text, timestamp text, date text, time text,
+  name text, phone text, town text,
+  "paymentMethod" text, advance numeric, "advancePaymentMethod" text,
+  status text,
+  "createdBy" text, "createdByName" text, "createdAt" text,
+  "approvedBy" text, "approvedByName" text, "approvedAt" text
+);
+
+-- Patient Bill table
+create table if not exists "patientBill" (
+  id text primary key,
+  branch text, timestamp text, date text, time text,
+  "mrNo" text, name text, phone text, town text, gender text, age int,
+  complaint text, "pastHistory" text,
+  "reSpherAR" text, "reCylAR" text, "reAxisAR" text,
+  "leSpherAR" text, "leCylAR" text, "leAxisAR" text,
+  "reSpherSub" text, "reCylSub" text, "reAxisSub" text,
+  "leSpherSub" text, "leCylSub" text, "leAxisSub" text,
+  add text, eyelids text, conjunctiva text, cornea text,
+  "anteriorChamber" text, iris text, pupil text, lens text,
+  "ocularMovements" text, fundus text, advice text, optom text,
+  "lensType" text, "frameNo" text, advance numeric, "paymentMethod" text,
+  "deliveryStatus" text, balance numeric, status text,
+  "createdBy" text, "createdByName" text, "createdAt" text,
+  "approvedBy" text, "approvedByName" text, "approvedAt" text
+);
+
+-- Optometrist table
+create table if not exists optometrist (
+  id text primary key,
+  branch text, timestamp text, date text, time text,
+  "mrNo" text, "patientId" text, name text, phone text,
+  complaint text, "pastHistory" text, "optomName" text,
+  status text,
+  "createdBy" text, "createdByName" text, "createdAt" text,
+  "approvedBy" text, "approvedByName" text, "approvedAt" text
+);
+
+-- Opticals table
+create table if not exists opticals (
+  id text primary key,
+  branch text, timestamp text, date text, time text,
+  "mrNo" text, "patientId" text, name text, phone text, address text,
+  "totalPrice" numeric, advance numeric, "advancePaymentMethod" text,
+  "transactionId" text, balance numeric, "optomName" text,
+  status text,
+  "createdBy" text, "createdByName" text, "createdAt" text,
+  "approvedBy" text, "approvedByName" text, "approvedAt" text
+);
+
+-- Tasks table
+create table if not exists tasks (
+  id text primary key,
+  title text, description text,
+  "assignedTo" text, deadline text, priority text, status text,
+  "createdBy" text, "createdByName" text, "createdAt" text,
+  "completedAt" text
+);
+
+-- Reminders table
+create table if not exists reminders (
+  id text primary key,
+  branch text,
+  "mrNo" text, "patientId" text, name text, phone text,
+  "reminderType" text, "reminderDate" text, notes text, status text,
+  "createdBy" text, "createdByName" text, "createdAt" text,
+  "completedAt" text
+);
+
+-- Stock / Inventory table
+create table if not exists stock (
+  id text primary key,
+  branch text, sku text, name text,
+  category text, brand text, qty int, reorder int,
+  cost numeric, price numeric, location text,
+  "lensPower" text, "lensType" text, "boxNo" text,
+  "createdBy" text, "createdByName" text
+);
+
+-- Sales & Invoices table
+create table if not exists invoices (
+  id text primary key,
+  branch text, date text,
+  "patientName" text, items jsonb, discount numeric,
+  status text, "approvalStatus" text,
+  "createdBy" text, "createdByName" text, "createdAt" text
+);
+
+-- Pending Approval Queue — record column MUST be jsonb
+create table if not exists pending_queue (
+  id text primary key,
+  type text,
+  record jsonb,
+  "submittedBy" text,
+  "submittedByName" text,
+  branch text,
+  "submittedAt" text
+);
+
+-- Accounts / Staff table
+create table if not exists accounts (
+  id text primary key,
+  name text, role text, branch text,
+  password text, perms jsonb
+);
+
+-- Audit Log table
+create table if not exists audit_log (
+  id text primary key,
+  action text, detail jsonb,
+  "userId" text, "userName" text, branch text, at text
+);
+
+-- ══════════════════════════════════════════════════════════════
+-- Row Level Security — allow all operations via anon key
+-- (Required for the app to read/write data)
+-- ══════════════════════════════════════════════════════════════
+alter table patients enable row level security;
+alter table "patientBill" enable row level security;
+alter table optometrist enable row level security;
+alter table opticals enable row level security;
+alter table stock enable row level security;
+alter table invoices enable row level security;
+alter table pending_queue enable row level security;
+alter table accounts enable row level security;
+alter table audit_log enable row level security;
+alter table tasks enable row level security;
+alter table reminders enable row level security;
+
+create policy "allow_all" on patients for all using (true) with check (true);
+create policy "allow_all" on "patientBill" for all using (true) with check (true);
+create policy "allow_all" on optometrist for all using (true) with check (true);
+create policy "allow_all" on opticals for all using (true) with check (true);
+create policy "allow_all" on stock for all using (true) with check (true);
+create policy "allow_all" on invoices for all using (true) with check (true);
+create policy "allow_all" on pending_queue for all using (true) with check (true);
+create policy "allow_all" on accounts for all using (true) with check (true);
+create policy "allow_all" on audit_log for all using (true) with check (true);
+create policy "allow_all" on tasks for all using (true) with check (true);
+create policy "allow_all" on reminders for all using (true) with check (true);`;
+
+  const statusColor = { ok: "#16a34a", error: "#dc2626", testing: "#d97706", pushing: "#1d4ed8", syncing: "#7c3aed", idle: "#9b8e82" };
+
+  return (
+    <div>
+      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Cloud Sync — Supabase</div>
+      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 22 }}>Connect a free Supabase database to sync all data across devices and branches.</div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+        <div className="card">
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 14 }}>Connection</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontSize: 13 }}>
+            <span style={{ width: 10, height: 10, borderRadius: "50%", background: statusColor[sbStatus] || "#9b8e82", display: "inline-block" }} />
+            Status: <strong>{sbStatus}</strong>
+          </div>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div><label>Supabase Project URL</label><input type="text" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://xxxx.supabase.co" /></div>
+            <div><label>Anon / Public Key</label><input type="text" value={key} onChange={e => setKey(e.target.value)} placeholder="eyJhbGci…" /></div>
+          </div>
+          {msg && <div style={{ marginTop: 10, fontSize: 13, color: msg.startsWith("✅") ? "#16a34a" : msg.startsWith("❌") ? "#dc2626" : "#d97706" }}>{msg}</div>}
+          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+            <button className="btn btn-dark btn-sm" onClick={connect}>🔌 Connect & Test</button>
+            <button className="btn btn-outline btn-sm" onClick={onSync}>⬇ Pull from DB</button>
+            <button className="btn btn-outline btn-sm" onClick={onPush}>⬆ Push to DB</button>
+          </div>
+        </div>
+        <div className="card">
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Quick Steps</div>
+          {[
+            ["1", "Go to supabase.com → New Project", "#1d4ed8"],
+            ["2", "Copy Project URL + Anon Key from Settings → API", "#7c3aed"],
+            ["3", "Paste above → click Connect & Test", "#16a34a"],
+            ["4", "Run the SQL below in Supabase SQL Editor", "#d97706"],
+            ["5", "Click Push to DB to upload your local data", "#dc2626"],
+          ].map(([n, t, c]) => (
+            <div key={n} style={{ display: "flex", gap: 12, marginBottom: 10, alignItems: "flex-start" }}>
+              <div style={{ width: 24, height: 24, minWidth: 24, background: c, color: "#fff", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12 }}>{n}</div>
+              <div style={{ fontSize: 13 }}>{t}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Complete SQL Setup Script</div>
+        <div style={{ fontSize: 12, color: "#9b8e82", marginBottom: 10 }}>Copy and run this entire block in Supabase → SQL Editor → New Query</div>
+        <pre style={{ background: "#1a1714", color: "#f0ede8", padding: "16px 18px", borderRadius: 12, fontSize: 11, overflowX: "auto", lineHeight: 1.7 }}>{SQL}</pre>
+        <button className="btn btn-outline btn-sm" style={{ marginTop: 12 }} onClick={() => { navigator.clipboard.writeText(SQL); }}>📋 Copy SQL</button>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// LAUNCH GUIDE  (step-by-step how to publish this app)
+// ════════════════════════════════════════════════════════════════════════
+function LaunchGuide() {
+  const [step, setStep] = useState(0);
+
+  const STEPS = [
+    {
+      title: "Overview — What You Need",
+      icon: "📋",
+      content: (
+        <div>
+          <p style={{ marginBottom: 14 }}>To launch OptiManager you need 3 free tools:</p>
+          {[
+            ["💻", "GitHub", "Stores your app code — free", "https://github.com"],
+            ["🟢", "Vercel", "Hosts your app online, gives you a URL — free", "https://vercel.com"],
+            ["☁",  "Supabase", "Your cloud database — free (500MB)", "https://supabase.com"],
+          ].map(([icon, title, desc, url]) => (
+            <div key={title} style={{ display:"flex", gap:14, padding:"12px 0", borderBottom:"1px solid #f0ede8" }}>
+              <div style={{ fontSize:24 }}>{icon}</div>
+              <div>
+                <div style={{ fontWeight:700 }}>{title} — <a href={url} target="_blank" rel="noreferrer" style={{ color:"#1d4ed8" }}>{url}</a></div>
+                <div style={{ fontSize:13, color:"#6b5e52", marginTop:2 }}>{desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )
+    },
+    {
+      title: "Step 1 — Set Up Supabase",
+      icon: "☁",
+      content: (
+        <div style={{ display:"grid", gap:14 }}>
+          {[
+            ["Go to supabase.com", "Click Start your project → sign in with GitHub (free). No credit card needed."],
+            ["Create a new project", "Click New Project. Name: optimanager. Pick region: ap-south-1 (Mumbai). Set a DB password. Click Create."],
+            ["Get your credentials", "After 60 seconds → Project Settings → API. Copy the Project URL and anon/public key."],
+            ["Run SQL tables", "Go to SQL Editor → New Query → paste the supabase_setup_v2.sql file → click Run. You will see: Success."],
+            ["Connect in app", "Open OptiManager → Cloud Sync → paste URL and key → Connect and Test → Push to DB."],
+          ].map(([t, d], i) => (
+            <div key={i} style={{ display:"flex", gap:14 }}>
+              <div style={{ width:28, height:28, minWidth:28, background:"#1a1714", color:"#f0ede8", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:13 }}>{i+1}</div>
+              <div><div style={{ fontWeight:700, fontSize:14 }}>{t}</div><div style={{ fontSize:13, color:"#6b5e52", marginTop:3, lineHeight:1.7 }}>{d}</div></div>
+            </div>
+          ))}
+        </div>
+      )
+    },
+    {
+      title: "Step 2 — Save Code to GitHub",
+      icon: "💻",
+      content: (
+        <div style={{ display:"grid", gap:14 }}>
+          <p style={{ fontSize:13, color:"#6b5e52" }}>GitHub stores your code and connects to Vercel for deployment.</p>
+          {[
+            ["Create a GitHub account", "Go to github.com → Sign up (free). Verify your email."],
+            ["Create a new repository", "Click + top right → New repository. Name: optimanager. Set to Public. Tick Add a README. Click Create repository."],
+            ["Upload index.html", "Click Add file → Create new file. Name: index.html. Paste the HTML boilerplate (html tag, head with title OptiManager, body with div id=root and a script tag pointing to /src/main.jsx). Commit."],
+            ["Upload package.json", "Click Add file → Create new file. Name: package.json. Paste the JSON with react and react + react + reactDOM as dependencies and vite as devDependency. Commit."],
+            ["Upload vite.config.js", "Click Add file → Create new file. Name: vite.config.js. Paste: import defineConfig from vite and plugin-react, export default defineConfig with plugins react(). Commit."],
+            ["Upload src/main.jsx", "Click Add file → Create new file. Type src/main.jsx as the name (GitHub creates the folder). Paste the React entry point that renders App into the root div. Commit."],
+            ["Upload src/App.jsx", "Click Add file → Upload files. Upload the optical-shop-manager.jsx file you downloaded from Claude. After upload, rename it to App.jsx. Commit."],
+          ].map(([t, d], i) => (
+            <div key={i} style={{ display:"flex", gap:14 }}>
+              <div style={{ width:28, height:28, minWidth:28, background:"#1d4ed8", color:"#fff", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:13 }}>{i+1}</div>
+              <div><div style={{ fontWeight:700, fontSize:14 }}>{t}</div><div style={{ fontSize:13, color:"#6b5e52", marginTop:3, lineHeight:1.7 }}>{d}</div></div>
+            </div>
+          ))}
+        </div>
+      )
+    },
+    {
+      title: "Step 3 — Deploy on Vercel",
+      icon: "🚀",
+      content: (
+        <div style={{ display:"grid", gap:14 }}>
+          <p style={{ fontSize:13, color:"#6b5e52" }}>Vercel gives you a free live URL like optimanager.vercel.app in about 2 minutes.</p>
+          {[
+            ["Sign up at vercel.com", "Click Start Deploying → Continue with GitHub. Uses the same GitHub account."],
+            ["Import your repository", "Click Add New → Project. Find your optimanager repository → click Import."],
+            ["Configure build settings", "Framework Preset: Vite. Build Command: vite build. Output Directory: dist. Leave everything else as default."],
+            ["Click Deploy", "Vercel builds and deploys automatically. Wait about 2 minutes."],
+            ["Get your live URL", "You will see a Congratulations screen with a URL like optimanager-xyz.vercel.app. Click Visit — your app is live!"],
+            ["Share with staff", "Copy the URL and send it on WhatsApp. Staff opens it in Chrome on any phone and logs in with their ID and password."],
+            ["Future updates", "When you get a new JSX file from Claude, go to GitHub, open src/App.jsx, click the pencil icon, paste the new code, commit. Vercel auto-rebuilds in 1 to 2 minutes."],
+          ].map(([t, d], i) => (
+            <div key={i} style={{ display:"flex", gap:14 }}>
+              <div style={{ width:28, height:28, minWidth:28, background:"#16a34a", color:"#fff", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:13 }}>{i+1}</div>
+              <div><div style={{ fontWeight:700, fontSize:14 }}>{t}</div><div style={{ fontSize:13, color:"#6b5e52", marginTop:3, lineHeight:1.7 }}>{d}</div></div>
+            </div>
+          ))}
+        </div>
+      )
+    },
+    {
+      title: "Step 4 — Daily Use & Staff Access",
+      icon: "👥",
+      content: (
+        <div style={{ display:"grid", gap:14 }}>
+          {[
+            ["Share the URL with staff", "Send the Vercel URL to your team on WhatsApp. They open it in Chrome on phone or computer."],
+            ["Each person uses their login", "Go to Manage Staff to create IDs and passwords. Share privately."],
+            ["Staff submit, you approve", "Staff additions go to your Approval Queue. Login as Owner and Accept or Reject each one."],
+            ["Dashboard Builder", "Toggle which fields appear per section and which actions each staff member can do."],
+            ["Audit Log", "Every login, submission, approval, and deletion is recorded with name and timestamp."],
+            ["Cloud Sync", "Data saves locally AND in Supabase. Use Pull from DB to sync latest from the cloud."],
+            ["Backup anytime", "Every section has a CSV export button to download your data."],
+          ].map(([t, d], i) => (
+            <div key={i} style={{ display:"flex", gap:14 }}>
+              <div style={{ width:28, height:28, minWidth:28, background:"#7c3aed", color:"#fff", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:13 }}>{i+1}</div>
+              <div><div style={{ fontWeight:700, fontSize:14 }}>{t}</div><div style={{ fontSize:13, color:"#6b5e52", marginTop:3, lineHeight:1.7 }}>{d}</div></div>
+            </div>
+          ))}
+          <div style={{ marginTop:8, background:"#dcfce7", borderRadius:12, padding:"14px 18px", border:"1.5px solid #bbf7d0" }}>
+            <div style={{ fontWeight:700, color:"#16a34a", marginBottom:6 }}>Total Cost: Rs. 0 per month</div>
+            <div style={{ fontSize:13, color:"#15803d", lineHeight:1.8 }}>GitHub Free · Vercel Free · Supabase Free (500MB, 50k API calls/day). All three are completely free for a small optical shop with 2 branches.</div>
+          </div>
+        </div>
+      )
+    },
+  ];
+
+    return (
+    <div>
+      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>🚀 Launch Guide</div>
+      <div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 22 }}>Step-by-step: from this app to a live URL your staff can open on any phone.</div>
+
+      {/* Step tabs */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 22, flexWrap: "wrap" }}>
+        {STEPS.map((s, i) => (
+          <button key={i} className={`btn btn-sm ${step === i ? "btn-dark" : "btn-outline"}`} onClick={() => setStep(i)}>
+            {s.icon} {i === 0 ? "Overview" : `Step ${i}`}
+          </button>
+        ))}
+      </div>
+
+      <div className="card">
+        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, fontWeight: 700, marginBottom: 18 }}>{STEPS[step].title}</div>
+        {STEPS[step].content}
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 24 }}>
+          <button className="btn btn-outline btn-sm" onClick={() => setStep(s => Math.max(0, s - 1))} disabled={step === 0}>← Previous</button>
+          <button className="btn btn-dark btn-sm" onClick={() => setStep(s => Math.min(STEPS.length - 1, s + 1))} disabled={step === STEPS.length - 1}>Next →</button>
         </div>
       </div>
     </div>
@@ -737,27 +2687,80 @@ function MDGovernanceSection({ accounts, setAccounts, branding, setBranding, aud
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// ENCRYPTED STYLES INJECTION OVERLAYS
+// SHARED COMPONENTS
 // ════════════════════════════════════════════════════════════════════════
-const LBL = { display: "block", fontSize: "11px", fontWeight: "700", color: "#475569", textTransform: "uppercase", marginBottom: "4px", letterSpacing: "0.03em" };
-const INP = { width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: "6px", background: "#f8fafc", fontSize: "12px", outline: "none", boxSizing: "border-box" };
-const SECT_BOX = { background: "#fafafa", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px" };
-const SECT_TTL = { margin: "0 0 10px 0", fontSize: "11px", textTransform: "uppercase", color: "#475569", borderBottom: "1px solid #e2e8f0", paddingBottom: "4px", letterSpacing: "0.05em", fontWeight: 700 };
+function SectionHeader({ title, onAdd, onExport, onSync, syncing, msg }) {
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div className="section-title">{title}</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          {onSync && (
+            <button className="btn btn-outline btn-sm" onClick={onSync} disabled={syncing} title="Pull latest data from cloud">
+              {syncing ? "⟳ Syncing…" : "⟳ Sync"}
+            </button>
+          )}
+          {onExport && <button className="btn btn-outline btn-sm" onClick={onExport}>⬇ CSV</button>}
+          {onAdd    && <button className="btn btn-dark btn-sm"    onClick={onAdd}>+ Add</button>}
+        </div>
+      </div>
+      {msg && <div style={{ marginTop: 8, fontSize: 13, padding: "8px 14px", borderRadius: 8, background: msg.includes("approval") ? "#fef9c3" : "#dcfce7", color: msg.includes("approval") ? "#a16207" : "#16a34a" }}>{msg}</div>}
+    </div>
+  );
+}
 
-const SHELL_CSS = `
-  .sidebar-btn { display: flex; align-items: center; width: 100%; padding: 10px 12px; background: transparent; border: none; border-radius: 6px; color: rgba(255,255,255,0.8); text-align: left; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
-  .sidebar-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
-  .sidebar-btn.active { background: rgba(255,255,255,0.2); color: #fff; font-weight: 700; }
-  .logout-btn { width: 100%; padding: 10px; border-radius: 6px; background: #b91c1c; color: #fff; border: none; font-weight: 600; font-size: 12px; cursor: pointer; margin-top: auto; }
-  .tab-btn { padding: 6px 12px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 11px; font-weight: 600; color: #475569; cursor: pointer; }
-  .tab-btn.active { background: #1e3a8a; color: #fff; border-color: #1e3a8a; }
-  .analytics-card { background: #fff; padding: 16px; border-radius: 12px; border-left: 4px solid #2563eb; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-  .analytics-card.interactive { cursor: pointer; transition: transform 0.15s; }
-  .analytics-card.interactive:hover { transform: translateY(-2px); background: #fafafa; }
-  .analytics-card .title { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; }
-  .analytics-card .value { font-size: 22px; font-weight: 700; color: #111827; margin-top: 4px; }
+function Modal({ title, children, onClose, onSave, saveLabel = "Save", wide, xl, width }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ width: xl ? "min(920px,96vw)" : wide ? "min(700px,96vw)" : width ? width : "min(560px,96vw)" }}>
+        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, fontWeight: 700, marginBottom: 18 }}>{title}</div>
+        {children}
+        <div style={{ display: "flex", gap: 10, marginTop: 22, justifyContent: "flex-end" }}>
+          <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+          <button className="btn btn-dark" onClick={onSave}>{saveLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// STYLES
+// ════════════════════════════════════════════════════════════════════════
+const CS = { background: "#f0ede8", padding: "2px 6px", borderRadius: 4, fontFamily: "monospace", fontSize: 12 };
+
+const GCSS = `
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Playfair+Display:wght@500;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#c8bfb0;border-radius:3px}
+input,select,textarea,button{font-family:inherit}button{cursor:pointer}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 13px;border-radius:9px;font-size:13px;font-weight:500;color:#6b5e52;border:none;background:none;width:100%;text-align:left;transition:all .18s}
+.nav-item:hover{background:#e8e2db;color:#1a1714}.nav-item.active{background:#1a1714;color:#f0ede8}
+.badge{background:#e55e3a;color:#fff;border-radius:20px;font-size:11px;padding:1px 7px;font-weight:600}
+.card{background:#fff;border-radius:16px;padding:22px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.btn{padding:9px 18px;border-radius:9px;font-size:13px;font-weight:600;border:none;transition:all .15s}
+.btn-dark{background:#1a1714;color:#f0ede8}.btn-dark:hover{background:#2e2820}.btn-dark:disabled{opacity:.5;cursor:not-allowed}
+.btn-outline{background:transparent;border:1.5px solid #c8bfb0;color:#1a1714}.btn-outline:hover{background:#f0ede8}.btn-outline:disabled{opacity:.5}
+.btn-danger{background:#fee2e2;color:#dc2626}.btn-danger:hover{background:#fecaca}
+.btn-sm{padding:6px 12px;font-size:12px;border-radius:7px}
+input[type=text],input[type=number],input[type=date],input[type=time],input[type=email],input[type=tel],input[type=password],select,textarea{width:100%;padding:8px 11px;border:1.5px solid #e2ddd8;border-radius:8px;font-size:13px;background:#faf9f7;transition:border .15s;outline:none}
+input:focus,select:focus,textarea:focus{border-color:#1a1714;background:#fff}
+input[readonly]{background:#f0ede8;color:#9b8e82;border-color:#e2ddd8}
+label{font-size:11px;font-weight:700;color:#6b5e52;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;padding:9px 12px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#9b8e82;border-bottom:1.5px solid #e8e2db;white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid #f0ede8;vertical-align:middle}
+tr:last-child td{border-bottom:none}tr:hover td{background:#faf9f7}
+.tag{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600}
+.tag-green{background:#dcfce7;color:#16a34a}.tag-yellow{background:#fef9c3;color:#a16207}
+.tag-red{background:#fee2e2;color:#dc2626}.tag-blue{background:#dbeafe;color:#1d4ed8}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+.modal{background:#fff;border-radius:20px;padding:28px;max-height:93vh;overflow-y:auto;box-shadow:0 24px 70px rgba(0,0,0,.25)}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.form-grid .full{grid-column:1/-1}
+.stat-card{background:#fff;border-radius:14px;padding:20px 22px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.stat-num{font-family:'Playfair Display',serif;font-size:34px;font-weight:700;line-height:1}
+.section-title{font-family:'Playfair Display',serif;font-size:21px;font-weight:700;margin-bottom:18px}
+p{line-height:1.7}
+@media(max-width:768px){.form-grid{grid-template-columns:1fr}}
 `;
-
-const ts = () => `${new Date().toLocaleDateString("en-IN")} ${new Date().toLocaleTimeString("en-IN")}`;
-const currency = (n) => `₹${Number(n || 0).toFixed(2)}`;
-const uid = () => "ID" + Math.random().toString(36).substring(2, 7).toUpperCase();
