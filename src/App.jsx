@@ -101,13 +101,19 @@ async function sbUpsertOne(table, row) {
 }
 
 async function sbUpsertMany(table, rows) {
-  if (!_sb || !rows.length) return true;
+  if (!_sb) return { ok: false, error: "Not connected" };
+  if (!rows.length) return { ok: true, error: null };
   try {
     const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}`, {
       method: "POST", headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(rows),
     });
-    return r.ok;
-  } catch(e) { return false; }
+    if (!r.ok) {
+      const t = await r.text().catch(() => "");
+      console.warn(`sbUpsertMany ${table} HTTP ${r.status}:`, t);
+      return { ok: false, error: `HTTP ${r.status}: ${t.slice(0, 200)}` };
+    }
+    return { ok: true, error: null };
+  } catch(e) { return { ok: false, error: String(e) }; }
 }
 
 async function sbDelete(table, id) {
@@ -166,6 +172,7 @@ const safeArray = (arr, fallback = []) => Array.isArray(arr) ? arr : fallback;
 export default function App() {
   const [session,  setSession]  = useState(() => LS.getSess());
   const [accounts, setAccounts] = useState(() => safeArray(LS.get("opti_accounts", DEFAULT_ACCOUNTS), DEFAULT_ACCOUNTS));
+  const accountsWriteInFlight = useRef(false);
   const [data,     setData]     = useState(() => { const d = LS.get("opti_data_v4", SEED_DATA); return d && typeof d === 'object' ? d : SEED_DATA; });
   const [auditLog, setAuditLog] = useState(() => safeArray(LS.get("opti_audit", [])));
   const [fieldVis, setFieldVis] = useState(() => LS.get("opti_fields", DEFAULT_FIELD_VISIBILITY) || DEFAULT_FIELD_VISIBILITY);
@@ -204,7 +211,7 @@ export default function App() {
         reminders:   Array.isArray(rems)  ? rems  : safeArray(d.reminders),
       }));
 
-      if (Array.isArray(accs) && accs.length > 0) { setAccounts(accs); LS.set("opti_accounts", accs); }
+      if (Array.isArray(accs) && accs.length > 0 && !accountsWriteInFlight.current) { setAccounts(accs); LS.set("opti_accounts", accs); }
       setLastSync(new Date()); setSbStatus("ok");
     } catch(e) { setSbStatus("error"); }
     setSyncing(false);
@@ -268,20 +275,33 @@ export default function App() {
     setData(d => {
       const updated = typeof fn === "function" ? fn(safeArray(d[key])) : fn;
       if (sbReady()) {
-        if (newRecord) sbUpsertOne(key, newRecord).catch(() => {});
+        if (newRecord) {
+          sbUpsertOne(key, newRecord).then(result => {
+            if (!result.ok) {
+              alert(`Warning: This record could not be saved to the cloud.\n\nReason: ${result.error}\n\nIt is only stored on this device for now. This is usually caused by a missing column in the Supabase "${SB_TABLES[key] || key}" table.`);
+            }
+          });
+        }
         else if (Array.isArray(updated)) sbUpsertMany(key, updated).catch(() => {});
       }
       return { ...d, [key]: updated };
     });
   }, []);
 
-  // FIXED BUG: Properly handles functional state updates so Dashboard Builder checkboxes work
+  // Surfaces real Supabase errors so a failed write never looks like
+  // "data got wiped" — the user is told exactly what happened.
   const updateAccounts = useCallback((updater) => {
     setAccounts(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       const cleanNext = safeArray(next, DEFAULT_ACCOUNTS);
       if (sbReady()) {
-        sbUpsertMany("accounts", cleanNext).catch(e => console.warn("Accounts sync failed", e));
+        accountsWriteInFlight.current = true;
+        sbUpsertMany("accounts", cleanNext).then(result => {
+          accountsWriteInFlight.current = false;
+          if (!result.ok) {
+            alert(`Warning: Staff changes could not be saved to the cloud.\n\nReason: ${result.error}\n\nYour change is only stored on this device for now and may be lost on next sync. This is usually caused by a missing column in the Supabase "accounts" table — ask your admin to check the database schema.`);
+          }
+        });
       }
       return cleanNext;
     });
@@ -1332,7 +1352,7 @@ function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
   };
 
   const submit = () => {
-    if (!form.name.trim()) || !form.reminderDate) { setMsg("Name and reminder date required."); return; }
+    if (!form.name.trim() || !form.reminderDate) { setMsg("Name and reminder date required."); return; }
     const record = { id: uid(), ...form, status: "pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
     mutate("reminders", arr => [...arr, record], record); audit("REMINDER_ADD", { name: form.name, type: form.reminderType }); setModal(false); setMsg("Reminder set.");
   };
@@ -1477,5 +1497,3 @@ function Modal({ title, children, onClose, onSave, saveLabel = "Save", wide, xl,
     </div>
   );
 }
-
-export default App;
