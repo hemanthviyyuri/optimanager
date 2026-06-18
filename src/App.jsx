@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 
 // ════════════════════════════════════════════════════════════════════════
-// v4.11 — Ophthalmology HMS | Fixed Schema Cache Error (_lookup strip)
+// v4.9 — Ophthalmology HMS | Fixed Permissions Bug · Staff Editing
 // ════════════════════════════════════════════════════════════════════════
-const APP_VER  = "4.11";
+const APP_VER  = "4.10";
 const BRANCHES = ["JPT Branch", "PRP Branch"];
 const SECTIONS = ["patients","patientBill","optometrist","opticals","inventory","invoices","alerts"];
 const SECTION_LABELS = { patients:"OP Registration", patientBill:"K Sheet Entry", optometrist:"Optometrist", opticals:"Opticals", inventory:"Inventory", invoices:"Sales & Invoices", alerts:"Low Stock Alerts" };
@@ -858,16 +858,18 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
   );
 
   const submit = () => {
-    const { _lookup, ...cleanForm } = form; // Strip out the temporary search field
-    const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...cleanForm, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
     mutate("patientBill", arr => [...arr, record], record); 
-    audit("ADD",{type:"patientBill",name:cleanForm.name}); 
+    audit("ADD",{type:"patientBill",name:form.name}); 
     setModal(false); setMsg("K Sheet saved successfully.");
   };
 
   const del = id => { if (confirm("Delete K Sheet?")) { mutate("patientBill", arr => arr.filter(x => x.id!==id)); audit("DELETE",{type:"patientBill",id}); } };
 
   // ── Designation-based tab access control ─────────────────────────────
+  // Owner / MD / DEVELOPER / OPTOMOLOGIST → all 5 clinical tabs
+  // OPTOM → tabs 1–4 (no eye exam / MD tab)
+  // FRONT DESK STAFF → tab 1 only (patient info)
   const ALL_TABS = [
     { id:"basic",  label:"1. Patient Info" },
     { id:"vitals", label:"2. History & Vitals (Optom)" },
@@ -1038,8 +1040,7 @@ function OptometristSection({ session, data, mutate, can, audit, onSync, syncing
 
   const submit = () => {
     if (!form.name.trim()) { setMsg("Patient name required."); return; }
-    const { _lookup, ...cleanForm } = form; // Strip out the temporary search field
-    const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...cleanForm, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
     mutate("optometrist", arr=>[...arr, record], record); setModal(false); setMsg("Saved.");
   };
 
@@ -1111,8 +1112,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
 
   const submit = () => {
     if (!form.name.trim()) { setMsg("Patient name required."); return; }
-    const { _lookup, ...cleanForm } = form; // Strip out the temporary search field
-    const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...cleanForm, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
     mutate("opticals", arr=>[...arr, record], record); setModal(false); setMsg("Opticals saved.");
   };
 
@@ -1209,3 +1209,311 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
             </tr>
           ))}</tbody>
         </table>
+      </div>
+      {modal && (
+        <Modal title={modal === "add" ? "Add Stock" : "Edit Stock"} onClose={() => setModal(null)} onSave={save} saveLabel="Save Inventory">
+          <div className="form-grid">
+            <div><label>SKU</label><input type="text" value={form.sku} onChange={F("sku")} /></div><div><label>Category</label><select value={form.category} onChange={F("category")}>{["Frames", "Contact Lenses", "Lenses", "Accessories"].map(c => <option key={c}>{c}</option>)}</select></div>
+            <div className="full"><label>Name</label><input type="text" value={form.name} onChange={F("name")} /></div>
+            <div><label>Brand</label><input type="text" value={form.brand} onChange={F("brand")} /></div><div><label>Location</label><input type="text" value={form.location} onChange={F("location")} /></div>
+            <div><label>Qty</label><input type="number" value={form.qty} onChange={F("qty")} /></div><div><label>Reorder At</label><input type="number" value={form.reorder} onChange={F("reorder")} /></div>
+            <div><label>Cost (₹)</label><input type="number" value={form.cost} onChange={F("cost")} /></div><div><label>Price (₹)</label><input type="number" value={form.price} onChange={F("price")} /></div>
+            {form.category === "Lenses" && <><div><label>Lens Power</label><input type="text" placeholder="-2.50" value={form.lensPower} onChange={F("lensPower")} /></div><div><label>Lens Type</label><select value={form.lensType} onChange={F("lensType")}>{LENS_TYPES.map(l => <option key={l}>{l}</option>)}</select></div><div><label>Box Number</label><input type="text" placeholder="B-14" value={form.boxNo} onChange={F("boxNo")} /></div></>}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const rows    = safeArray(data.invoices).filter(x => (isOwner || x.branch === branch));
+  const [modal, setModal] = useState(false);
+  const [form,  setForm]  = useState({ patientName: "", date: todayStr(), items: [], discount: 0 });
+  const [lN, setLN] = useState(""); const [lQ, setLQ] = useState(1); const [lP, setLP] = useState(0);
+  const [msg, setMsg] = useState("");
+  
+  const addLine = () => { if (!lN.trim()) return; setForm(f => ({ ...f, items: [...f.items, { name: lN, qty: Number(lQ), price: Number(lP) }] })); setLN(""); setLQ(1); setLP(0); };
+  const sub = safeArray(form.items).reduce((s, l) => s + l.qty * l.price, 0);
+  
+  const save = () => {
+    if (!form.patientName || !form.items.length) return;
+    const record = { id: `INV-${uid().slice(0, 6).toUpperCase()}`, branch: isOwner ? "JPT Branch" : branch, ...form, discount: Number(form.discount), approvalStatus: "approved", status: "Pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    mutate("invoices", arr => [...arr, record], record); audit("ADD", { type: "invoices" }); setModal(false);
+  };
+  const total = inv => safeArray(inv.items).reduce((s, i) => s + i.qty * i.price, 0) - (inv.discount || 0);
+  
+  return (
+    <div>
+      <SectionHeader title="Sales & Invoices" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows, "invoices.csv")} onAdd={can("invoices", "add") ? () => { setForm({ patientName: "", date: todayStr(), items: [], discount: 0 }); setModal(true); } : null} msg={msg} />
+      <div className="card" style={{ overflowX: "auto" }}>
+        <table><thead><tr><th>Invoice</th><th>Date</th><th>Patient</th><th>Total</th><th>Status</th><th>By</th><th>Branch</th>{isOwner && <th></th>}</tr></thead>
+          <tbody>{rows.map(inv => (
+            <tr key={inv.id}>
+              <td style={{ fontWeight: 700 }}>{inv.id}</td><td>{inv.date}</td><td>{inv.patientName}</td><td style={{ fontWeight: 700 }}>{currency(total(inv))}</td>
+              <td><span className={`tag ${inv.status === "Paid" ? "tag-green" : "tag-yellow"}`}>{inv.status}</span></td><td style={{ fontSize: 11, color: "#9b8e82" }}>{inv.createdByName || "—"}</td><td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{inv.branch}</span></td>
+              <td style={{ display: "flex", gap: 5 }}>
+                {(isOwner || can("invoices", "edit")) && inv.status === "Pending" && <button className="btn btn-sm" style={{ background: "#dcfce7", color: "#16a34a", border: "none", fontWeight: 700 }} onClick={() => mutate("invoices", arr => arr.map(i => i.id === inv.id ? { ...i, status: "Paid" } : i))}>✓ Paid</button>}
+                {isOwner && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) mutate("invoices", arr => arr.filter(i => i.id !== inv.id)); }}>✕</button>}
+              </td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      {modal && (
+        <Modal title="New Invoice" onClose={() => setModal(false)} onSave={save} saveLabel="Create Invoice" wide>
+          <div className="form-grid" style={{ marginBottom: 14 }}><div><label>Patient Name</label><input type="text" value={form.patientName} onChange={e => setForm(f => ({ ...f, patientName: e.target.value }))} /></div><div><label>Date</label><input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div></div>
+          <label>Add Item</label>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}><input type="text" placeholder="Item name" value={lN} onChange={e => setLN(e.target.value)} style={{ flex: 2 }} /><input type="number" placeholder="Qty" value={lQ} onChange={e => setLQ(e.target.value)} style={{ width: 60 }} /><input type="number" placeholder="₹" value={lP} onChange={e => setLP(e.target.value)} style={{ width: 90 }} /><button className="btn btn-dark btn-sm" onClick={addLine}>Add</button></div>
+          {form.items.length > 0 && <div style={{ background: "#faf9f7", borderRadius: 10, padding: "10px 14px", marginBottom: 12 }}>{form.items.map((l, i) => <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>{l.name} × {l.qty}</span><span style={{ fontWeight: 600 }}>{currency(l.qty * l.price)}</span></div>)}<div style={{ borderTop: "1px solid #e8e2db", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontWeight: 700 }}><span>Sub</span><span>{currency(sub)}</span></div></div>}
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}><div style={{ flex: 1 }}><label>Discount (₹)</label><input type="number" value={form.discount} onChange={e => setForm(f => ({ ...f, discount: e.target.value }))} /></div><div style={{ flex: 1 }}><div style={{ fontSize: 11, color: "#9b8e82" }}>TOTAL</div><div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700 }}>{currency(sub - Number(form.discount))}</div></div></div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function AlertsSection({ session, data, mutate, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const low     = safeArray(data.stock).filter(s => (isOwner || s.branch === branch) && s.qty <= s.reorder);
+  const [modal, setModal] = useState(null); const [qty, setQty] = useState(0);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div className="section-title">Low Stock Alerts</div>
+        <div style={{ display: "flex", gap: 10 }}>{onSync && <button className="btn btn-outline btn-sm" onClick={onSync} disabled={syncing}>{syncing ? "⟳ Syncing…" : "⟳ Sync"}</button>}<button className="btn btn-outline btn-sm" onClick={() => exportCSV(low.map(({ id, ...r }) => r), "low_stock.csv")}>⬇ CSV</button></div>
+      </div>
+      {low.length === 0 ? <div className="card" style={{ textAlign: "center", padding: 48, color: "#9b8e82" }}><div style={{ fontSize: 36, marginBottom: 10 }}>✓</div><div style={{ fontWeight: 600 }}>All stock levels healthy</div></div> : low.map(s => (
+        <div key={s.id} style={{ background: "#fff9f5", border: "1.5px solid #fed7aa", borderRadius: 12, padding: "12px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div><div style={{ fontWeight: 700 }}>{s.name}</div><div style={{ fontSize: 12, color: "#9b8e82", marginTop: 2 }}>{s.sku} · {s.branch} · Box: {s.boxNo || "—"}</div></div>
+          <div style={{ display: "flex", gap: 14, alignItems: "center" }}><div style={{ textAlign: "right" }}><div style={{ fontSize: 11, color: "#9b8e82" }}>Stock / Reorder</div><div><span style={{ fontWeight: 700, color: "#dc2626", fontSize: 16 }}>{s.qty}</span><span style={{ color: "#9b8e82" }}> / {s.reorder}</span></div></div>{isOwner && <button className="btn btn-dark btn-sm" onClick={() => { setModal(s); setQty(s.reorder - s.qty + 10); }}>+ Restock</button>}</div>
+        </div>
+      ))}
+      {modal && <Modal title="Restock" onClose={() => setModal(null)} onSave={() => { mutate("stock", p => p.map(s => s.id === modal.id ? { ...s, qty: s.qty + Number(qty) } : s)); setModal(null); }} saveLabel="Update" width={360}><div style={{ fontSize: 13, color: "#9b8e82", marginBottom: 12 }}>{modal.name}</div><label>Units to Add</label><input type="number" min={1} value={qty} onChange={e => setQty(e.target.value)} /><div style={{ fontSize: 13, color: "#9b8e82", marginTop: 8 }}>New total: {modal.qty + Number(qty)}</div></Modal>}
+    </div>
+  );
+}
+
+function TasksSection({ session, data, mutate, audit, accounts, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const allTasks = safeArray(data.tasks);
+  const rows = isOwner ? allTasks : allTasks.filter(t => t.assignedTo === session.id);
+  const [modal, setModal] = useState(false); const [form,  setForm]  = useState({});
+  const [msg,   setMsg]   = useState(""); const [filter,setFilter]= useState("all"); 
+  const staffList = safeArray(accounts).filter(a => a.role === "staff");
+  const blank = () => ({ title: "", description: "", assignedTo: staffList[0]?.id || "", deadline: todayStr(), priority: "Medium" });
+  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const submit = () => {
+    if (!form.title.trim()) { setMsg("Task title required."); return; }
+    const record = { id: uid(), ...form, status: "pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    mutate("tasks", arr => [...arr, record], record); audit("TASK_ASSIGN", { title: form.title, assignedTo: form.assignedTo }); setModal(false); setMsg("Task assigned.");
+  };
+
+  const markDone = (task) => {
+    const updated = { ...task, status: "done", completedAt: ts() };
+    mutate("tasks", arr => arr.map(x => x.id === task.id ? updated : x), updated); audit("TASK_COMPLETE", { title: task.title });
+  };
+  const del = id => { if (confirm("Delete task?")) { mutate("tasks", arr => arr.filter(x => x.id !== id)); audit("DELETE", { type:"tasks", id }); } };
+  const isOverdue = t => t.status === "pending" && new Date(t.deadline) < new Date(todayStr());
+  const filtered = rows.filter(t => { if (filter === "pending") return t.status === "pending" && !isOverdue(t); if (filter === "done") return t.status === "done"; if (filter === "overdue") return isOverdue(t); return true; });
+  const staffName = id => staffList.find(s => s.id === id)?.name || id;
+  const priorityColor = p => ({ High:"#dc2626", Medium:"#d97706", Low:"#16a34a" }[p] || "#9b8e82");
+
+  return (
+    <div>
+      <SectionHeader title="Tasks" onSync={onSync} syncing={syncing} onAdd={isOwner ? () => { setForm(blank()); setMsg(""); setModal(true); } : null} msg={msg} />
+      <div style={{ display:"flex", gap:8, marginBottom:16 }}>{["all","pending","overdue","done"].map(f => (<button key={f} className={`btn btn-sm ${filter===f?"btn-dark":"btn-outline"}`} onClick={()=>setFilter(f)}>{f.charAt(0).toUpperCase()+f.slice(1)}</button>))}</div>
+      <div style={{ display:"grid", gap:10 }}>
+        {filtered.length === 0 && <div style={{ color:"#9b8e82", fontSize:13, padding:20, textAlign:"center" }}>No tasks here.</div>}
+        {filtered.map(t => (
+          <div key={t.id} className="card" style={{ padding:"16px 18px", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:14, borderLeft: `4px solid ${t.status==="done" ? "#16a34a" : isOverdue(t) ? "#dc2626" : priorityColor(t.priority)}` }}>
+            <div style={{ flex:1 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}><div style={{ fontWeight:700, fontSize:15, textDecoration: t.status==="done" ? "line-through" : "none", color: t.status==="done" ? "#9b8e82" : "#1a1714" }}>{t.title}</div><span style={{ fontSize:10, padding:"2px 8px", borderRadius:20, fontWeight:700, background:`${priorityColor(t.priority)}20`, color:priorityColor(t.priority) }}>{t.priority}</span>{isOverdue(t) && <span style={{ fontSize:10, padding:"2px 8px", borderRadius:20, fontWeight:700, background:"#fee2e2", color:"#dc2626" }}>⚠ Overdue</span>}{t.status==="done" && <span style={{ fontSize:10, padding:"2px 8px", borderRadius:20, fontWeight:700, background:"#dcfce7", color:"#16a34a" }}>✓ Done</span>}</div>
+              {t.description && <div style={{ fontSize:13, color:"#6b5e52", marginBottom:6 }}>{t.description}</div>}
+              <div style={{ fontSize:12, color:"#9b8e82", display:"flex", gap:14 }}><span>👤 {staffName(t.assignedTo)}</span><span>📅 Due {t.deadline}</span></div>
+            </div>
+            <div style={{ display:"flex", gap:8 }}>{t.status === "pending" && (!isOwner ? t.assignedTo === session.id : true) && (<button className="btn btn-outline btn-sm" onClick={()=>markDone(t)}>Mark Done</button>)}{isOwner && <button className="btn btn-danger btn-sm" onClick={()=>del(t.id)}>✕</button>}</div>
+          </div>
+        ))}
+      </div>
+      {modal && (
+        <Modal title="Assign Task" onClose={()=>setModal(false)} onSave={submit} saveLabel="Assign Task">
+          <div style={{ display:"grid", gap:14 }}>
+            <div><label>Title *</label><input type="text" value={form.title} onChange={F("title")} /></div><div><label>Description</label><textarea rows={3} value={form.description} onChange={F("description")} /></div>
+            <div><label>Assign To</label><select value={form.assignedTo} onChange={F("assignedTo")}>{staffList.map(s => <option key={s.id} value={s.id}>{s.name} ({s.branch})</option>)}</select></div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}><div><label>Deadline</label><input type="date" value={form.deadline} onChange={F("deadline")} /></div><div><label>Priority</label><select value={form.priority} onChange={F("priority")}><option>Low</option><option>Medium</option><option>High</option></select></div></div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const allReminders = safeArray(data.reminders);
+  const rows = isOwner ? allReminders : allReminders.filter(r => r.branch === branch);
+
+  const [modal, setModal] = useState(false); const [form,  setForm]  = useState({});
+  const [msg,   setMsg]   = useState(""); const [mrLookup, setMrLookup] = useState("");
+  const [filter, setFilter] = useState("upcoming");
+
+  const blank = () => ({ mrNo: "", patientId: "", name: "", phone: "", reminderType: "Lens Delivery", reminderDate: todayStr(), notes: "", branch: isOwner ? "JPT Branch" : branch });
+  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const lookupPatient = (query) => {
+    const found = safeArray(data.patients).find(p => p.mrNo?.toLowerCase() === query.toLowerCase() || p.patientId?.toLowerCase() === query.toLowerCase() || p.phone === query);
+    if (found) { setForm(f => ({ ...f, mrNo: found.mrNo||"", patientId: found.patientId||"", name: found.name, phone: found.phone })); setMrLookup(`✓ Found: ${found.name} (${found.patientId})`); } else { setMrLookup("No match found."); }
+  };
+
+  const submit = () => {
+    if (!form.name.trim() || !form.reminderDate) { setMsg("Name and reminder date required."); return; }
+    const record = { id: uid(), ...form, status: "pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    mutate("reminders", arr => [...arr, record], record); audit("REMINDER_ADD", { name: form.name, type: form.reminderType }); setModal(false); setMsg("Reminder set.");
+  };
+
+  const markDone = (rem) => { const updated = { ...rem, status: "done", completedAt: ts() }; mutate("reminders", arr => arr.map(x => x.id === rem.id ? updated : x), updated); };
+  const del = id => { if (confirm("Delete reminder?")) { mutate("reminders", arr => arr.filter(x => x.id !== id)); audit("DELETE", { type:"reminders", id }); } };
+  const isOverdue = r => r.status === "pending" && new Date(r.reminderDate) < new Date(todayStr());
+  const isToday    = r => r.reminderDate === todayStr();
+  const filtered = rows.filter(r => { if (filter === "upcoming") return r.status === "pending"; if (filter === "done") return r.status === "done"; return true; }).sort((a,b) => new Date(a.reminderDate) - new Date(b.reminderDate));
+  const typeIcon = t => ({ "Lens Delivery":"🕶", "Follow-up Visit":"🔁", "Payment Due":"💰", "Review":"📋" }[t] || "🔔");
+
+  return (
+    <div>
+      <SectionHeader title="Reminders" onSync={onSync} syncing={syncing} onAdd={() => { setForm(blank()); setMsg(""); setMrLookup(""); setModal(true); }} msg={msg} />
+      <div style={{ display:"flex", gap:8, marginBottom:16 }}>{["upcoming","done","all"].map(f => (<button key={f} className={`btn btn-sm ${filter===f?"btn-dark":"btn-outline"}`} onClick={()=>setFilter(f)}>{f.charAt(0).toUpperCase()+f.slice(1)}</button>))}</div>
+      <div style={{ display:"grid", gap:10 }}>
+        {filtered.length === 0 && <div style={{ color:"#9b8e82", fontSize:13, padding:20, textAlign:"center" }}>No reminders here.</div>}
+        {filtered.map(r => (
+          <div key={r.id} className="card" style={{ padding:"14px 18px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:14, borderLeft: `4px solid ${r.status==="done" ? "#16a34a" : isOverdue(r) ? "#dc2626" : isToday(r) ? "#d97706" : "#9b8e82"}` }}>
+            <div style={{ display:"flex", alignItems:"center", gap:12, flex:1 }}><div style={{ fontSize:22 }}>{typeIcon(r.reminderType)}</div><div><div style={{ fontWeight:700, fontSize:14, textDecoration: r.status==="done"?"line-through":"none", color: r.status==="done"?"#9b8e82":"#1a1714" }}>{r.name} <span style={{ fontWeight:400, color:"#9b8e82", fontSize:12 }}>({r.mrNo || r.patientId || "—"})</span></div><div style={{ fontSize:12, color:"#6b5e52" }}>{r.reminderType} · {r.phone}</div>{r.notes && <div style={{ fontSize:12, color:"#9b8e82", marginTop:2 }}>{r.notes}</div>}</div></div>
+            <div style={{ textAlign:"right" }}><div style={{ fontWeight:700, fontSize:13, color: isOverdue(r)?"#dc2626":isToday(r)?"#d97706":"#1a1714" }}>{r.reminderDate}</div>{isOverdue(r) && <div style={{ fontSize:10, color:"#dc2626", fontWeight:700 }}>OVERDUE</div>}{isToday(r) && <div style={{ fontSize:10, color:"#d97706", fontWeight:700 }}>TODAY</div>}</div>
+            <div style={{ display:"flex", gap:6 }}>{r.status === "pending" && <button className="btn btn-outline btn-sm" onClick={()=>markDone(r)}>Done</button>}<button className="btn btn-danger btn-sm" onClick={()=>del(r.id)}>✕</button></div>
+          </div>
+        ))}
+      </div>
+      {modal && (
+        <Modal title="Set Reminder" onClose={()=>setModal(false)} onSave={submit} saveLabel="Set Reminder">
+          <div style={{ background:"#f0ede8", borderRadius:10, padding:"12px 14px", marginBottom:14 }}><label style={{ fontWeight:700 }}>🔗 Look Up Patient</label><div style={{ display:"flex", gap:8, marginTop:6 }}><input type="text" placeholder="Enter MR-001 or phone…" value={form._lookup||""} onChange={e=>setForm(f=>({...f,_lookup:e.target.value}))} style={{ flex:1 }} /><button className="btn btn-dark btn-sm" onClick={()=>lookupPatient(form._lookup||"")}>Look Up</button></div>{mrLookup && <div style={{ fontSize:12,marginTop:6,color:mrLookup.startsWith("✓")?"#16a34a":"#dc2626" }}>{mrLookup}</div>}</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+            <div><label>MR No</label><input type="text" value={form.mrNo} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div><div><label>Patient ID</label><input type="text" value={form.patientId} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div>
+            <div style={{ gridColumn:"1/-1" }}><label>Name *</label><input type="text" value={form.name} onChange={F("name")} /></div><div><label>Phone</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} /></div>
+            <div><label>Reminder Type</label><select value={form.reminderType} onChange={F("reminderType")}>{["Lens Delivery","Follow-up Visit","Payment Due","Review"].map(t=><option key={t}>{t}</option>)}</select></div>
+            <div><label>Reminder Date *</label><input type="date" value={form.reminderDate} onChange={F("reminderDate")} /></div><div style={{ gridColumn:"1/-1" }}><label>Notes</label><textarea rows={2} value={form.notes} onChange={F("notes")} /></div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function UsersSection({ accounts, setAccounts, audit }) {
+  const staff = safeArray(accounts).filter(a => a.role === "staff");
+  const [modal, setModal] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [form, setForm] = useState({ id: "", name: "", designation: DESIGNATIONS[0], branch: BRANCHES[0], password: "" });
+  
+  const openAdd = () => { setForm({ id: "", name: "", designation: DESIGNATIONS[0], branch: BRANCHES[0], password: "" }); setEditMode(false); setModal(true); };
+  const openEdit = (acc) => { setForm({ ...acc }); setEditMode(true); setModal(true); };
+
+  const saveStaff = () => {
+    if (!form.id || !form.name || !form.password) { alert("Fill all fields."); return; }
+    if (editMode) {
+      setAccounts(p => safeArray(p).map(a => a.id === form.id ? { ...a, ...form } : a));
+      audit("EDIT_STAFF", { userId: form.id, name: form.name });
+    } else {
+      if (safeArray(accounts).find(a => a.id === form.id)) { alert("User ID already exists."); return; }
+      const perms = {}; SECTIONS.forEach(s => { perms[s] = { view: false, add: false, edit: false }; });
+      setAccounts(p => [...safeArray(p), { ...form, role: "staff", perms }]);
+      audit("CREATE_STAFF", { userId: form.id, name: form.name });
+    }
+    setModal(false);
+  };
+  
+  const delStaff = id => { if (confirm("Delete staff?")) { setAccounts(p => safeArray(p).filter(a => a.id !== id)); audit("DELETE_STAFF", { userId: id }); } };
+  
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
+        <div className="section-title">Manage Staff</div><button className="btn btn-dark btn-sm" onClick={openAdd}>+ Add Staff</button>
+      </div>
+      <div style={{ marginBottom: 14, fontSize: 13, color: "#9b8e82" }}>Use <strong>Dashboard Builder</strong> to control field visibility and section permissions per staff member.</div>
+      {staff.map(acc => (
+        <div key={acc.id} className="card" style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div><div style={{ fontWeight: 700, fontSize: 15 }}>{acc.name} <span style={{ fontSize: 12, fontWeight: 400, color: "#6b5e52", background: "#f0ede8", padding: "2px 8px", borderRadius: 12, marginLeft: 6 }}>{acc.designation}</span></div><div style={{ fontSize: 12, color: "#9b8e82", marginTop: 4 }}>ID: <code style={CS}>{acc.id}</code> · {acc.branch} · Password: <code style={CS}>{acc.password}</code></div></div>
+            <div style={{ display: "flex", gap: 8 }}><button className="btn btn-outline btn-sm" onClick={() => openEdit(acc)}>Edit</button><button className="btn btn-danger btn-sm" onClick={() => delStaff(acc.id)}>Delete</button></div>
+          </div>
+          <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {SECTIONS.map(s => (
+              <div key={s} style={{ fontSize: 11, background: "#f0ede8", borderRadius: 20, padding: "2px 10px" }}>
+                {SECTION_LABELS[s]}: {["view", "add", "edit"].filter(a => acc.perms?.[s]?.[a]).join("/") || "none"}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      {modal && (
+        <Modal title={editMode ? "Edit Staff" : "Add New Staff"} onClose={() => setModal(false)} onSave={saveStaff} saveLabel={editMode ? "Update Account" : "Create Account"}>
+          <div className="form-grid">
+            <div><label>User ID (login)</label><input type="text" value={form.id} onChange={e => setForm(f => ({ ...f, id: e.target.value }))} readOnly={editMode} style={editMode ? { background: "#f0ede8", color: "#9b8e82" } : {}} /></div>
+            <div><label>Name</label><input type="text" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+            <div><label>Designation</label><select value={form.designation} onChange={e => setForm(f => ({ ...f, designation: e.target.value }))}>{DESIGNATIONS.map(d => <option key={d}>{d}</option>)}</select></div>
+            <div><label>Branch</label><select value={form.branch} onChange={e => setForm(f => ({ ...f, branch: e.target.value }))}>{BRANCHES.map(b => <option key={b}>{b}</option>)}</select></div>
+            <div><label>Password</label><input type="text" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} /></div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function SupabaseSection({ sbCreds, sbStatus, onConnect, onSync, onPush }) {
+  const [url, setUrl]   = useState(sbCreds.url || "");
+  const [key, setKey]   = useState(sbCreds.key || "");
+  const [msg, setMsg]   = useState("");
+  const connect = async () => { setMsg("Testing connection…"); const ok = await onConnect(url, key); setMsg(ok ? "✅ Connected!" : "❌ Invalid URL or key format."); };
+  const statusColor = { ok: "#16a34a", error: "#dc2626", testing: "#d97706", pushing: "#1d4ed8", syncing: "#7c3aed", idle: "#9b8e82" };
+
+  return (
+    <div>
+      <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Cloud Sync</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 20, marginBottom: 20 }}>
+        <div className="card">
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontSize: 13 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: statusColor[sbStatus] || "#9b8e82", display: "inline-block" }} />Status: <strong>{sbStatus}</strong></div>
+          <div style={{ display: "grid", gap: 12 }}><div><label>Supabase URL</label><input type="text" value={url} onChange={e => setUrl(e.target.value)} /></div><div><label>Anon Key</label><input type="text" value={key} onChange={e => setKey(e.target.value)} /></div></div>
+          {msg && <div style={{ marginTop: 10, fontSize: 13 }}>{msg}</div>}
+          <div style={{ display: "flex", gap: 8, marginTop: 14 }}><button className="btn btn-dark btn-sm" onClick={connect}>🔌 Connect & Test</button><button className="btn btn-outline btn-sm" onClick={onSync}>⬇ Pull from DB</button><button className="btn btn-outline btn-sm" onClick={onPush}>⬆ Push to DB</button></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LaunchGuide() { return <div style={{ padding: 20 }}>See previous instructions for launch steps.</div>; }
+
+function SectionHeader({ title, onAdd, onExport, onSync, syncing, msg }) {
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div className="section-title">{title}</div><div style={{ display: "flex", gap: 10 }}>{onSync && <button className="btn btn-outline btn-sm" onClick={onSync} disabled={syncing}>{syncing ? "⟳ Syncing…" : "⟳ Sync"}</button>}{onExport && <button className="btn btn-outline btn-sm" onClick={onExport}>⬇ CSV</button>}{onAdd && <button className="btn btn-dark btn-sm" onClick={onAdd}>+ Add</button>}</div></div>
+      {msg && <div style={{ marginTop: 8, fontSize: 13, padding: "8px 14px", borderRadius: 8, background: "#dcfce7", color: "#16a34a" }}>{msg}</div>}
+    </div>
+  );
+}
+
+function Modal({ title, children, onClose, onSave, saveLabel = "Save", wide, xl, width }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ width: xl ? "min(920px,96vw)" : wide ? "min(700px,96vw)" : width ? width : "min(560px,96vw)" }}>
+        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, fontWeight: 700, marginBottom: 18 }}>{title}</div>{children}
+        <div style={{ display: "flex", gap: 10, marginTop: 22, justifyContent: "flex-end" }}><button className="btn btn-outline" onClick={onClose}>Cancel</button><button className="btn btn-dark" onClick={onSave}>{saveLabel}</button></div>
+      </div>
+    </div>
+  );
+}
