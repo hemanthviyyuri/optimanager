@@ -9,7 +9,10 @@ const SECTIONS = ["patients","patientBill","optometrist","opticals","inventory",
 const SECTION_LABELS = { patients:"OP Registration", patientBill:"K Sheet Entry", optometrist:"Optometrist", opticals:"Opticals", inventory:"Inventory", invoices:"Sales & Invoices", alerts:"Low Stock Alerts" };
 const LENS_TYPES     = ["Single Vision","Bifocal","Progressive","Anti-Reflective","Photochromic","Blue Cut","UV400","Polarized","High Index 1.60","High Index 1.67","High Index 1.74","Trivex","Polycarbonate","Toric (Contact)","Multifocal (Contact)"];
 const DELIVERY_STATUS= ["Delivered","Not Ready","Fixing Completed But Not Delivered"];
-const DESIGNATIONS   = ["FRONT DESK STAFF", "OPTOM", "OPTOMOLOGIST", "MD", "DEVELOPER"];
+const DESIGNATIONS   = ["FRONT DESK STAFF", "OPTOM", "OPTOMOLOGIST", "MD", "COUNSELLING ROOM", "DEVELOPER"];
+// Privileged designations: equal to MD/Owner access (Counselling Room excludes Manage Staff + Audit Log)
+const hasMDAccess = (s) => !!s && (s.role === "owner" || s.designation === "MD" || s.designation === "COUNSELLING ROOM");
+const isCounselling = (s) => !!s && s.designation === "COUNSELLING ROOM";
 
 const CS = { background: "#f0ede8", padding: "2px 6px", borderRadius: 4, fontFamily: "monospace", fontSize: 12 };
 
@@ -76,6 +79,7 @@ function sbReady() { return _sb !== null; }
 const SB_TABLES = {
   patients: "patients", patientBill: "patientBill", optometrist: "optometrist", opticals: "opticals",
   stock: "stock", invoices: "invoices", accounts: "accounts", audit_log: "audit_log", tasks: "tasks", reminders: "reminders",
+  counselling: "counselling",
 };
 
 const K_SHEET_PACK_PREFIX = "\n\n__K_SHEET_FULL__:";
@@ -218,7 +222,7 @@ const LS = {
   getSess: ()    => { try { return JSON.parse(sessionStorage.getItem("opti_sess")); } catch { return null; } },
 };
 
-const SEED_DATA = { patients: [], patientBill: [], optometrist: [], opticals: [], stock: [], invoices: [], tasks: [], reminders: [] };
+const SEED_DATA = { patients: [], patientBill: [], optometrist: [], opticals: [], stock: [], invoices: [], tasks: [], reminders: [], counselling: [] };
 const safeArray = (arr, fallback = []) => Array.isArray(arr) ? arr : fallback;
 
 // ── Dashboard CMS defaults (editable in DashboardCMS view) ──────────────
@@ -455,6 +459,7 @@ export default function App() {
     <Shell session={session} onLogout={logout} view={view} setView={setView} can={can} sbStatus={sbStatus} syncing={syncing} lastSync={lastSync} onManualSync={() => syncFromCloud(sbCreds.url, sbCreds.key)}>
       {view === "dashboard"    && <Dashboard session={session} data={data} setView={setView} auditLog={auditLog} dashCms={dashCms} />}
       {view === "patientStatus"&& <PatientStatusSection session={session} data={data} onSync={() => syncFromCloud(sbCreds.url, sbCreds.key)} syncing={syncing} />}
+      {view === "counselling"  && hasMDAccess(session) && <CounsellingSection {...sharedProps} />}
       {view === "dashcms"      && session.role === "owner" && <DashboardCMS dashCms={dashCms} setDashCms={setDashCms} />}
       {view === "patients"     && <PatientsSection     {...sharedProps} />}
       {view === "patientBill"  && <PatientBillSection  {...sharedProps} />}
@@ -576,6 +581,7 @@ function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastS
     { id: "tasks",        label: "Tasks",            icon: "📌", show: true },
     { id: "reminders",    label: "Reminders",        icon: "🔔", show: true },
     { id: "patientStatus",label: "Patient Status",   icon: "🚦", show: true },
+    { id: "counselling",  label: "Counselling Room", icon: "💬", show: hasMDAccess(session) },
     { id: "divider" },
     { id: "auditlog",    label: "Audit Log",        icon: "📋", show: isOwner },
     { id: "dashbuilder", label: "Dashboard Builder",icon: "🏗", show: isOwner },
@@ -687,19 +693,55 @@ function Dashboard({ session, data, setView, auditLog, dashCms }) {
         )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 14, marginBottom: 22 }}>
-        {blocks.map(b => (
-          <div key={b.key} onClick={b.click} style={{ cursor:"pointer", borderRadius: 14, padding: "16px 18px", background: b.bg, color: b.color, boxShadow: "0 2px 8px rgba(0,0,0,.05)", transition:"transform .15s", border:"1px solid rgba(255,255,255,.5)" }}
-               onMouseEnter={e => e.currentTarget.style.transform="translateY(-2px)"} onMouseLeave={e => e.currentTarget.style.transform=""}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-              <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".08em", opacity:.85 }}>{b.title}</div>
-              <div style={{ fontSize: 20 }}>{b.icon}</div>
+      {hasMDAccess(session) && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 14, marginBottom: 22 }}>
+          {blocks.map(b => (
+            <div key={b.key} onClick={b.click} style={{ cursor:"pointer", borderRadius: 14, padding: "16px 18px", background: b.bg, color: b.color, boxShadow: "0 2px 8px rgba(0,0,0,.05)", transition:"transform .15s", border:"1px solid rgba(255,255,255,.5)" }}
+                 onMouseEnter={e => e.currentTarget.style.transform="translateY(-2px)"} onMouseLeave={e => e.currentTarget.style.transform=""}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".08em" }}>{b.title}</div>
+                <div style={{ fontSize: 20 }}>{b.icon}</div>
+              </div>
+              <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 34, fontWeight: 800 }}>{b.value}</div>
+              <div style={{ fontSize: 11, marginTop: 4, opacity: .8 }}>{b.sub}</div>
             </div>
-            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 30, fontWeight: 800, lineHeight: 1.1 }}>{b.value}</div>
-            <div style={{ fontSize: 11, marginTop: 4, opacity: .8 }}>{b.sub}</div>
+          ))}
+        </div>
+      )}
+
+      {hasMDAccess(session) && (
+        <div className="card" style={{ marginBottom: 18, borderTop: "4px solid #5b21b6" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 12 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#5b21b6" }}>🚦 Patient Status (Today)</div>
+            <button className="btn btn-outline btn-sm" onClick={() => setView("patientStatus")}>Open Full View</button>
           </div>
-        ))}
-      </div>
+          {(() => {
+            const todayPts = flt(data.patients).filter(x => isToday(x.date)).map(p => ({ ...p, _status: getPatientStatus(p, data) }));
+            if (!todayPts.length) return <div style={{ fontSize:12, color:"#9b8e82" }}>No patients registered today.</div>;
+            return (
+              <div style={{ overflowX:"auto" }}>
+                <table>
+                  <thead><tr><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {todayPts.slice(0, 12).map(p => (
+                      <tr key={p.id}>
+                        <td style={{ fontFamily:"monospace", fontWeight:700 }}>{p.mrNo || "—"}</td>
+                        <td style={{ fontFamily:"monospace", color:"#1d4ed8" }}>{p.patientId || "—"}</td>
+                        <td style={{ fontWeight:600 }}>{p.name}</td>
+                        <td>{p.phone}</td>
+                        <td><span className="tag" style={{ background:p._status.bg, color:p._status.color }}>{p._status.label}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+
+
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: 18, marginBottom: 18 }}>
         {sortedPanels.map(([key, panel]) => {
@@ -1000,6 +1042,14 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
   const submit = () => {
     setTouch({ phone: true, name: true, address: true, mrNo: true });
     if (!validate.phone(form.phone) || !form.name.trim() || !form.address.trim() || !form.mrNo.trim()) { setMsg("Fill required fields correctly."); return; }
+    if (form.visitType === "Camp" && !String(form.ref || "").trim()) { setMsg("Ref/Camp is required when Visit Type is Camp."); return; }
+    if (form.id) {
+      const updated = { ...form, updatedBy: session.id, updatedByName: session.name, updatedAt: ts() };
+      mutate("patients", arr => arr.map(x => x.id === form.id ? { ...x, ...updated } : x), updated);
+      audit("EDIT", { type: "patients", id: form.id, name: form.name });
+      setModal(false); setMsg("Patient updated.");
+      return;
+    }
     const record = { id: uid(), ...form, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
     mutate("patients", arr => [...arr, record], record);
     audit("ADD", { type: "patients", name: form.name });
@@ -1007,6 +1057,8 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
   };
 
   const del = id => { if (confirm("Delete patient?")) { mutate("patients", arr => arr.filter(x => x.id !== id)); audit("DELETE", { type: "patients", id }); } };
+  const openEdit = (row) => { setForm({ ...row }); setTouch({}); setMsg(""); setDupWarning(null); setModal(true); };
+  const canEdit = isOwner || can("patients", "edit");
 
   const filtered = rows.filter(r => !search || r.name?.toLowerCase().includes(search.toLowerCase()) || r.phone?.includes(search) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) || r.patientId?.toLowerCase().includes(search.toLowerCase()));
 
@@ -1018,7 +1070,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
       </div>
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
-          <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Address</th><th>Payment</th><th>Amount</th><th>Ref/Camp</th><th>Visit</th><th>Branch</th><th>Remarks</th>{isOwner && <th></th>}</tr></thead>
+          <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Address</th><th>Payment</th><th>Amount</th><th>Ref/Camp</th><th>Visit</th><th>Branch</th><th>Remarks</th><th></th></tr></thead>
           <tbody>{filtered.map(r => (
             <tr key={r.id}>
               <td style={{ fontSize:11, whiteSpace:"nowrap", color:"#9b8e82" }}>{r.timestamp}</td>
@@ -1029,10 +1081,13 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
               <td><span className="tag tag-blue">{r.paymentMode}</span></td>
               <td style={{ fontWeight:600 }}>{r.paymentAmount ? `₹${r.paymentAmount}` : "—"}</td>
               <td style={{ fontSize:12, color:"#9b8e82" }}>{r.ref || "—"}</td>
-              <td><span className="tag" style={{ background:"#f0ede8", color:"#6b5e52" }}>{r.visitType || "New Patient"}</span></td>
+              <td><span className="tag" style={{ background:r.visitType === "Camp" ? "#fef3c7" : "#f0ede8", color:r.visitType === "Camp" ? "#92400e" : "#6b5e52" }}>{r.visitType || "New Patient"}</span></td>
               <td><span className="tag" style={{ background:"#f0ede8", color:"#6b5e52" }}>{r.branch}</span></td>
               <td style={{ fontSize:12, color:"#9b8e82", maxWidth:120, overflow:"hidden", textOverflow:"ellipsis" }}>{r.remarks || "—"}</td>
-              {isOwner && <td><button className="btn btn-danger btn-sm" onClick={() => del(r.id)}>✕</button></td>}
+              <td style={{ display:"flex", gap:5 }}>
+                <button className="btn btn-outline btn-sm" disabled={!canEdit} style={!canEdit ? { opacity:.35, cursor:"not-allowed" } : {}} onClick={() => canEdit && openEdit(r)}>Edit</button>
+                {isOwner && <button className="btn btn-danger btn-sm" onClick={() => del(r.id)}>✕</button>}
+              </td>
             </tr>
           ))}</tbody>
         </table>
@@ -1046,11 +1101,11 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
             <div><label>Time</label><input type="time" value={form.time} onChange={F("time")} /></div>
             <div><label>MR No (Manual) *</label><input type="text" placeholder="Enter MR Number" value={form.mrNo} onChange={F("mrNo")} onBlur={T("mrNo")} style={{ ...vStyle(form.mrNo, v => v.trim().length > 0, touch.mrNo), fontWeight: 700 }} />{vMsg(form.mrNo, v => v.trim().length > 0, touch.mrNo, "Required.")}</div>
             <div><label>Patient ID (Auto Generated)</label><input type="text" value={form.patientId} readOnly style={{ fontWeight: 700 }} /></div>
-            <div><label>Visit Type</label><select value={form.visitType} onChange={F("visitType")}>{["New Patient","2nd Visit","3rd Visit","4th Visit","5th Visit","Review"].map(v => <option key={v}>{v}</option>)}</select></div>
+            <div><label>Visit Type</label><select value={form.visitType} onChange={F("visitType")}>{["New Patient","2nd Visit","3rd Visit","4th Visit","5th Visit","Review","Camp"].map(v => <option key={v}>{v}</option>)}</select></div>
             <div style={{ gridColumn:"1/-1" }}><label>Name *</label><input type="text" value={form.name} onChange={F("name")} onBlur={T("name")} style={vStyle(form.name, v => v.trim().length > 0, touch.name)} />{vMsg(form.name, v => v.trim().length > 0, touch.name, "Required.")}</div>
             <div><label>Phone * (10 digits)</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} onBlur={handlePhoneBlur} style={vStyle(form.phone, validate.phone, touch.phone)} />{vMsg(form.phone, validate.phone, touch.phone, "10 digits, not starting 0.")}</div>
             <div style={{ gridColumn:"span 2" }}><label>Address *</label><input type="text" value={form.address} onChange={F("address")} onBlur={T("address")} style={vStyle(form.address, v => v.trim().length > 0, touch.address)} />{vMsg(form.address, v => v.trim().length > 0, touch.address, "Required.")}</div>
-            <div><label>Ref / Camp</label><input type="text" placeholder="Camp name or referrer" value={form.ref} onChange={F("ref")} /></div>
+            <div><label>Ref / Camp {form.visitType === "Camp" ? "*" : ""}</label><input type="text" placeholder={form.visitType === "Camp" ? "Camp name (required)" : "Camp name or referrer"} value={form.ref} onChange={F("ref")} style={form.visitType === "Camp" && !form.ref ? { borderColor: "#dc2626" } : {}} /></div>
             <div><label>Payment Amount (₹)</label><input type="number" value={form.paymentAmount} onChange={F("paymentAmount")} /></div>
             <div><label>Payment Mode</label><select value={form.paymentMode} onChange={F("paymentMode")}>{["Cash","UPI","Card","Cheque","Free","Camp"].map(m => <option key={m}>{m}</option>)}</select></div>
             {(form.paymentMode === "UPI" || form.paymentMode === "Card" || form.paymentMode === "Cheque") && (<div><label>Payment Ref No</label><input type="text" placeholder="Transaction / Cheque No" value={form.paymentRefNo} onChange={F("paymentRefNo")} /></div>)}
@@ -1955,6 +2010,132 @@ function DashboardCMS({ dashCms, setDashCms }) {
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Counselling Room — patient lookup with advice & remarks
+// Accessible to MD, Owner, and COUNSELLING ROOM staff
+// ════════════════════════════════════════════════════════════════════════
+function CounsellingSection({ session, data, mutate, audit, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const rows = safeArray(data.counselling).filter(x => (isOwner || hasMDAccess(session) || x.branch === branch));
+
+  const [modal, setModal] = useState(false);
+  const [form,  setForm]  = useState({});
+  const [msg,   setMsg]   = useState("");
+  const [mrLookup, setMrLookup] = useState("");
+  const [search, setSearch] = useState("");
+
+  const blank = () => ({
+    timestamp: ts(), date: todayStr(), time: timeStr(),
+    mrNo: "", patientId: "", name: "", phone: "",
+    advice: "", remarks: "",
+    counsellor: session.name, branch: isOwner ? "JPT Branch" : branch,
+  });
+
+  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const lookupPatient = (query) => {
+    if (!query.trim()) return;
+    const q = query.toLowerCase();
+    const found = safeArray(data.patients).find(p =>
+      p.mrNo?.toLowerCase() === q || p.patientId?.toLowerCase() === q || p.phone === query
+    );
+    if (found) {
+      setForm(f => ({ ...f, mrNo: found.mrNo || "", patientId: found.patientId || "", name: found.name, phone: found.phone }));
+      setMrLookup(`✓ Found: ${found.name} (${found.patientId})`);
+    } else {
+      setMrLookup("No patient found in OP Registration.");
+    }
+  };
+
+  const submit = () => {
+    if (!form.name.trim()) { setMsg("Patient name is required."); return; }
+    if (!form.advice.trim() && !form.remarks.trim()) { setMsg("Enter advice or remarks."); return; }
+    if (form.id) {
+      const updated = { ...form, updatedBy: session.id, updatedByName: session.name, updatedAt: ts() };
+      mutate("counselling", arr => safeArray(arr).map(x => x.id === form.id ? { ...x, ...updated } : x), updated);
+      audit("EDIT", { type: "counselling", id: form.id, name: form.name });
+      setModal(false); setMsg("Counselling entry updated.");
+      return;
+    }
+    const record = { id: uid(), ...form, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    mutate("counselling", arr => [...safeArray(arr), record], record);
+    audit("ADD", { type: "counselling", name: form.name });
+    setModal(false); setMsg("Counselling entry saved.");
+  };
+
+  const del = id => { if (confirm("Delete counselling entry?")) { mutate("counselling", arr => safeArray(arr).filter(x => x.id !== id)); audit("DELETE", { type: "counselling", id }); } };
+  const openEdit = (row) => { setForm({ ...row }); setMrLookup(""); setMsg(""); setModal(true); };
+
+  const filtered = rows.filter(r => !search
+    || r.name?.toLowerCase().includes(search.toLowerCase())
+    || r.mrNo?.toLowerCase().includes(search.toLowerCase())
+    || r.patientId?.toLowerCase().includes(search.toLowerCase())
+    || r.phone?.includes(search)
+  );
+
+  return (
+    <div>
+      <SectionHeader title="Counselling Room" onSync={onSync} syncing={syncing}
+        onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "counselling.csv")}
+        onAdd={() => { setForm(blank()); setMrLookup(""); setMsg(""); setModal(true); }} msg={msg} />
+
+      <div style={{ marginBottom: 12 }}>
+        <input type="text" placeholder="🔍 Search by name, MR No, Patient ID, phone…" value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", maxWidth: 420, borderRadius: 10, border: "1px solid #e8e2db", padding: "8px 14px", fontSize: 13 }} />
+      </div>
+
+      <div className="card" style={{ overflowX: "auto" }}>
+        <table>
+          <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Advice (Counselling Room)</th><th>Remarks</th><th>Counsellor</th><th>Branch</th><th></th></tr></thead>
+          <tbody>
+            {filtered.length === 0 && <tr><td colSpan={10} style={{ color: "#9b8e82", textAlign: "center", padding: 24 }}>No counselling entries yet.</td></tr>}
+            {filtered.map(r => (
+              <tr key={r.id}>
+                <td style={{ fontSize: 11, color: "#9b8e82", whiteSpace: "nowrap" }}>{r.timestamp}</td>
+                <td style={{ fontWeight: 700, fontFamily: "monospace" }}>{r.mrNo || "—"}</td>
+                <td style={{ fontFamily: "monospace", color: "#1d4ed8" }}>{r.patientId || "—"}</td>
+                <td style={{ fontWeight: 600 }}>{r.name}</td>
+                <td>{r.phone}</td>
+                <td style={{ fontSize: 12, maxWidth: 280, whiteSpace: "pre-wrap" }}>{r.advice || "—"}</td>
+                <td style={{ fontSize: 12, color: "#6b5e52", maxWidth: 220, whiteSpace: "pre-wrap" }}>{r.remarks || "—"}</td>
+                <td style={{ fontSize: 12, color: "#9b8e82" }}>{r.counsellor || r.createdByName || "—"}</td>
+                <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{r.branch}</span></td>
+                <td style={{ display: "flex", gap: 5 }}>
+                  <button className="btn btn-outline btn-sm" onClick={() => openEdit(r)}>Edit</button>
+                  {isOwner && <button className="btn btn-danger btn-sm" onClick={() => del(r.id)}>✕</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {modal && (
+        <Modal title={form.id ? "Edit Counselling Entry" : "New Counselling Entry"} onClose={() => setModal(false)} onSave={submit} saveLabel={form.id ? "Update Entry" : "Save Entry"} wide>
+          <div style={{ background: "#f0ede8", borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
+            <label style={{ fontWeight: 700 }}>🔗 Look Up Patient</label>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              <input type="text" placeholder="Enter MR No, Patient ID or phone…" value={form._lookup || ""} onChange={e => setForm(f => ({ ...f, _lookup: e.target.value }))} style={{ flex: 1 }} />
+              <button className="btn btn-dark btn-sm" onClick={() => lookupPatient(form._lookup || "")}>Look Up</button>
+            </div>
+            {mrLookup && <div style={{ fontSize: 12, marginTop: 6, color: mrLookup.startsWith("✓") ? "#16a34a" : "#dc2626" }}>{mrLookup}</div>}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div><label>MR No</label><input type="text" value={form.mrNo || ""} onChange={F("mrNo")} /></div>
+            <div><label>Patient ID</label><input type="text" value={form.patientId || ""} onChange={F("patientId")} /></div>
+            <div><label>Name *</label><input type="text" value={form.name || ""} onChange={F("name")} /></div>
+            <div><label>Phone</label><input type="text" maxLength={10} value={form.phone || ""} onChange={F("phone")} /></div>
+            <div style={{ gridColumn: "1/-1" }}><label>Advice (Counselling Room)</label><textarea rows={4} value={form.advice || ""} onChange={F("advice")} placeholder="Counselling advice given to patient…" /></div>
+            <div style={{ gridColumn: "1/-1" }}><label>Remarks</label><textarea rows={3} value={form.remarks || ""} onChange={F("remarks")} placeholder="Internal notes / remarks…" /></div>
+            <div><label>Counsellor</label><input type="text" value={form.counsellor || ""} onChange={F("counsellor")} /></div>
+            {isOwner && <div><label>Branch</label><select value={form.branch} onChange={F("branch")}>{BRANCHES.map(b => <option key={b}>{b}</option>)}</select></div>}
+          </div>
+        </Modal>
       )}
     </div>
   );
