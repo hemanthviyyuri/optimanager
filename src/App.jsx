@@ -160,11 +160,26 @@ async function sbUpsertOne(table, row) {
   } catch(e) { return { ok: false, error: String(e) }; }
 }
 
+function normalizeRowKeys(rows) {
+  // PostgREST PGRST102 "All object keys must match" — every row in a bulk
+  // upsert must have the exact same set of keys. Union all keys and fill
+  // missing ones with null.
+  const keySet = new Set();
+  for (const r of rows) if (r && typeof r === "object") for (const k of Object.keys(r)) keySet.add(k);
+  const keys = Array.from(keySet);
+  return rows.map(r => {
+    const out = {};
+    for (const k of keys) out[k] = (r && k in r) ? r[k] : null;
+    return out;
+  });
+}
+
 async function sbUpsertMany(table, rows) {
   if (!_sb) return { ok: false, error: "Not connected" };
   if (!rows.length) return { ok: true, error: null };
   try {
-    const payload = table === "patientBill" ? rows.map(packKSheetForLegacyTable) : rows;
+    const packed = table === "patientBill" ? rows.map(packKSheetForLegacyTable) : rows;
+    const payload = normalizeRowKeys(packed);
     let result = await sbPostPayload(table, payload, "resolution=merge-duplicates,return=minimal");
     if (!result.ok) result = await sbPostPayloadPruned(table, payload, "resolution=merge-duplicates,return=minimal");
     if (!result.ok) console.warn(`sbUpsertMany ${table}:`, result.error);
