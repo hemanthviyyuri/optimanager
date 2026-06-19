@@ -276,7 +276,7 @@ export default function App() {
     if (!sbCreds.url || !sbCreds.key) return;
     initSB(sbCreds.url, sbCreds.key);
     syncRef.current(sbCreds.url, sbCreds.key);
-    const id = setInterval(() => syncRef.current(sbCreds.url, sbCreds.key), 10000);
+    const id = setInterval(() => syncRef.current(sbCreds.url, sbCreds.key), 4000);
     return () => clearInterval(id);
   }, [sbCreds.url, sbCreds.key]);
 
@@ -554,48 +554,138 @@ function Dashboard({ session, data, setView, auditLog }) {
   const isOwner = session.role === "owner";
   const myBranch = session.branch;
   const flt = arr => isOwner ? safeArray(arr) : safeArray(arr).filter(x => x.branch === myBranch);
+  const today = todayStr();
 
-  const pts   = flt(data.patients).filter(x => x.status === "approved");
-  const bills = flt(data.patientBill).filter(x => x.status === "approved");
-  const invs  = flt(data.invoices).filter(x => x.approvalStatus === "approved" && x.status === "Paid");
-  const rev   = invs.reduce((s, i) => s + safeArray(i.items).reduce((a, x) => a + x.qty * x.price, 0) - (i.discount || 0), 0);
+  // Live clock — re-renders every second so the dashboard always reflects "now".
+  const [, setTick] = useState(0);
+  useEffect(() => { const id = setInterval(() => setTick(t => t + 1), 1000); return () => clearInterval(id); }, []);
 
-  const stats = [
-    { label: "Patients",          value: pts.length,    color: "#1a1714" },
-    { label: "Patient Bills",     value: bills.length,  color: "#1d4ed8" },
-    { label: "Revenue (Paid)",    value: currency(rev), color: "#16a34a" },
+  const isToday = (d) => {
+    if (!d) return false;
+    if (typeof d === "string" && d.startsWith(today)) return true;
+    // dd/mm/yyyy formatted strings from ts()
+    try {
+      const parts = String(d).split(/[\s/,-]/).filter(Boolean);
+      if (parts.length >= 3) {
+        const [dd, mm, yyyy] = parts;
+        const iso = `${yyyy.padStart(4,"0")}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
+        if (iso === today) return true;
+      }
+    } catch {}
+    return false;
+  };
+
+  const ptsToday    = flt(data.patients).filter(x => x.status === "approved" && isToday(x.date));
+  const billsToday  = flt(data.patientBill).filter(x => x.status === "approved" && isToday(x.date));
+  const invsToday   = flt(data.invoices).filter(x => x.approvalStatus === "approved" && x.status === "Paid" && isToday(x.date));
+  const revToday    = invsToday.reduce((s, i) => s + safeArray(i.items).reduce((a, x) => a + x.qty * x.price, 0) - (i.discount || 0), 0);
+  const revisitToday = ptsToday.filter(x => {
+    const v = (x.visitType || "").toLowerCase();
+    return v && v !== "new patient" && (v.includes("visit") || v.includes("review") || v.includes("camp"));
+  });
+  const newRegToday = ptsToday.filter(x => !revisitToday.includes(x));
+
+  const tasksToday = flt(data.tasks).filter(t => isToday(t.deadline) || isToday(t.completedAt) || isToday(t.createdAt));
+  const remToday   = flt(data.reminders).filter(r => isToday(r.reminderDate) || isToday(r.completedAt) || isToday(r.createdAt));
+  const auditToday = safeArray(auditLog).filter(a => isToday(a.at)).slice(0, 12);
+
+  const blocks = [
+    { key: "patients",    label: "OP Registration (Today)", value: newRegToday.length, sub: "New patients today",        bg: "linear-gradient(135deg,#fef3c7,#fde68a)", color: "#92400e", icon: "◉", click: () => setView("patients") },
+    { key: "revisit",     label: "Revisit / Review / Camp", value: revisitToday.length, sub: "Returning today",            bg: "linear-gradient(135deg,#dbeafe,#bfdbfe)", color: "#1e3a8a", icon: "↻", click: () => setView("patients") },
+    { key: "ksheet",      label: "K Sheets (Today)",        value: billsToday.length,  sub: "K Sheet entries today",      bg: "linear-gradient(135deg,#dcfce7,#bbf7d0)", color: "#14532d", icon: "📋", click: () => setView("patientBill") },
+    { key: "revenue",     label: "Revenue (Today)",         value: currency(revToday), sub: "Paid invoices today",        bg: "linear-gradient(135deg,#fce7f3,#fbcfe8)", color: "#9d174d", icon: "₹", click: () => setView("invoices") },
   ];
 
-  const recentAudit = safeArray(auditLog).slice(0, 8);
+  const pendingTasks = tasksToday.filter(t => t.status !== "done");
+  const doneTasks    = tasksToday.filter(t => t.status === "done");
+  const pendingRems  = remToday.filter(r => r.status !== "done");
+  const doneRems     = remToday.filter(r => r.status === "done");
 
   return (
     <div>
-      <div style={{ marginBottom: 22 }}>
-        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 26, fontWeight: 700 }}>Welcome, {session.name} 👋</div>
-        <div style={{ fontSize: 13, color: "#9b8e82", marginTop: 3 }}>{isOwner ? "All Branches" : myBranch} · {ts()}</div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", marginBottom: 22, flexWrap:"wrap", gap:10 }}>
+        <div>
+          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 26, fontWeight: 700 }}>Welcome, {session.name} 👋</div>
+          <div style={{ fontSize: 13, color: "#9b8e82", marginTop: 3 }}>{isOwner ? "All Branches" : myBranch} · Live · {ts()}</div>
+        </div>
+        {isOwner && (
+          <button className="btn btn-outline btn-sm" onClick={() => setView("dashbuilder")}>⚙ Customize Dashboard</button>
+        )}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 22 }}>
-        {stats.map(s => (
-          <div key={s.label} className="stat-card" style={{ cursor: "default" }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#9b8e82", textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 6 }}>{s.label}</div>
-            <div className="stat-num" style={{ color: s.color }}>{s.value}</div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 14, marginBottom: 22 }}>
+        {blocks.map(b => (
+          <div key={b.key} onClick={b.click} style={{ cursor:"pointer", borderRadius: 14, padding: "16px 18px", background: b.bg, color: b.color, boxShadow: "0 2px 8px rgba(0,0,0,.05)", transition:"transform .15s", border:"1px solid rgba(255,255,255,.5)" }}
+               onMouseEnter={e => e.currentTarget.style.transform="translateY(-2px)"} onMouseLeave={e => e.currentTarget.style.transform=""}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".08em", opacity:.85 }}>{b.label}</div>
+              <div style={{ fontSize: 20 }}>{b.icon}</div>
+            </div>
+            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 30, fontWeight: 800, lineHeight: 1.1 }}>{b.value}</div>
+            <div style={{ fontSize: 11, marginTop: 4, opacity: .8 }}>{b.sub}</div>
           </div>
         ))}
       </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", gap: 18, marginBottom: 18 }}>
+        {/* Tasks Today */}
+        <div className="card" style={{ borderTop: "4px solid #d97706" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 12 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color:"#92400e" }}>📌 Today's Tasks</div>
+            <button className="btn btn-outline btn-sm" onClick={() => setView("tasks")}>View all</button>
+          </div>
+          {tasksToday.length === 0 && <div style={{ fontSize:12, color:"#9b8e82" }}>No tasks for today.</div>}
+          {pendingTasks.map(t => (
+            <div key={t.id} style={{ padding:"8px 10px", borderRadius:8, background:"#fef3c7", marginBottom:6, borderLeft:`4px solid ${t.priority==="High"?"#dc2626":t.priority==="Low"?"#16a34a":"#d97706"}` }}>
+              <div style={{ fontWeight:700, fontSize:13, color:"#1a1714" }}>{t.title}</div>
+              <div style={{ fontSize:11, color:"#6b5e52" }}>Due {t.deadline} · {t.priority}</div>
+            </div>
+          ))}
+          {doneTasks.map(t => (
+            <div key={t.id} style={{ padding:"8px 10px", borderRadius:8, background:"#dcfce7", marginBottom:6, borderLeft:"4px solid #16a34a" }}>
+              <div style={{ fontWeight:700, fontSize:13, color:"#14532d", textDecoration:"line-through" }}>{t.title}</div>
+              <div style={{ fontSize:11, color:"#166534" }}>✓ Completed {t.completedAt || ""}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Reminders Today */}
+        <div className="card" style={{ borderTop: "4px solid #1d4ed8" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 12 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color:"#1e3a8a" }}>🔔 Today's Reminders</div>
+            <button className="btn btn-outline btn-sm" onClick={() => setView("reminders")}>View all</button>
+          </div>
+          {remToday.length === 0 && <div style={{ fontSize:12, color:"#9b8e82" }}>No reminders for today.</div>}
+          {pendingRems.map(r => (
+            <div key={r.id} style={{ padding:"8px 10px", borderRadius:8, background:"#dbeafe", marginBottom:6, borderLeft:"4px solid #1d4ed8" }}>
+              <div style={{ fontWeight:700, fontSize:13, color:"#1a1714" }}>{r.name} <span style={{ fontWeight:400, color:"#6b5e52", fontSize:11 }}>({r.reminderType})</span></div>
+              <div style={{ fontSize:11, color:"#1e3a8a" }}>Due {r.reminderDate} · {r.phone || "—"}</div>
+            </div>
+          ))}
+          {doneRems.map(r => (
+            <div key={r.id} style={{ padding:"8px 10px", borderRadius:8, background:"#dcfce7", marginBottom:6, borderLeft:"4px solid #16a34a" }}>
+              <div style={{ fontWeight:700, fontSize:13, color:"#14532d", textDecoration:"line-through" }}>{r.name}</div>
+              <div style={{ fontSize:11, color:"#166534" }}>✓ Completed {r.completedAt || ""}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: isOwner ? "1fr 1fr" : "1fr", gap: 18 }}>
         {isOwner && (
-          <div className="card">
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Branch Overview</div>
+          <div className="card" style={{ borderTop: "4px solid #16a34a" }}>
+            <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 14, color:"#14532d" }}>🏥 Branch Overview (Today)</div>
             {BRANCHES.map(br => {
-              const bPts   = safeArray(data.patients).filter(x => x.branch === br && x.status === "approved");
-              const bBills = safeArray(data.patientBill).filter(x => x.branch === br && x.status === "approved");
+              const bPts   = safeArray(data.patients).filter(x => x.branch === br && x.status === "approved" && isToday(x.date));
+              const bBills = safeArray(data.patientBill).filter(x => x.branch === br && x.status === "approved" && isToday(x.date));
+              const bRev   = safeArray(data.invoices).filter(x => x.branch === br && x.approvalStatus === "approved" && x.status === "Paid" && isToday(x.date));
               return (
                 <div key={br} style={{ padding: "10px 0", borderBottom: "1px solid #f0ede8" }}>
                   <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{br}</div>
                   <div style={{ display: "flex", gap: 10 }}>
-                    {[["Patients", bPts.length, "#1a1714"], ["Bills", bBills.length, "#1d4ed8"]].map(([l, v, c]) => (
-                      <div key={l} style={{ flex: 1, background: "#f0ede8", borderRadius: 8, padding: "8px 10px" }}>
-                        <div style={{ fontSize: 10, color: "#9b8e82", fontWeight: 600 }}>{l}</div>
+                    {[["OP Reg", bPts.length, "#92400e", "#fef3c7"], ["K Sheets", bBills.length, "#14532d", "#dcfce7"], ["Invoices", bRev.length, "#9d174d", "#fce7f3"]].map(([l, v, c, bg]) => (
+                      <div key={l} style={{ flex: 1, background: bg, borderRadius: 8, padding: "8px 10px" }}>
+                        <div style={{ fontSize: 10, color: c, fontWeight: 700 }}>{l}</div>
                         <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 700, color: c }}>{v}</div>
                       </div>
                     ))}
@@ -606,13 +696,13 @@ function Dashboard({ session, data, setView, auditLog }) {
           </div>
         )}
         {isOwner && (
-          <div className="card">
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Recent Activity</div>
-            {recentAudit.length === 0 && <div style={{ fontSize: 13, color: "#9b8e82" }}>No activity yet.</div>}
-            {recentAudit.map(a => (
+          <div className="card" style={{ borderTop: "4px solid #9d174d" }}>
+            <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 14, color:"#9d174d" }}>⚡ Today's Activity</div>
+            {auditToday.length === 0 && <div style={{ fontSize: 13, color: "#9b8e82" }}>No activity today.</div>}
+            {auditToday.map(a => (
               <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f0ede8", fontSize: 12 }}>
                 <div>
-                  <span style={{ fontWeight: 700, marginRight: 6, color: { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", ADD: "#16a34a", DELETE: "#dc2626", EDIT: "#d97706" }[a.action] || "#1a1714" }}>{a.action}</span>
+                  <span style={{ fontWeight: 700, marginRight: 6, color: { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", ADD: "#16a34a", DELETE: "#dc2626", EDIT: "#d97706", TASK_ASSIGN:"#d97706", TASK_COMPLETE:"#16a34a", REMINDER_ADD:"#1d4ed8" }[a.action] || "#1a1714" }}>{a.action}</span>
                   <span style={{ color: "#6b5e52" }}>{a.userName}</span>
                   {a.branch !== "All" && <span style={{ color: "#b5a99e", marginLeft: 5 }}>· {a.branch}</span>}
                 </div>
