@@ -2202,7 +2202,7 @@ function CounsellingSection({ session, data, mutate, audit, onSync, syncing }) {
             {isOwner && <div><label>Branch</label><select value={form.branch} onChange={F("branch")}>{BRANCHES.map(b => <option key={b}>{b}</option>)}</select></div>}
           </div>
         </Modal>
-      )}
+    )}
     </div>
   );
 }
