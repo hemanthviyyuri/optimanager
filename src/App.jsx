@@ -16,7 +16,8 @@ const LENS_TYPES     = ["Single Vision","Bifocal","Progressive","Anti-Reflective
 const DELIVERY_STATUS= ["Delivered","Not Ready","Fixing Completed But Not Delivered"];
 const DESIGNATIONS   = ["FRONT DESK STAFF", "OPTOM", "OPTOMOLOGIST", "MD", "COUNSELLING ROOM", "DEVELOPER"];
 // Privileged designations: equal to MD/Owner access (Counselling Room excludes Manage Staff + Audit Log)
-const hasMDAccess = (s) => !!s && (s.role === "owner" || s.designation === "MD" || s.designation === "COUNSELLING ROOM");
+const hasMDAccess   = (s) => !!s && (s.role === "owner" || s.designation === "MD" || s.designation === "COUNSELLING ROOM");
+const hasOwnerOrMD  = (s) => !!s && (s.role === "owner" || s.designation === "MD");
 const isCounselling = (s) => !!s && s.designation === "COUNSELLING ROOM";
 
 const CS = { background: "#f0ede8", padding: "2px 6px", borderRadius: 4, fontFamily: "monospace", fontSize: 12 };
@@ -554,7 +555,7 @@ export default function App() {
       {view === "dashboard"    && <Dashboard session={session} data={data} setView={setView} auditLog={auditLog} dashCms={dashCms} />}
       {view === "patientStatus"&& <PatientStatusSection session={session} data={data} onSync={() => syncFromCloud(sbCreds.url, sbCreds.key)} syncing={syncing} />}
       {view === "counselling"  && hasMDAccess(session) && <CounsellingSection {...sharedProps} />}
-      {view === "dashcms"      && session.role === "owner" && <DashboardCMS dashCms={dashCms} setDashCms={setDashCms} />}
+      {view === "dashcms"      && hasMDAccess(session) && <DashboardCMS dashCms={dashCms} setDashCms={setDashCms} />}
       {view === "patients"     && <PatientsSection     {...sharedProps} />}
       {view === "patientBill"  && <PatientBillSection  {...sharedProps} />}
       {view === "optometrist"  && <OptometristSection  {...sharedProps} />}
@@ -564,10 +565,10 @@ export default function App() {
       {view === "alerts"       && <AlertsSection       {...sharedProps} />}
       {view === "tasks"        && <TasksSection        {...sharedProps} accounts={accounts} />}
       {view === "reminders"    && <RemindersSection    {...sharedProps} />}
-      {view === "auditlog"     && session.role === "owner" && <AuditLogSection auditLog={auditLog} accounts={accounts} />}
-      {view === "dashbuilder"  && session.role === "owner" && <DashboardBuilder fieldVis={fieldVis} setFieldVis={setFieldVis} accounts={accounts} setAccounts={updateAccounts} />}
-      {view === "users"        && session.role === "owner" && <UsersSection accounts={accounts} setAccounts={updateAccounts} audit={audit} />}
-      {view === "supabase"     && session.role === "owner" && <SupabaseSection sbCreds={sbCreds} sbStatus={sbStatus} onConnect={connectSupabase} onSync={syncFromSupabase} onPush={pushToSupabase} />}
+      {view === "auditlog"     && hasOwnerOrMD(session) && <AuditLogSection auditLog={auditLog} accounts={accounts} />}
+      {view === "dashbuilder"  && hasMDAccess(session) && <DashboardBuilder fieldVis={fieldVis} setFieldVis={setFieldVis} accounts={accounts} setAccounts={updateAccounts} />}
+      {view === "users"        && hasOwnerOrMD(session) && <UsersSection accounts={accounts} setAccounts={updateAccounts} audit={audit} />}
+      {view === "supabase"     && hasMDAccess(session) && <SupabaseSection sbCreds={sbCreds} sbStatus={sbStatus} onConnect={connectSupabase} onSync={syncFromSupabase} onPush={pushToSupabase} />}
       {view === "launchguide"  && <LaunchGuide />}
     </Shell>
   );
@@ -677,11 +678,11 @@ function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastS
     { id: "patientStatus",label: "Patient Status",   icon: "🚦", show: true },
     { id: "counselling",  label: "Counselling Room", icon: "💬", show: hasMDAccess(session) },
     { id: "divider" },
-    { id: "auditlog",    label: "Audit Log",        icon: "📋", show: isOwner },
-    { id: "dashbuilder", label: "Dashboard Builder",icon: "🏗", show: isOwner },
-    { id: "dashcms",     label: "Dashboard CMS",    icon: "🎨", show: isOwner },
-    { id: "users",       label: "Manage Staff",     icon: "👥", show: isOwner },
-    { id: "supabase",    label: "Cloud Sync",       icon: "☁", show: isOwner, badge: sbStatus === "error" ? "!" : 0, badgeColor: "#dc2626" },
+    { id: "auditlog",    label: "Audit Log",        icon: "📋", show: hasOwnerOrMD(session) },
+    { id: "dashbuilder", label: "Dashboard Builder",icon: "🏗", show: hasMDAccess(session) },
+    { id: "dashcms",     label: "Dashboard CMS",    icon: "🎨", show: hasMDAccess(session) },
+    { id: "users",       label: "Manage Staff",     icon: "👥", show: hasOwnerOrMD(session) },
+    { id: "supabase",    label: "Cloud Sync",       icon: "☁", show: hasMDAccess(session), badge: sbStatus === "error" ? "!" : 0, badgeColor: "#dc2626" },
     { id: "launchguide", label: "Launch Guide",     icon: "🚀", show: true },
   ];
   const sbDot = { ok: "#16a34a", error: "#dc2626", testing: "#d97706", pushing: "#d97706", syncing: "#d97706" }[sbStatus] || "#9b8e82";
@@ -767,7 +768,7 @@ function Dashboard({ session, data, setView, auditLog, dashCms }) {
     .map(([key, b]) => ({ key, ...b, value: blockValues[key] ?? 0, click: () => setView(b.link || blockLinks[key] || "dashboard") }));
 
   const sortedPanels = Object.entries(cms.panels || {})
-    .filter(([, p]) => p.enabled !== false && (!p.ownerOnly || isOwner))
+    .filter(([, p]) => p.enabled !== false && (!p.ownerOnly || hasMDAccess(session)))
     .sort((a, b) => (a[1].order || 0) - (b[1].order || 0));
 
   // Today's K Sheets with advice (owner view)
@@ -782,7 +783,7 @@ function Dashboard({ session, data, setView, auditLog, dashCms }) {
           <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 26, fontWeight: 700 }}>Welcome, {session.name} 👋</div>
           <div style={{ fontSize: 13, color: "#9b8e82", marginTop: 3 }}>{isOwner ? "All Branches" : myBranch} · Live · {ts()}</div>
         </div>
-        {isOwner && (
+        {hasMDAccess(session) && (
           <div style={{ display:"flex", gap:8 }}>
             <button className="btn btn-outline btn-sm" onClick={() => setView("dashcms")}>🎨 Edit Dashboard (CMS)</button>
             <button className="btn btn-outline btn-sm" onClick={() => setView("dashbuilder")}>⚙ Field Builder</button>
