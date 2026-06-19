@@ -1,14 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import BRAND_LOGO_ASSET from "./assets/sri-surya-logo.png.asset.json";
-const BRAND_LOGO = BRAND_LOGO_ASSET.url;
-const BRAND_NAME = "Sri Surya Eye Care Hospital";
-const BRAND_TAG  = "powered by OptiManager HMS";
 
 // ════════════════════════════════════════════════════════════════════════
 // v4.9 — Ophthalmology HMS | Fixed Permissions Bug · Staff Editing
 // ════════════════════════════════════════════════════════════════════════
 const APP_VER  = "4.10";
-const BRANCHES = ["KKD_Main Branch"];
+const BRANCHES = ["JPT Branch", "PRP Branch"];
 const SECTIONS = ["patients","patientBill","optometrist","opticals","inventory","invoices","alerts"];
 const SECTION_LABELS = { patients:"OP Registration", patientBill:"K Sheet Entry", optometrist:"Optometrist", opticals:"Opticals", inventory:"Inventory", invoices:"Sales & Invoices", alerts:"Low Stock Alerts" };
 const LENS_TYPES     = ["Single Vision","Bifocal","Progressive","Anti-Reflective","Photochromic","Blue Cut","UV400","Polarized","High Index 1.60","High Index 1.67","High Index 1.74","Trivex","Polycarbonate","Toric (Contact)","Multifocal (Contact)"];
@@ -58,7 +54,7 @@ p{line-height:1.7}
 
 const DEFAULT_ACCOUNTS = [
   { id:"owner",      name:"Owner",       role:"owner", designation: "MD", branch:"All",        password:"owner123", perms:{} },
-  { id:"staff_kkd1", name:"Ravi (KKD)",  role:"staff", designation: "FRONT DESK STAFF", branch:"KKD_Main Branch", password:"kkd1234",
+  { id:"staff_jpt1", name:"Ravi (JPT)",  role:"staff", designation: "FRONT DESK STAFF", branch:"JPT Branch", password:"jpt1234",
     perms:{ patients:{view:true,add:true,edit:false}, patientBill:{view:true,add:true,edit:false}, optometrist:{view:true,add:true,edit:false}, opticals:{view:true,add:true,edit:false}, inventory:{view:true,add:false,edit:false}, invoices:{view:true,add:false,edit:false}, alerts:{view:true,add:false,edit:false} }
   },
 ];
@@ -164,26 +160,11 @@ async function sbUpsertOne(table, row) {
   } catch(e) { return { ok: false, error: String(e) }; }
 }
 
-function normalizeRowKeys(rows) {
-  // PostgREST PGRST102 "All object keys must match" — every row in a bulk
-  // upsert must have the exact same set of keys. Union all keys and fill
-  // missing ones with null.
-  const keySet = new Set();
-  for (const r of rows) if (r && typeof r === "object") for (const k of Object.keys(r)) keySet.add(k);
-  const keys = Array.from(keySet);
-  return rows.map(r => {
-    const out = {};
-    for (const k of keys) out[k] = (r && k in r) ? r[k] : null;
-    return out;
-  });
-}
-
 async function sbUpsertMany(table, rows) {
   if (!_sb) return { ok: false, error: "Not connected" };
   if (!rows.length) return { ok: true, error: null };
   try {
-    const packed = table === "patientBill" ? rows.map(packKSheetForLegacyTable) : rows;
-    const payload = normalizeRowKeys(packed);
+    const payload = table === "patientBill" ? rows.map(packKSheetForLegacyTable) : rows;
     let result = await sbPostPayload(table, payload, "resolution=merge-duplicates,return=minimal");
     if (!result.ok) result = await sbPostPayloadPruned(table, payload, "resolution=merge-duplicates,return=minimal");
     if (!result.ok) console.warn(`sbUpsertMany ${table}:`, result.error);
@@ -543,9 +524,9 @@ function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
       <style>{GCSS}</style>
       <div style={{ width: 420, background: "#fff", borderRadius: 24, padding: "42px 38px", boxShadow: "0 40px 100px rgba(0,0,0,.5)" }}>
         <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <img src={BRAND_LOGO} alt={BRAND_NAME} style={{ width: 84, height: 84, borderRadius: "50%", margin: "0 auto 12px", display: "block", objectFit: "cover" }} />
-          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700, lineHeight: 1.2 }}>{BRAND_NAME}</div>
-          <div style={{ fontSize: 11, color: "#9b8e82", marginTop: 4 }}>{BRAND_TAG} · v{APP_VER}</div>
+          <div style={{ width: 60, height: 60, background: "#1a1714", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", fontSize: 28 }}>👁</div>
+          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 24, fontWeight: 700 }}>OptiManager</div>
+          <div style={{ fontSize: 12, color: "#9b8e82", marginTop: 3 }}>v{APP_VER} · Ophthalmology HMS</div>
         </div>
         <div style={{ marginBottom: 18, background: "#f0ede8", borderRadius: 12, padding: "14px 16px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -570,7 +551,7 @@ function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
             </select>
           </div>
           <div><label>User ID</label>
-            <input type="text" placeholder="owner / staff_kkd1" value={userId} onChange={e => { setUserId(e.target.value); setErr(""); }} />
+            <input type="text" placeholder="owner / staff_jpt1" value={userId} onChange={e => { setUserId(e.target.value); setErr(""); }} />
           </div>
           <div><label>Password</label>
             <div style={{ position: "relative" }}>
@@ -615,12 +596,9 @@ function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastS
     <div style={{ display: "flex", minHeight: "100vh", fontFamily: "'DM Sans',sans-serif", background: "#f0ede8", color: "#1a1714" }}>
       <style>{GCSS}</style>
       <aside style={{ width: 236, background: "#fff", borderRight: "1px solid #e8e2db", padding: "18px 10px", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh", flexShrink: 0, overflowY: "auto" }}>
-        <div style={{ padding: "0 8px 14px", borderBottom: "1px solid #f0ede8", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
-          <img src={BRAND_LOGO} alt={BRAND_NAME} style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 13, fontWeight: 700, lineHeight: 1.1 }}>{BRAND_NAME}</div>
-            <div style={{ fontSize: 9, color: "#9b8e82", marginTop: 2, display: "flex", alignItems: "center", gap: 5 }}>{BRAND_TAG} · v{APP_VER} <span style={{ width: 7, height: 7, borderRadius: "50%", background: sbDot, display: "inline-block" }} title={`Supabase: ${sbStatus}`} /></div>
-          </div>
+        <div style={{ padding: "0 8px 14px", borderBottom: "1px solid #f0ede8", marginBottom: 10 }}>
+          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 16, fontWeight: 700 }}>👁 OptiManager</div>
+          <div style={{ fontSize: 10, color: "#9b8e82", marginTop: 1, display: "flex", alignItems: "center", gap: 5 }}>v{APP_VER} <span style={{ width: 7, height: 7, borderRadius: "50%", background: sbDot, display: "inline-block" }} title={`Supabase: ${sbStatus}`} /></div>
         </div>
         <div style={{ margin: "0 4px 12px", background: "#f0ede8", borderRadius: 10, padding: "9px 12px" }}>
           <div style={{ fontSize: 13, fontWeight: 700 }}>{session.name}</div>
@@ -1025,7 +1003,7 @@ function DashboardBuilder({ fieldVis, setFieldVis, accounts, setAccounts }) {
 
 function PatientsSection({ session, data, mutate, can, audit, onSync, syncing }) {
   const isOwner  = session.role === "owner";
-  const branch   = session.branch || "KKD_Main Branch";
+  const branch   = session.branch || "JPT Branch";
   const rows = safeArray(data.patients).filter(x => (isOwner || x.branch === branch));
 
   const [modal, setModal] = useState(false);
@@ -1045,7 +1023,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
   const blank = () => ({
     timestamp: ts(), date: todayStr(), time: timeStr(), mrNo: "", patientId: nextPatientId(),
     name: "", phone: "", address: "", ref: "", paymentAmount: "", paymentMode: "Cash", paymentRefNo: "",
-    branch: isOwner ? "KKD_Main Branch" : branch, remarks: "", visitType: "New Patient", visitCount: 1,
+    branch: isOwner ? "JPT Branch" : branch, remarks: "", visitType: "New Patient", visitCount: 1,
   });
 
   const F = k => e => { setForm(f => ({ ...f, [k]: e.target.value })); setDupWarning(null); };
@@ -1131,7 +1109,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
             <div><label>Payment Amount (₹)</label><input type="number" value={form.paymentAmount} onChange={F("paymentAmount")} /></div>
             <div><label>Payment Mode</label><select value={form.paymentMode} onChange={F("paymentMode")}>{["Cash","UPI","Card","Cheque","Free","Camp"].map(m => <option key={m}>{m}</option>)}</select></div>
             {(form.paymentMode === "UPI" || form.paymentMode === "Card" || form.paymentMode === "Cheque") && (<div><label>Payment Ref No</label><input type="text" placeholder="Transaction / Cheque No" value={form.paymentRefNo} onChange={F("paymentRefNo")} /></div>)}
-            {isOwner && (<div><label>Branch</label><select value={form.branch} onChange={F("branch")}>{["KKD_Main Branch"].map(b => <option key={b}>{b}</option>)}</select></div>)}
+            {isOwner && (<div><label>Branch</label><select value={form.branch} onChange={F("branch")}>{["JPT Branch","PRP Branch"].map(b => <option key={b}>{b}</option>)}</select></div>)}
             <div style={{ gridColumn:"1/-1" }}><label>Remarks</label><textarea rows={2} value={form.remarks} onChange={F("remarks")} placeholder="Any remarks…" /></div>
           </div>
         </Modal>
@@ -1142,7 +1120,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
 
 function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing }) {
   const isOwner = session.role === "owner";
-  const branch  = session.branch || "KKD_Main Branch";
+  const branch  = session.branch || "JPT Branch";
   const rows    = safeArray(data.patientBill).filter(x => (isOwner || x.branch === branch));
 
   const [modal, setModal] = useState(false);
@@ -1200,25 +1178,11 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
   );
 
   const submit = () => {
-    if (form.id) {
-      const updated = { ...form, updatedBy: session.id, updatedByName: session.name, updatedAt: ts() };
-      mutate("patientBill", arr => arr.map(x => x.id === form.id ? updated : x), updated);
-      audit("EDIT",{type:"patientBill",name:form.name,id:form.id});
-      setModal(false); setMsg("K Sheet updated.");
-      return;
-    }
-    const record = { id: uid(), branch: isOwner ? "KKD_Main Branch" : branch, ...form, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
     mutate("patientBill", arr => [...arr, record], record); 
     audit("ADD",{type:"patientBill",name:form.name}); 
     setModal(false); setMsg("K Sheet saved successfully. Full optom details are packed for lookup sync.");
   };
-
-  const openEdit = (row) => { setForm(unpackKSheetRow({ ...row })); setTouch({}); setMsg(""); setTab("basic"); setMrLookup(""); setModal(true); };
-  const [viewRow, setViewRow] = useState(null);
-  const openView = (row) => setViewRow(unpackKSheetRow({ ...row }));
-
-  const canEdit = isOwner || can("patientBill","edit");
-  const canView = isOwner || can("patientBill","view");
 
   const del = id => { if (confirm("Delete K Sheet?")) { mutate("patientBill", arr => arr.filter(x => x.id!==id)); audit("DELETE",{type:"patientBill",id}); } };
 
@@ -1247,23 +1211,18 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
       <div style={{ marginBottom:12 }}><input type="text" placeholder="🔍 Search by name, phone, MR No, Patient ID…" value={search} onChange={e=>setSearch(e.target.value)} style={{ width:"100%", maxWidth:420, borderRadius:10, border:"1px solid #e8e2db", padding:"8px 14px", fontSize:13 }} /></div>
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
-          <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Complaint</th><th>IOP</th><th>Optom</th><th>By</th><th>Branch</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Complaint</th><th>IOP</th><th>Optom</th><th>By</th><th>Branch</th>{isOwner && <th></th>}</tr></thead>
           <tbody>{filtered.map(r => (
             <tr key={r.id}>
               <td style={{ fontSize:11, color:"#9b8e82", whiteSpace:"nowrap" }}>{r.timestamp}</td>
-              <td style={{ fontWeight:700, fontFamily:"monospace" }}>{r.mrNo}</td>
-              <td style={{ fontFamily:"monospace", color:"#1d4ed8", cursor: canView?"pointer":"default", textDecoration: canView?"underline":"none" }} onClick={()=>canView && openView(r)}>{r.patientId || "—"}</td>
-              <td style={{ fontWeight:600, cursor: canView?"pointer":"default" }} onClick={()=>canView && openView(r)}>{r.name}</td><td>{r.phone}</td><td>{r.gender}</td><td>{r.age}</td>
+              <td style={{ fontWeight:700, fontFamily:"monospace" }}>{r.mrNo}</td><td style={{ fontFamily:"monospace", color:"#1d4ed8" }}>{r.patientId || "—"}</td>
+              <td style={{ fontWeight:600 }}>{r.name}</td><td>{r.phone}</td><td>{r.gender}</td><td>{r.age}</td>
               <td style={{ maxWidth:160, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.complaint || "—"}</td>
               <td style={{ fontFamily:"monospace", fontSize:12 }}>{r.iop || "—"}</td>
               <td style={{ fontSize:12, color:"#9b8e82" }}>{r.optom || "—"}</td>
               <td style={{ fontSize:11, color:"#9b8e82" }}>{r.createdByName||"—"}</td>
               <td><span className="tag" style={{ background:"#f0ede8", color:"#6b5e52" }}>{r.branch}</span></td>
-              <td><div style={{ display:"flex", gap:6 }}>
-                <button className="btn btn-outline btn-sm" disabled={!canView} style={!canView?{opacity:.35,cursor:"not-allowed"}:{}} onClick={()=>canView && openView(r)}>View</button>
-                <button className="btn btn-outline btn-sm" disabled={!canEdit} style={!canEdit?{opacity:.35,cursor:"not-allowed"}:{}} onClick={()=>canEdit && openEdit(r)}>Edit</button>
-                {isOwner && <button className="btn btn-danger btn-sm" onClick={()=>del(r.id)}>✕</button>}
-              </div></td>
+              {isOwner && <td><button className="btn btn-danger btn-sm" onClick={()=>del(r.id)}>✕</button></td>}
             </tr>
           ))}</tbody>
         </table>
@@ -1372,25 +1331,13 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
           )}
         </Modal>
       )}
-      {viewRow && (
-        <Modal title={`Patient Record · ${viewRow.name || viewRow.mrNo || ""}`} onClose={()=>setViewRow(null)} onSave={()=>setViewRow(null)} saveLabel="Close" wide>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:10, fontSize:12 }}>
-            {Object.entries(viewRow).filter(([k])=>!["_lookup"].includes(k)).map(([k,v]) => (
-              <div key={k} style={{ background:"#faf9f7", border:"1px solid #f0ede8", borderRadius:8, padding:"8px 10px" }}>
-                <div style={{ fontSize:10, color:"#9b8e82", textTransform:"uppercase", fontWeight:700, letterSpacing:".05em" }}>{k}</div>
-                <div style={{ fontFamily:"monospace", wordBreak:"break-word", marginTop:3 }}>{v===""||v==null?"—":String(v)}</div>
-              </div>
-            ))}
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }
 
 function OptometristSection({ session, data, mutate, can, audit, onSync, syncing }) {
   const isOwner = session.role === "owner";
-  const branch  = session.branch || "KKD_Main Branch";
+  const branch  = session.branch || "JPT Branch";
   const rows    = safeArray(data.optometrist).filter(x => (isOwner || x.branch === branch));
 
   const [modal, setModal] = useState(false);
@@ -1413,7 +1360,7 @@ function OptometristSection({ session, data, mutate, can, audit, onSync, syncing
 
   const submit = () => {
     if (!form.name.trim()) { setMsg("Patient name required."); return; }
-    const record = { id: uid(), branch: isOwner ? "KKD_Main Branch" : branch, ...form, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
     mutate("optometrist", arr=>[...arr, record], record); setModal(false); setMsg("Saved.");
   };
 
@@ -1456,7 +1403,7 @@ function OptometristSection({ session, data, mutate, can, audit, onSync, syncing
 
 function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing }) {
   const isOwner = session.role === "owner";
-  const branch  = session.branch || "KKD_Main Branch";
+  const branch  = session.branch || "JPT Branch";
   const rows    = safeArray(data.opticals).filter(x => (isOwner || x.branch === branch));
 
   const [modal,    setModal]    = useState(false);
@@ -1484,20 +1431,10 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
   const calcBalance = () => { setForm(f => ({ ...f, balance: String(Math.max(0, (parseFloat(f.totalPrice)||0) - (parseFloat(f.advance)||0))) })); };
 
   const submit = () => {
-    if (!form.name || !form.name.trim()) { setMsg("Patient name required."); return; }
-    if (form.id) {
-      const updated = { ...form, updatedBy: session.id, updatedByName: session.name, updatedAt: ts() };
-      mutate("opticals", arr => arr.map(x => x.id === form.id ? updated : x), updated);
-      audit("EDIT",{type:"opticals",name:form.name,id:form.id});
-      setModal(false); setMsg("Opticals updated.");
-      return;
-    }
-    const record = { id: uid(), branch: isOwner ? "KKD_Main Branch" : branch, ...form, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    if (!form.name.trim()) { setMsg("Patient name required."); return; }
+    const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
     mutate("opticals", arr=>[...arr, record], record); setModal(false); setMsg("Opticals saved.");
   };
-
-  const openEdit = (row) => { setForm({ ...row }); setRxPreview(null); setMrLookup(""); setMsg(""); setModal(true); };
-  const canEdit = isOwner || can("opticals","edit");
 
   const del = id => { if (confirm("Delete?")) { mutate("opticals", arr=>arr.filter(x=>x.id!==id)); audit("DELETE",{type:"opticals",id}); } };
   const filtered = rows.filter(r => !search || r.name?.toLowerCase().includes(search.toLowerCase()) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) || r.patientId?.toLowerCase().includes(search.toLowerCase()));
@@ -1511,7 +1448,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
           <thead><tr>
             <th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th>
             <th>Lens Type</th><th>Frame No</th><th>Total Price</th><th>Advance</th><th>Balance</th>
-            <th>Delivery</th><th>Adv. Method</th><th>Txn ID</th><th>Rep</th><th>Branch</th><th>Actions</th>
+            <th>Delivery</th><th>Adv. Method</th><th>Txn ID</th><th>Rep</th><th>Branch</th>{isOwner&&<th></th>}
           </tr></thead>
           <tbody>{filtered.map(r => (
             <tr key={r.id}>
@@ -1524,10 +1461,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
               <td><span className={`tag ${r.deliveryStatus==="Delivered"?"tag-green":r.deliveryStatus==="Not Ready"?"tag-red":"tag-yellow"}`} style={{ fontSize:10 }}>{r.deliveryStatus==="Fixing Completed But Not Delivered"?"Fixing Done":(r.deliveryStatus||"—")}</span></td>
               <td><span className="tag tag-blue">{r.advancePaymentMethod||"—"}</span></td><td style={{ fontSize:11,fontFamily:"monospace",color:"#9b8e82" }}>{r.transactionId||"—"}</td>
               <td style={{ fontSize:11,color:"#9b8e82" }}>{r.optomName||"—"}</td><td><span className="tag" style={{ background:"#f0ede8",color:"#6b5e52" }}>{r.branch}</span></td>
-              <td><div style={{ display:"flex", gap:6 }}>
-                <button className="btn btn-outline btn-sm" disabled={!canEdit} style={!canEdit?{opacity:.35,cursor:"not-allowed"}:{}} onClick={()=>canEdit && openEdit(r)}>Edit</button>
-                {isOwner && <button className="btn btn-danger btn-sm" onClick={()=>del(r.id)}>✕</button>}
-              </div></td>
+              {isOwner && <td><button className="btn btn-danger btn-sm" onClick={()=>del(r.id)}>✕</button></td>}
             </tr>
           ))}</tbody>
         </table>
@@ -1556,7 +1490,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
 
 function InventorySection({ session, data, mutate, can, audit, onSync, syncing }) {
   const isOwner = session.role === "owner";
-  const branch  = session.branch || "KKD_Main Branch";
+  const branch  = session.branch || "JPT Branch";
   const rows    = safeArray(data.stock).filter(x => isOwner || x.branch === branch);
   const [search, setSearch] = useState(""); const [cat, setCat] = useState("All");
   const [modal,  setModal]  = useState(null); const [msg, setMsg] = useState("");
@@ -1566,7 +1500,7 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
   const filtered = rows.filter(s => (cat === "All" || s.category === cat) && (s.name.toLowerCase().includes(search.toLowerCase()) || s.sku.toLowerCase().includes(search.toLowerCase())));
   const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
   
-  const open = s => { setForm(s ? { ...s } : { ...blank, branch: isOwner ? "KKD_Main Branch" : branch }); setModal(s || "add"); };
+  const open = s => { setForm(s ? { ...s } : { ...blank, branch: isOwner ? "JPT Branch" : branch }); setModal(s || "add"); };
   
   const save = () => {
     const item = { ...form, qty: Number(form.qty), reorder: Number(form.reorder), cost: Number(form.cost), price: Number(form.price) };
@@ -1614,7 +1548,7 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
 
 function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing }) {
   const isOwner = session.role === "owner";
-  const branch  = session.branch || "KKD_Main Branch";
+  const branch  = session.branch || "JPT Branch";
   const rows    = safeArray(data.invoices).filter(x => (isOwner || x.branch === branch));
   const [modal, setModal] = useState(false);
   const [form,  setForm]  = useState({ patientName: "", date: todayStr(), items: [], discount: 0 });
@@ -1626,7 +1560,7 @@ function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing })
   
   const save = () => {
     if (!form.patientName || !form.items.length) return;
-    const record = { id: `INV-${uid().slice(0, 6).toUpperCase()}`, branch: isOwner ? "KKD_Main Branch" : branch, ...form, discount: Number(form.discount), approvalStatus: "approved", status: "Pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    const record = { id: `INV-${uid().slice(0, 6).toUpperCase()}`, branch: isOwner ? "JPT Branch" : branch, ...form, discount: Number(form.discount), approvalStatus: "approved", status: "Pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
     mutate("invoices", arr => [...arr, record], record); audit("ADD", { type: "invoices" }); setModal(false);
   };
   const total = inv => safeArray(inv.items).reduce((s, i) => s + i.qty * i.price, 0) - (inv.discount || 0);
@@ -1663,7 +1597,7 @@ function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing })
 
 function AlertsSection({ session, data, mutate, onSync, syncing }) {
   const isOwner = session.role === "owner";
-  const branch  = session.branch || "KKD_Main Branch";
+  const branch  = session.branch || "JPT Branch";
   const low     = safeArray(data.stock).filter(s => (isOwner || s.branch === branch) && s.qty <= s.reorder);
   const [modal, setModal] = useState(null); const [qty, setQty] = useState(0);
   return (
@@ -1741,7 +1675,7 @@ function TasksSection({ session, data, mutate, audit, accounts, onSync, syncing 
 
 function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
   const isOwner = session.role === "owner";
-  const branch  = session.branch || "KKD_Main Branch";
+  const branch  = session.branch || "JPT Branch";
   const allReminders = safeArray(data.reminders);
   const rows = isOwner ? allReminders : allReminders.filter(r => r.branch === branch);
 
@@ -1749,7 +1683,7 @@ function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
   const [msg,   setMsg]   = useState(""); const [mrLookup, setMrLookup] = useState("");
   const [filter, setFilter] = useState("upcoming");
 
-  const blank = () => ({ mrNo: "", patientId: "", name: "", phone: "", reminderType: "Lens Delivery", reminderDate: todayStr(), notes: "", branch: isOwner ? "KKD_Main Branch" : branch });
+  const blank = () => ({ mrNo: "", patientId: "", name: "", phone: "", reminderType: "Lens Delivery", reminderDate: todayStr(), notes: "", branch: isOwner ? "JPT Branch" : branch });
   const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
   const lookupPatient = (query) => {
@@ -1908,7 +1842,7 @@ function Modal({ title, children, onClose, onSave, saveLabel = "Save", wide, xl,
 // ════════════════════════════════════════════════════════════════════════
 function PatientStatusSection({ session, data, onSync, syncing }) {
   const isOwner = session.role === "owner";
-  const branch  = session.branch || "KKD_Main Branch";
+  const branch  = session.branch || "JPT Branch";
   const [search, setSearch] = useState("");
   const [statusF, setStatusF] = useState("ALL");
   const [todayOnly, setTodayOnly] = useState(false);
@@ -2087,7 +2021,7 @@ function DashboardCMS({ dashCms, setDashCms }) {
 // ════════════════════════════════════════════════════════════════════════
 function CounsellingSection({ session, data, mutate, audit, onSync, syncing }) {
   const isOwner = session.role === "owner";
-  const branch  = session.branch || "KKD_Main Branch";
+  const branch  = session.branch || "JPT Branch";
   const rows = safeArray(data.counselling).filter(x => (isOwner || hasMDAccess(session) || x.branch === branch));
 
   const [modal, setModal] = useState(false);
@@ -2100,7 +2034,7 @@ function CounsellingSection({ session, data, mutate, audit, onSync, syncing }) {
     timestamp: ts(), date: todayStr(), time: timeStr(),
     mrNo: "", patientId: "", name: "", phone: "",
     advice: "", remarks: "",
-    counsellor: session.name, branch: isOwner ? "KKD_Main Branch" : branch,
+    counsellor: session.name, branch: isOwner ? "JPT Branch" : branch,
   });
 
   const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -2202,7 +2136,7 @@ function CounsellingSection({ session, data, mutate, audit, onSync, syncing }) {
             {isOwner && <div><label>Branch</label><select value={form.branch} onChange={F("branch")}>{BRANCHES.map(b => <option key={b}>{b}</option>)}</select></div>}
           </div>
         </Modal>
-    )}
+      )}
     </div>
   );
 }
