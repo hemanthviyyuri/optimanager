@@ -560,6 +560,7 @@ export default function App() {
       {view === "patientBill"  && <PatientBillSection  {...sharedProps} />}
       {view === "optometrist"  && <OptometristSection  {...sharedProps} />}
       {view === "opticals"     && <OpticalsSection     {...sharedProps} />}
+      {view === "opticalsStatus" && <OpticalsStatusSection {...sharedProps} />}
       {view === "inventory"    && <InventorySection    {...sharedProps} />}
       {view === "invoices"     && <InvoicesSection     {...sharedProps} />}
       {view === "alerts"       && <AlertsSection       {...sharedProps} />}
@@ -670,6 +671,7 @@ function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastS
     { id: "patientBill",  label: "K Sheet Entry",    icon: "🧾", show: can("patientBill", "view") },
     
     { id: "opticals",     label: "Opticals",         icon: "🔭", show: can("opticals", "view") },
+    { id: "opticalsStatus",label: "Opticals Status", icon: "📦", show: can("opticals", "view") },
     { id: "inventory",    label: "Inventory",        icon: "▦", show: can("inventory", "view") },
     { id: "invoices",     label: "Sales & Invoices", icon: "◆", show: can("invoices", "view") },
     { id: "alerts",       label: "Low Stock Alerts", icon: "▲", show: can("alerts", "view") },
@@ -1141,6 +1143,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
     setTouch({ phone: true, name: true, address: true, mrNo: true });
     if (!validate.phone(form.phone) || !form.name.trim() || !form.address.trim() || !form.mrNo.trim()) { setMsg("Fill required fields correctly."); return; }
     if (form.visitType === "Camp" && !String(form.ref || "").trim()) { setMsg("Ref/Camp is required when Visit Type is Camp."); return; }
+    if ((form.paymentMode === "Card" || form.paymentMode === "UPI") && !String(form.paymentRefNo || "").trim()) { setMsg("Payment Ref No is required for Card / UPI payments."); return; }
     if (form.id) {
       const updated = { ...form, updatedBy: session.id, updatedByName: session.name, updatedAt: ts() };
       mutate("patients", arr => arr.map(x => x.id === form.id ? { ...x, ...updated } : x), updated);
@@ -1226,7 +1229,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
       </div>
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
-          <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Address</th><th>Payment</th><th>Amount</th><th>Ref/Camp</th><th>Visit</th><th>Branch</th><th>Remarks</th><th></th></tr></thead>
+          <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Address</th><th>Payment</th><th>Payment Ref No</th><th>Amount</th><th>Ref/Camp</th><th>Visit</th><th>Branch</th><th>Remarks</th><th></th></tr></thead>
           <tbody>{filtered.map(r => (
             <tr key={r.id}>
               <td style={{ fontSize:11, whiteSpace:"nowrap", color:"#9b8e82" }}>{r.timestamp}</td>
@@ -1235,6 +1238,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
               <td style={{ fontWeight:600, cursor: canViewDetail?"pointer":"default" }} onClick={() => canViewDetail && setViewRow(r)}>{r.name}</td><td>{r.phone}</td>
               <td style={{ maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.address}</td>
               <td><span className="tag tag-blue">{r.paymentMode}</span></td>
+              <td style={{ fontSize:11, fontFamily:"monospace", color:"#9b8e82" }}>{r.paymentRefNo || "—"}</td>
               <td style={{ fontWeight:600 }}>{r.paymentAmount ? `₹${r.paymentAmount}` : "—"}</td>
               <td style={{ fontSize:12, color:"#9b8e82" }}>{r.ref || "—"}</td>
               <td><span className="tag" style={{ background:r.visitType === "Camp" ? "#fef3c7" : "#f0ede8", color:r.visitType === "Camp" ? "#92400e" : "#6b5e52" }}>{r.visitType || "New Patient"}</span></td>
@@ -1675,6 +1679,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
 
   const submit = () => {
     if (!form.name || !form.name.trim()) { setMsg("Patient name required."); return; }
+    if ((form.advancePaymentMethod === "Card" || form.advancePaymentMethod === "UPI") && !String(form.transactionId || "").trim()) { setMsg("Payment Ref No is required for Card / UPI payments."); return; }
     if (form.id) {
       const updated = { ...form, updatedBy: session.id, updatedByName: session.name, updatedAt: ts() };
       mutate("opticals", arr => arr.map(x => x.id === form.id ? updated : x), updated);
@@ -1701,7 +1706,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
           <thead><tr>
             <th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th>
             <th>Lens Type</th><th>Frame No</th><th>Total Price</th><th>Advance</th><th>Balance</th>
-            <th>Delivery</th><th>Adv. Method</th><th>Txn ID</th><th>Rep</th><th>Branch</th><th>Actions</th>
+            <th>Delivery</th><th>Adv. Method</th><th>Payment Ref No</th><th>Rep</th><th>Branch</th><th>Actions</th>
           </tr></thead>
           <tbody>{filtered.map(r => (
             <tr key={r.id}>
@@ -1734,7 +1739,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
             <div><label>Frame No</label><input type="text" placeholder="e.g. FR-A12" value={form.frameNo} onChange={F("frameNo")} /></div>
             <div><label>Total Price (₹) *</label><input type="number" value={form.totalPrice} onChange={F("totalPrice")} onBlur={calcBalance} /></div><div><label>Advance (₹)</label><input type="number" value={form.advance} onChange={F("advance")} onBlur={calcBalance} /></div><div><label>Balance (₹)</label><input type="number" value={form.balance} readOnly style={{ background:"#f0ede8" }} /></div>
             <div><label>Advance Payment Method</label><select value={form.advancePaymentMethod} onChange={F("advancePaymentMethod")}>{["Cash","UPI","Card","Cheque","NA"].map(m=><option key={m}>{m}</option>)}</select></div>
-            {(form.advancePaymentMethod==="UPI"||form.advancePaymentMethod==="Card"||form.advancePaymentMethod==="Cheque") && (<div><label>Txn ID / Ref No</label><input type="text" value={form.transactionId} onChange={F("transactionId")} /></div>)}
+            {(form.advancePaymentMethod==="UPI"||form.advancePaymentMethod==="Card"||form.advancePaymentMethod==="Cheque") && (<div><label>Payment Ref No{(form.advancePaymentMethod==="UPI"||form.advancePaymentMethod==="Card")?" *":""}</label><input type="text" placeholder="Transaction / Cheque No" value={form.transactionId} onChange={F("transactionId")} /></div>)}
             <div style={{ gridColumn:"1/-1" }}><label>Delivery Status</label><select value={form.deliveryStatus} onChange={F("deliveryStatus")}>{DELIVERY_STATUS.map(d=><option key={d}>{d}</option>)}</select></div>
             <div><label>Representative Name</label><input type="text" value={form.optomName} onChange={F("optomName")} /></div>
           </div>
@@ -1743,6 +1748,119 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
     </div>
   );
 }
+
+// ── Opticals Status: lookup from Opticals, update delivery status, auto-remind ──
+function OpticalsStatusSection({ session, data, mutate, can, audit, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "KKD_Main Branch";
+  const rows    = safeArray(data.opticals).filter(x => (isOwner || x.branch === branch));
+
+  const [search, setSearch] = useState("");
+  const [msg,    setMsg]    = useState("");
+  const [refEdits, setRefEdits] = useState({});
+
+  const canEdit = isOwner || can("opticals", "edit") || can("opticals", "add");
+
+  const balanceOf = (r) => {
+    const b = r.balance !== "" && r.balance != null ? parseFloat(r.balance) : (parseFloat(r.totalPrice) || 0) - (parseFloat(r.advance) || 0);
+    return Math.max(0, isNaN(b) ? 0 : b);
+  };
+
+  const commitRef = (row) => {
+    const val = (refEdits[row.id] ?? (row.transactionId || "")).trim();
+    if ((row.advancePaymentMethod === "Card" || row.advancePaymentMethod === "UPI") && !val) {
+      setMsg(`Payment Ref No is required for ${row.advancePaymentMethod} payment (${row.name}).`);
+    }
+    if (val === (row.transactionId || "")) return;
+    const updated = { ...row, transactionId: val, updatedBy: session.id, updatedByName: session.name, updatedAt: ts() };
+    mutate("opticals", arr => arr.map(x => x.id === row.id ? updated : x), updated);
+    audit("EDIT", { type: "opticals", name: row.name, id: row.id });
+  };
+
+  const changeDelivery = (row, newStatus) => {
+    if (!canEdit) { setMsg("No permission to update delivery status."); return; }
+    const updated = { ...row, deliveryStatus: newStatus, updatedBy: session.id, updatedByName: session.name, updatedAt: ts() };
+    mutate("opticals", arr => arr.map(x => x.id === row.id ? updated : x), updated);
+    audit("EDIT", { type: "opticals", name: row.name, id: row.id });
+
+    if (newStatus === "Fixing Completed But Not Delivered") {
+      const exists = safeArray(data.reminders).some(rm => rm.sourceOpticalId === row.id && rm.status === "pending");
+      if (!exists) {
+        const rem = {
+          id: uid(),
+          mrNo: row.mrNo || "", patientId: row.patientId || "", name: row.name || "", phone: row.phone || "",
+          reminderType: "Follow-up Visit",
+          reminderDate: todayStr(),
+          notes: "Auto: Fixing completed but not delivered — Front Desk to call patient and arrange delivery.",
+          branch: row.branch || branch,
+          targetDesignation: "FRONT DESK STAFF",
+          sourceOpticalId: row.id,
+          status: "pending",
+          createdBy: session.id, createdByName: session.name, createdAt: ts(),
+        };
+        mutate("reminders", arr => [...arr, rem], rem);
+        audit("REMINDER_ADD", { name: row.name, type: "Front Desk Follow-up Call" });
+        setMsg(`🔔 Reminder created for Front Desk Staff to follow up with ${row.name || "patient"}.`);
+      } else {
+        setMsg(`Front Desk follow-up reminder already pending for ${row.name || "patient"}.`);
+      }
+    }
+  };
+
+  const filtered = rows.filter(r => !search || r.name?.toLowerCase().includes(search.toLowerCase()) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) || r.patientId?.toLowerCase().includes(search.toLowerCase()) || r.phone?.includes(search));
+
+  return (
+    <div>
+      <SectionHeader title="Opticals Status" onSync={onSync} syncing={syncing} msg={msg} />
+      <div style={{ marginBottom:12 }}><input type="text" placeholder="🔍 Search by name, MR No, Patient ID, phone…" value={search} onChange={e=>setSearch(e.target.value)} style={{ width:"100%", maxWidth:420, borderRadius:10, border:"1px solid #e8e2db", padding:"8px 14px", fontSize:13 }} /></div>
+      <div className="card" style={{ overflowX:"auto" }}>
+        <table>
+          <thead><tr>
+            <th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th>
+            <th>Total</th><th>Advance</th><th>Payment Method</th><th>Balance Payment</th><th>Payment Ref No</th><th>Delivery Status</th><th>Rep</th>
+          </tr></thead>
+          <tbody>{filtered.map(r => {
+            const bal = balanceOf(r);
+            const needRef = r.advancePaymentMethod === "Card" || r.advancePaymentMethod === "UPI";
+            return (
+              <tr key={r.id}>
+                <td style={{ fontWeight:700, fontFamily:"monospace" }}>{r.mrNo||"—"}</td>
+                <td style={{ fontFamily:"monospace", color:"#1d4ed8" }}>{r.patientId||"—"}</td>
+                <td style={{ fontWeight:600 }}>{r.name}</td><td>{r.phone||"—"}</td>
+                <td style={{ fontWeight:700 }}>{r.totalPrice?`₹${r.totalPrice}`:"—"}</td>
+                <td>{r.advance?`₹${r.advance}`:"—"}</td>
+                <td><span className="tag tag-blue">{r.advancePaymentMethod||"—"}</span></td>
+                <td style={{ fontWeight:700, color: bal>0?"#dc2626":"#16a34a" }}>{bal>0?`₹${bal}`:"Fully Paid"}</td>
+                <td>
+                  <input
+                    type="text"
+                    placeholder={needRef ? "Required" : "—"}
+                    value={refEdits[r.id] ?? (r.transactionId || "")}
+                    onChange={e => setRefEdits(s => ({ ...s, [r.id]: e.target.value }))}
+                    onBlur={() => commitRef(r)}
+                    disabled={!canEdit}
+                    style={{ width:130, padding:"5px 8px", fontSize:11, fontFamily:"monospace", border: needRef && !(refEdits[r.id] ?? r.transactionId) ? "1.5px solid #dc2626" : "1.5px solid #e2ddd8", borderRadius:7 }}
+                  />
+                </td>
+                <td>
+                  <select
+                    value={r.deliveryStatus || "Not Ready"}
+                    onChange={e => changeDelivery(r, e.target.value)}
+                    disabled={!canEdit}
+                    style={{ width:200, padding:"5px 8px", fontSize:11, borderRadius:7, border:"1.5px solid #e2ddd8", background: r.deliveryStatus==="Delivered" ? "#dcfce7" : r.deliveryStatus==="Fixing Completed But Not Delivered" ? "#fef9c3" : "#fee2e2" }}
+                  >{DELIVERY_STATUS.map(d => <option key={d} value={d}>{d}</option>)}</select>
+                </td>
+                <td style={{ fontSize:11, color:"#9b8e82" }}>{r.optomName||"—"}</td>
+              </tr>
+            );
+          })}</tbody>
+        </table>
+        {filtered.length === 0 && <div style={{ color:"#9b8e82", fontSize:13, padding:20, textAlign:"center" }}>No opticals records found.</div>}
+      </div>
+    </div>
+  );
+}
+
 
 function InventorySection({ session, data, mutate, can, audit, onSync, syncing }) {
   const isOwner = session.role === "owner";
