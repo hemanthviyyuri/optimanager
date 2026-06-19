@@ -78,7 +78,61 @@ const SB_TABLES = {
   stock: "stock", invoices: "invoices", accounts: "accounts", audit_log: "audit_log", tasks: "tasks", reminders: "reminders",
 };
 
+const K_SHEET_PACK_PREFIX = "\n\n__K_SHEET_FULL__:";
+const K_SHEET_DIRECT_FIELDS = new Set(["id","timestamp","date","time","mrNo","patientId","name","phone","address","gender","age","complaint","pastHistory","branch","status","createdBy","createdByName","createdAt"]);
+const K_SHEET_INTERNAL_FIELDS = new Set(["_lookup"]);
+
+function unpackKSheetRow(row) {
+  const text = typeof row?.pastHistory === "string" ? row.pastHistory : "";
+  const idx = text.indexOf(K_SHEET_PACK_PREFIX);
+  if (idx < 0) return row;
+  try {
+    const extra = JSON.parse(decodeURIComponent(text.slice(idx + K_SHEET_PACK_PREFIX.length).trim()));
+    return { ...row, ...extra, pastHistory: text.slice(0, idx).trimEnd() };
+  } catch { return row; }
+}
+
+function packKSheetForLegacyTable(row) {
+  const packed = {};
+  K_SHEET_DIRECT_FIELDS.forEach(k => { if (row[k] !== undefined) packed[k] = row[k]; });
+  const extra = {};
+  Object.entries(row || {}).forEach(([k, v]) => {
+    if (!K_SHEET_DIRECT_FIELDS.has(k) && !K_SHEET_INTERNAL_FIELDS.has(k) && v !== undefined && v !== null && v !== "") extra[k] = v;
+  });
+  if (Object.keys(extra).length) {
+    const cleanPastHistory = String(row.pastHistory || "").split(K_SHEET_PACK_PREFIX)[0].trimEnd();
+    packed.pastHistory = `${cleanPastHistory}${K_SHEET_PACK_PREFIX}${encodeURIComponent(JSON.stringify(extra))}`;
+  }
+  return packed;
+}
+
+const missingColumnFromError = (txt) => String(txt || "").match(/'([^']+)' column/)?.[1] || null;
+
 function sbHeaders() { return { "Content-Type": "application/json", "apikey": _sb.key, "Authorization": `Bearer ${_sb.key}` }; }
+
+async function sbPostPayload(table, payload, prefer) {
+  const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}`, {
+    method: "POST", headers: { ...sbHeaders(), "Prefer": prefer }, body: JSON.stringify(payload),
+  });
+  if (r.ok) return { ok: true, error: null };
+  const errBody = await r.text().catch(() => "");
+  return { ok: false, error: `HTTP ${r.status}: ${errBody.slice(0, 300)}`, raw: errBody };
+}
+
+async function sbPostPayloadPruned(table, payload, prefer) {
+  let nextPayload = payload;
+  const removed = new Set();
+  for (let i = 0; i < 20; i += 1) {
+    const result = await sbPostPayload(table, nextPayload, prefer);
+    if (result.ok) return result;
+    const col = missingColumnFromError(result.raw);
+    if (!col || removed.has(col)) return result;
+    removed.add(col);
+    const prune = row => { const copy = { ...(row || {}) }; delete copy[col]; return copy; };
+    nextPayload = Array.isArray(nextPayload) ? nextPayload.map(prune) : prune(nextPayload);
+  }
+  return { ok: false, error: "Too many missing database columns." };
+}
 
 async function sbGet(table) {
   if (!_sb) return null;
@@ -86,22 +140,19 @@ async function sbGet(table) {
     const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}?select=*`, { headers: sbHeaders() });
     if (!r.ok) return null;
     const d = await r.json();
-    return Array.isArray(d) ? d : null;
+    if (!Array.isArray(d)) return null;
+    return table === "patientBill" ? d.map(unpackKSheetRow) : d;
   } catch(e) { return null; }
 }
 
 async function sbUpsertOne(table, row) {
   if (!_sb) return { ok: false, error: "Not connected" };
   try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}`, {
-      method: "POST", headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(row),
-    });
-    if (!r.ok) {
-      const errBody = await r.text().catch(() => "");
-      console.error(`sbUpsertOne [${table}] HTTP ${r.status}:`, errBody);
-      return { ok: false, error: `HTTP ${r.status}: ${errBody.slice(0, 300)}` };
-    }
-    return { ok: true, error: null };
+    const payload = table === "patientBill" ? packKSheetForLegacyTable(row) : row;
+    let result = await sbPostPayload(table, payload, "resolution=merge-duplicates,return=minimal");
+    if (!result.ok) result = await sbPostPayloadPruned(table, payload, "resolution=merge-duplicates,return=minimal");
+    if (!result.ok) console.error(`sbUpsertOne [${table}]:`, result.error);
+    return result;
   } catch(e) { return { ok: false, error: String(e) }; }
 }
 
@@ -109,15 +160,11 @@ async function sbUpsertMany(table, rows) {
   if (!_sb) return { ok: false, error: "Not connected" };
   if (!rows.length) return { ok: true, error: null };
   try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}`, {
-      method: "POST", headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(rows),
-    });
-    if (!r.ok) {
-      const t = await r.text().catch(() => "");
-      console.warn(`sbUpsertMany ${table} HTTP ${r.status}:`, t);
-      return { ok: false, error: `HTTP ${r.status}: ${t.slice(0, 200)}` };
-    }
-    return { ok: true, error: null };
+    const payload = table === "patientBill" ? rows.map(packKSheetForLegacyTable) : rows;
+    let result = await sbPostPayload(table, payload, "resolution=merge-duplicates,return=minimal");
+    if (!result.ok) result = await sbPostPayloadPruned(table, payload, "resolution=merge-duplicates,return=minimal");
+    if (!result.ok) console.warn(`sbUpsertMany ${table}:`, result.error);
+    return result;
   } catch(e) { return { ok: false, error: String(e) }; }
 }
 
@@ -834,10 +881,31 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
 
   const lookupPatient = (query) => {
     if (!query.trim()) return;
-    const found = safeArray(data.patients).find(p => p.mrNo?.toLowerCase() === query.toLowerCase() || p.patientId?.toLowerCase() === query.toLowerCase() || p.phone === query);
+    const q = query.toLowerCase();
+    const found = safeArray(data.patients).find(p => p.mrNo?.toLowerCase() === q || p.patientId?.toLowerCase() === q || p.phone === query);
     if (found) {
-      setForm(f => ({ ...f, mrNo: found.mrNo || f.mrNo, patientId: found.patientId || f.patientId, name: found.name, phone: found.phone, address: found.address || found.town || "" }));
-      setMrLookup(`✓ Found: ${found.name} (${found.patientId})`);
+      // Pull most recent existing K Sheet for this patient (if any) so optometrist's saved data is preserved
+      const priorSheets = safeArray(data.patientBill).map(unpackKSheetRow).filter(k =>
+        (found.mrNo && k.mrNo?.toLowerCase() === found.mrNo.toLowerCase()) ||
+        (found.patientId && k.patientId?.toLowerCase() === found.patientId.toLowerCase()) ||
+        (found.phone && k.phone === found.phone)
+      );
+      const prior = priorSheets.sort((a,b) => (b.timestamp||"").localeCompare(a.timestamp||""))[0];
+      setForm(f => {
+        const base = { ...f, mrNo: found.mrNo || f.mrNo, patientId: found.patientId || f.patientId, name: found.name, phone: found.phone, address: found.address || found.town || "" };
+        if (!prior) return base;
+        // Merge prior K Sheet fields (skip identifiers/timestamps and internal/meta keys)
+        const skip = new Set(["id","timestamp","date","time","by","branch","status","createdBy","createdByName","createdAt","_lookup"]);
+        const merged = { ...prior, ...base };
+        Object.keys(prior).forEach(k => {
+          if (skip.has(k)) return;
+          if (base[k] === "" || base[k] === undefined || base[k] === null) {
+            merged[k] = prior[k];
+          }
+        });
+        return merged;
+      });
+      setMrLookup(`✓ Found: ${found.name} (${found.patientId})${prior ? " — prior K Sheet loaded" : ""}`);
     } else { setMrLookup("No match found in OP Registration."); }
   };
 
@@ -861,7 +929,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
     const record = { id: uid(), branch: isOwner ? "JPT Branch" : branch, ...form, status: "approved", createdBy: session.id, createdByName: session.name, createdAt: ts() };
     mutate("patientBill", arr => [...arr, record], record); 
     audit("ADD",{type:"patientBill",name:form.name}); 
-    setModal(false); setMsg("K Sheet saved successfully.");
+    setModal(false); setMsg("K Sheet saved successfully. Full optom details are packed for lookup sync.");
   };
 
   const del = id => { if (confirm("Delete K Sheet?")) { mutate("patientBill", arr => arr.filter(x => x.id!==id)); audit("DELETE",{type:"patientBill",id}); } };
