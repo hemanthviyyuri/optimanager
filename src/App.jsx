@@ -221,6 +221,64 @@ const LS = {
 const SEED_DATA = { patients: [], patientBill: [], optometrist: [], opticals: [], stock: [], invoices: [], tasks: [], reminders: [] };
 const safeArray = (arr, fallback = []) => Array.isArray(arr) ? arr : fallback;
 
+// ── Dashboard CMS defaults (editable in DashboardCMS view) ──────────────
+const DEFAULT_DASH_CMS = {
+  blocks: {
+    opReg:   { title: "OP Registration (Today)", sub: "New patients today",     bg: "linear-gradient(135deg,#fef3c7,#fde68a)", color: "#92400e", icon: "◉",  enabled: true, order: 1, link: "patients"    },
+    revisit: { title: "Revisit / Review / Camp", sub: "Returning today",        bg: "linear-gradient(135deg,#dbeafe,#bfdbfe)", color: "#1e3a8a", icon: "↻",  enabled: true, order: 2, link: "patients"    },
+    ksheet:  { title: "K Sheets (Today)",        sub: "K Sheet entries today",  bg: "linear-gradient(135deg,#dcfce7,#bbf7d0)", color: "#14532d", icon: "📋", enabled: true, order: 3, link: "patientBill" },
+    revenue: { title: "Revenue (Today)",         sub: "Paid invoices today",    bg: "linear-gradient(135deg,#fce7f3,#fbcfe8)", color: "#9d174d", icon: "₹",  enabled: true, order: 4, link: "invoices"    },
+  },
+  panels: {
+    tasks:          { title: "📌 Today's Tasks",          accent: "#d97706", enabled: true, order: 1 },
+    reminders:      { title: "🔔 Today's Reminders",      accent: "#1d4ed8", enabled: true, order: 2 },
+    advice:         { title: "💊 K Sheet Advice (Today)", accent: "#7c3aed", enabled: true, order: 3, ownerOnly: true },
+    branchOverview: { title: "🏥 Branch Overview (Today)",accent: "#16a34a", enabled: true, order: 4, ownerOnly: true },
+    activity:       { title: "⚡ Today's Activity",       accent: "#9d174d", enabled: true, order: 5, ownerOnly: true },
+  },
+};
+
+// ── Patient status (computed from cross-section lookup) ─────────────────
+const PATIENT_STATUS = {
+  OUT:          { key: "OUT",          label: "Patient Out",          bg: "#e5e7eb", color: "#374151" },
+  OPTICALS:     { key: "OPTICALS",     label: "At Opticals",          bg: "#fce7f3", color: "#9d174d" },
+  OPTOMOLOGIST: { key: "OPTOMOLOGIST", label: "With Optomologist",    bg: "#ede9fe", color: "#5b21b6" },
+  OPTOM:        { key: "OPTOM",        label: "With Optom",           bg: "#dbeafe", color: "#1e3a8a" },
+  OP_REG:       { key: "OP_REG",       label: "OP Registered",        bg: "#fef3c7", color: "#92400e" },
+  NONE:         { key: "NONE",         label: "Not Registered",       bg: "#f0ede8", color: "#6b5e52" },
+};
+
+function getPatientStatus(p, data) {
+  if (!p) return PATIENT_STATUS.NONE;
+  const mr  = String(p.mrNo || "").toLowerCase();
+  const pid = String(p.patientId || "").toLowerCase();
+  const nm  = String(p.name || "").toLowerCase();
+  const match = (r) => (mr && String(r.mrNo || "").toLowerCase() === mr) || (pid && String(r.patientId || "").toLowerCase() === pid);
+  const inv = safeArray(data.invoices).find(i => i.status === "Paid" && (String(i.patientName || "").toLowerCase() === nm || match(i)));
+  if (inv) return PATIENT_STATUS.OUT;
+  const optl = safeArray(data.opticals).find(match);
+  if (optl) return PATIENT_STATUS.OPTICALS;
+  const ks = safeArray(data.patientBill).find(match);
+  if (ks) {
+    if (ks.ophthalmologist || ks.advice || ks.fundus || ks.iris || ks.lens) return PATIENT_STATUS.OPTOMOLOGIST;
+    return PATIENT_STATUS.OPTOM;
+  }
+  if (safeArray(data.patients).find(match)) return PATIENT_STATUS.OP_REG;
+  return PATIENT_STATUS.NONE;
+}
+
+// ── Task / Reminder color rule: done=green, pending+not overdue=yellow, overdue=red ──
+function deadlineColor(item, dateField = "deadline") {
+  if (!item) return { bg: "#fef9c3", color: "#a16207", border: "#eab308", label: "Pending" };
+  if (item.status === "done") return { bg: "#dcfce7", color: "#14532d", border: "#16a34a", label: "Completed" };
+  const dl = item[dateField];
+  if (dl) {
+    const dlDate = new Date(dl);
+    if (!isNaN(dlDate.getTime()) && dlDate < new Date(todayStr())) return { bg: "#fee2e2", color: "#7f1d1d", border: "#dc2626", label: "Overdue" };
+  }
+  return { bg: "#fef9c3", color: "#854d0e", border: "#eab308", label: "Pending" };
+}
+
 export default function App() {
   const [session,  setSession]  = useState(() => LS.getSess());
   const [accounts, setAccounts] = useState(() => safeArray(LS.get("opti_accounts", DEFAULT_ACCOUNTS), DEFAULT_ACCOUNTS));
@@ -228,6 +286,10 @@ export default function App() {
   const [data,     setData]     = useState(() => { const d = LS.get("opti_data_v4", SEED_DATA); return d && typeof d === 'object' ? d : SEED_DATA; });
   const [auditLog, setAuditLog] = useState(() => safeArray(LS.get("opti_audit", [])));
   const [fieldVis, setFieldVis] = useState(() => LS.get("opti_fields", DEFAULT_FIELD_VISIBILITY) || DEFAULT_FIELD_VISIBILITY);
+  const [dashCms,  setDashCms]  = useState(() => {
+    const v = LS.get("opti_dash_cms", DEFAULT_DASH_CMS);
+    return v && v.blocks && v.panels ? v : DEFAULT_DASH_CMS;
+  });
   const [sbCreds,  setSbCreds]  = useState(() => LS.get("opti_sb", { url: "", key: "" }));
   
   const [sbStatus, setSbStatus] = useState("idle");
@@ -239,6 +301,7 @@ export default function App() {
   useEffect(() => { LS.set("opti_data_v4",  data);     }, [data]);
   useEffect(() => { LS.set("opti_audit",    auditLog); }, [auditLog]);
   useEffect(() => { LS.set("opti_fields",   fieldVis); }, [fieldVis]);
+  useEffect(() => { LS.set("opti_dash_cms", dashCms);  }, [dashCms]);
   useEffect(() => { LS.set("opti_sb",       sbCreds);  }, [sbCreds]);
 
   const syncFromCloud = async (url, key) => {
@@ -390,7 +453,9 @@ export default function App() {
 
   return (
     <Shell session={session} onLogout={logout} view={view} setView={setView} can={can} sbStatus={sbStatus} syncing={syncing} lastSync={lastSync} onManualSync={() => syncFromCloud(sbCreds.url, sbCreds.key)}>
-      {view === "dashboard"    && <Dashboard session={session} data={data} setView={setView} auditLog={auditLog} />}
+      {view === "dashboard"    && <Dashboard session={session} data={data} setView={setView} auditLog={auditLog} dashCms={dashCms} />}
+      {view === "patientStatus"&& <PatientStatusSection session={session} data={data} onSync={() => syncFromCloud(sbCreds.url, sbCreds.key)} syncing={syncing} />}
+      {view === "dashcms"      && session.role === "owner" && <DashboardCMS dashCms={dashCms} setDashCms={setDashCms} />}
       {view === "patients"     && <PatientsSection     {...sharedProps} />}
       {view === "patientBill"  && <PatientBillSection  {...sharedProps} />}
       {view === "optometrist"  && <OptometristSection  {...sharedProps} />}
@@ -510,9 +575,11 @@ function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastS
     { id: "alerts",       label: "Low Stock Alerts", icon: "▲", show: can("alerts", "view") },
     { id: "tasks",        label: "Tasks",            icon: "📌", show: true },
     { id: "reminders",    label: "Reminders",        icon: "🔔", show: true },
+    { id: "patientStatus",label: "Patient Status",   icon: "🚦", show: true },
     { id: "divider" },
     { id: "auditlog",    label: "Audit Log",        icon: "📋", show: isOwner },
     { id: "dashbuilder", label: "Dashboard Builder",icon: "🏗", show: isOwner },
+    { id: "dashcms",     label: "Dashboard CMS",    icon: "🎨", show: isOwner },
     { id: "users",       label: "Manage Staff",     icon: "👥", show: isOwner },
     { id: "supabase",    label: "Cloud Sync",       icon: "☁", show: isOwner, badge: sbStatus === "error" ? "!" : 0, badgeColor: "#dc2626" },
     { id: "launchguide", label: "Launch Guide",     icon: "🚀", show: true },
@@ -550,9 +617,10 @@ function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastS
   );
 }
 
-function Dashboard({ session, data, setView, auditLog }) {
+function Dashboard({ session, data, setView, auditLog, dashCms }) {
   const isOwner = session.role === "owner";
   const myBranch = session.branch;
+  const cms = dashCms || DEFAULT_DASH_CMS;
   const flt = arr => isOwner ? safeArray(arr) : safeArray(arr).filter(x => x.branch === myBranch);
   const today = todayStr();
 
@@ -563,7 +631,6 @@ function Dashboard({ session, data, setView, auditLog }) {
   const isToday = (d) => {
     if (!d) return false;
     if (typeof d === "string" && d.startsWith(today)) return true;
-    // dd/mm/yyyy formatted strings from ts()
     try {
       const parts = String(d).split(/[\s/,-]/).filter(Boolean);
       if (parts.length >= 3) {
@@ -589,17 +656,21 @@ function Dashboard({ session, data, setView, auditLog }) {
   const remToday   = flt(data.reminders).filter(r => isToday(r.reminderDate) || isToday(r.completedAt) || isToday(r.createdAt));
   const auditToday = safeArray(auditLog).filter(a => isToday(a.at)).slice(0, 12);
 
-  const blocks = [
-    { key: "patients",    label: "OP Registration (Today)", value: newRegToday.length, sub: "New patients today",        bg: "linear-gradient(135deg,#fef3c7,#fde68a)", color: "#92400e", icon: "◉", click: () => setView("patients") },
-    { key: "revisit",     label: "Revisit / Review / Camp", value: revisitToday.length, sub: "Returning today",            bg: "linear-gradient(135deg,#dbeafe,#bfdbfe)", color: "#1e3a8a", icon: "↻", click: () => setView("patients") },
-    { key: "ksheet",      label: "K Sheets (Today)",        value: billsToday.length,  sub: "K Sheet entries today",      bg: "linear-gradient(135deg,#dcfce7,#bbf7d0)", color: "#14532d", icon: "📋", click: () => setView("patientBill") },
-    { key: "revenue",     label: "Revenue (Today)",         value: currency(revToday), sub: "Paid invoices today",        bg: "linear-gradient(135deg,#fce7f3,#fbcfe8)", color: "#9d174d", icon: "₹", click: () => setView("invoices") },
-  ];
+  const blockValues = { opReg: newRegToday.length, revisit: revisitToday.length, ksheet: billsToday.length, revenue: currency(revToday) };
+  const blockLinks  = { opReg: "patients", revisit: "patients", ksheet: "patientBill", revenue: "invoices" };
+  const blocks = Object.entries(cms.blocks || {})
+    .filter(([, b]) => b.enabled !== false)
+    .sort((a, b) => (a[1].order || 0) - (b[1].order || 0))
+    .map(([key, b]) => ({ key, ...b, value: blockValues[key] ?? 0, click: () => setView(b.link || blockLinks[key] || "dashboard") }));
 
-  const pendingTasks = tasksToday.filter(t => t.status !== "done");
-  const doneTasks    = tasksToday.filter(t => t.status === "done");
-  const pendingRems  = remToday.filter(r => r.status !== "done");
-  const doneRems     = remToday.filter(r => r.status === "done");
+  const sortedPanels = Object.entries(cms.panels || {})
+    .filter(([, p]) => p.enabled !== false && (!p.ownerOnly || isOwner))
+    .sort((a, b) => (a[1].order || 0) - (b[1].order || 0));
+
+  // Today's K Sheets with advice (owner view)
+  const adviceToday = billsToday
+    .filter(k => (k.advice || k.ophthalmologist || k.fundus))
+    .map(k => ({ ...k, _status: getPatientStatus(k, data) }));
 
   return (
     <div>
@@ -609,7 +680,10 @@ function Dashboard({ session, data, setView, auditLog }) {
           <div style={{ fontSize: 13, color: "#9b8e82", marginTop: 3 }}>{isOwner ? "All Branches" : myBranch} · Live · {ts()}</div>
         </div>
         {isOwner && (
-          <button className="btn btn-outline btn-sm" onClick={() => setView("dashbuilder")}>⚙ Customize Dashboard</button>
+          <div style={{ display:"flex", gap:8 }}>
+            <button className="btn btn-outline btn-sm" onClick={() => setView("dashcms")}>🎨 Edit Dashboard (CMS)</button>
+            <button className="btn btn-outline btn-sm" onClick={() => setView("dashbuilder")}>⚙ Field Builder</button>
+          </div>
         )}
       </div>
 
@@ -618,7 +692,7 @@ function Dashboard({ session, data, setView, auditLog }) {
           <div key={b.key} onClick={b.click} style={{ cursor:"pointer", borderRadius: 14, padding: "16px 18px", background: b.bg, color: b.color, boxShadow: "0 2px 8px rgba(0,0,0,.05)", transition:"transform .15s", border:"1px solid rgba(255,255,255,.5)" }}
                onMouseEnter={e => e.currentTarget.style.transform="translateY(-2px)"} onMouseLeave={e => e.currentTarget.style.transform=""}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-              <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".08em", opacity:.85 }}>{b.label}</div>
+              <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".08em", opacity:.85 }}>{b.title}</div>
               <div style={{ fontSize: 20 }}>{b.icon}</div>
             </div>
             <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 30, fontWeight: 800, lineHeight: 1.1 }}>{b.value}</div>
@@ -627,94 +701,127 @@ function Dashboard({ session, data, setView, auditLog }) {
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", gap: 18, marginBottom: 18 }}>
-        {/* Tasks Today */}
-        <div className="card" style={{ borderTop: "4px solid #d97706" }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 12 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color:"#92400e" }}>📌 Today's Tasks</div>
-            <button className="btn btn-outline btn-sm" onClick={() => setView("tasks")}>View all</button>
-          </div>
-          {tasksToday.length === 0 && <div style={{ fontSize:12, color:"#9b8e82" }}>No tasks for today.</div>}
-          {pendingTasks.map(t => (
-            <div key={t.id} style={{ padding:"8px 10px", borderRadius:8, background:"#fef3c7", marginBottom:6, borderLeft:`4px solid ${t.priority==="High"?"#dc2626":t.priority==="Low"?"#16a34a":"#d97706"}` }}>
-              <div style={{ fontWeight:700, fontSize:13, color:"#1a1714" }}>{t.title}</div>
-              <div style={{ fontSize:11, color:"#6b5e52" }}>Due {t.deadline} · {t.priority}</div>
-            </div>
-          ))}
-          {doneTasks.map(t => (
-            <div key={t.id} style={{ padding:"8px 10px", borderRadius:8, background:"#dcfce7", marginBottom:6, borderLeft:"4px solid #16a34a" }}>
-              <div style={{ fontWeight:700, fontSize:13, color:"#14532d", textDecoration:"line-through" }}>{t.title}</div>
-              <div style={{ fontSize:11, color:"#166534" }}>✓ Completed {t.completedAt || ""}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Reminders Today */}
-        <div className="card" style={{ borderTop: "4px solid #1d4ed8" }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 12 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color:"#1e3a8a" }}>🔔 Today's Reminders</div>
-            <button className="btn btn-outline btn-sm" onClick={() => setView("reminders")}>View all</button>
-          </div>
-          {remToday.length === 0 && <div style={{ fontSize:12, color:"#9b8e82" }}>No reminders for today.</div>}
-          {pendingRems.map(r => (
-            <div key={r.id} style={{ padding:"8px 10px", borderRadius:8, background:"#dbeafe", marginBottom:6, borderLeft:"4px solid #1d4ed8" }}>
-              <div style={{ fontWeight:700, fontSize:13, color:"#1a1714" }}>{r.name} <span style={{ fontWeight:400, color:"#6b5e52", fontSize:11 }}>({r.reminderType})</span></div>
-              <div style={{ fontSize:11, color:"#1e3a8a" }}>Due {r.reminderDate} · {r.phone || "—"}</div>
-            </div>
-          ))}
-          {doneRems.map(r => (
-            <div key={r.id} style={{ padding:"8px 10px", borderRadius:8, background:"#dcfce7", marginBottom:6, borderLeft:"4px solid #16a34a" }}>
-              <div style={{ fontWeight:700, fontSize:13, color:"#14532d", textDecoration:"line-through" }}>{r.name}</div>
-              <div style={{ fontSize:11, color:"#166534" }}>✓ Completed {r.completedAt || ""}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: isOwner ? "1fr 1fr" : "1fr", gap: 18 }}>
-        {isOwner && (
-          <div className="card" style={{ borderTop: "4px solid #16a34a" }}>
-            <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 14, color:"#14532d" }}>🏥 Branch Overview (Today)</div>
-            {BRANCHES.map(br => {
-              const bPts   = safeArray(data.patients).filter(x => x.branch === br && x.status === "approved" && isToday(x.date));
-              const bBills = safeArray(data.patientBill).filter(x => x.branch === br && x.status === "approved" && isToday(x.date));
-              const bRev   = safeArray(data.invoices).filter(x => x.branch === br && x.approvalStatus === "approved" && x.status === "Paid" && isToday(x.date));
-              return (
-                <div key={br} style={{ padding: "10px 0", borderBottom: "1px solid #f0ede8" }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{br}</div>
-                  <div style={{ display: "flex", gap: 10 }}>
-                    {[["OP Reg", bPts.length, "#92400e", "#fef3c7"], ["K Sheets", bBills.length, "#14532d", "#dcfce7"], ["Invoices", bRev.length, "#9d174d", "#fce7f3"]].map(([l, v, c, bg]) => (
-                      <div key={l} style={{ flex: 1, background: bg, borderRadius: 8, padding: "8px 10px" }}>
-                        <div style={{ fontSize: 10, color: c, fontWeight: 700 }}>{l}</div>
-                        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 700, color: c }}>{v}</div>
-                      </div>
-                    ))}
-                  </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: 18, marginBottom: 18 }}>
+        {sortedPanels.map(([key, panel]) => {
+          if (key === "tasks") {
+            return (
+              <div key={key} className="card" style={{ borderTop: `4px solid ${panel.accent}` }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 12 }}>
+                  <div style={{ fontWeight: 800, fontSize: 14, color: panel.accent }}>{panel.title}</div>
+                  <button className="btn btn-outline btn-sm" onClick={() => setView("tasks")}>View all</button>
                 </div>
-              );
-            })}
-          </div>
-        )}
-        {isOwner && (
-          <div className="card" style={{ borderTop: "4px solid #9d174d" }}>
-            <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 14, color:"#9d174d" }}>⚡ Today's Activity</div>
-            {auditToday.length === 0 && <div style={{ fontSize: 13, color: "#9b8e82" }}>No activity today.</div>}
-            {auditToday.map(a => (
-              <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f0ede8", fontSize: 12 }}>
-                <div>
-                  <span style={{ fontWeight: 700, marginRight: 6, color: { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", ADD: "#16a34a", DELETE: "#dc2626", EDIT: "#d97706", TASK_ASSIGN:"#d97706", TASK_COMPLETE:"#16a34a", REMINDER_ADD:"#1d4ed8" }[a.action] || "#1a1714" }}>{a.action}</span>
-                  <span style={{ color: "#6b5e52" }}>{a.userName}</span>
-                  {a.branch !== "All" && <span style={{ color: "#b5a99e", marginLeft: 5 }}>· {a.branch}</span>}
-                </div>
-                <div style={{ color: "#b5a99e", fontSize: 11 }}>{a.at}</div>
+                {tasksToday.length === 0 && <div style={{ fontSize:12, color:"#9b8e82" }}>No tasks for today.</div>}
+                {tasksToday.map(t => {
+                  const c = deadlineColor(t, "deadline");
+                  return (
+                    <div key={t.id} style={{ padding:"8px 10px", borderRadius:8, background:c.bg, marginBottom:6, borderLeft:`4px solid ${c.border}` }}>
+                      <div style={{ fontWeight:700, fontSize:13, color:c.color, textDecoration: t.status==="done" ? "line-through" : "none" }}>{t.title}</div>
+                      <div style={{ fontSize:11, color:c.color, opacity:.85 }}>{c.label} · Due {t.deadline} · {t.priority}</div>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
-        )}
+            );
+          }
+          if (key === "reminders") {
+            return (
+              <div key={key} className="card" style={{ borderTop: `4px solid ${panel.accent}` }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 12 }}>
+                  <div style={{ fontWeight: 800, fontSize: 14, color: panel.accent }}>{panel.title}</div>
+                  <button className="btn btn-outline btn-sm" onClick={() => setView("reminders")}>View all</button>
+                </div>
+                {remToday.length === 0 && <div style={{ fontSize:12, color:"#9b8e82" }}>No reminders for today.</div>}
+                {remToday.map(r => {
+                  const c = deadlineColor(r, "reminderDate");
+                  return (
+                    <div key={r.id} style={{ padding:"8px 10px", borderRadius:8, background:c.bg, marginBottom:6, borderLeft:`4px solid ${c.border}` }}>
+                      <div style={{ fontWeight:700, fontSize:13, color:c.color, textDecoration: r.status==="done" ? "line-through" : "none" }}>{r.name} <span style={{ fontWeight:400, fontSize:11, opacity:.8 }}>({r.reminderType})</span></div>
+                      <div style={{ fontSize:11, color:c.color, opacity:.85 }}>{c.label} · Due {r.reminderDate} · {r.phone || "—"}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          }
+          if (key === "advice" && isOwner) {
+            return (
+              <div key={key} className="card" style={{ borderTop: `4px solid ${panel.accent}`, gridColumn: "1 / -1" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 12 }}>
+                  <div style={{ fontWeight: 800, fontSize: 14, color: panel.accent }}>{panel.title}</div>
+                  <button className="btn btn-outline btn-sm" onClick={() => setView("patientBill")}>Open K Sheets</button>
+                </div>
+                {adviceToday.length === 0 && <div style={{ fontSize:12, color:"#9b8e82" }}>No K Sheet advice today.</div>}
+                {adviceToday.length > 0 && (
+                  <div style={{ overflowX:"auto" }}>
+                    <table>
+                      <thead><tr><th>MR No</th><th>Name</th><th>Patient Status</th><th>Advice</th><th>Ophthalmologist</th></tr></thead>
+                      <tbody>
+                        {adviceToday.map(k => (
+                          <tr key={k.id}>
+                            <td style={{ fontFamily:"monospace", fontWeight:700 }}>{k.mrNo || "—"}</td>
+                            <td style={{ fontWeight:600 }}>{k.name}</td>
+                            <td><span className="tag" style={{ background: k._status.bg, color: k._status.color }}>{k._status.label}</span></td>
+                            <td style={{ fontSize:12, color:"#1a1714", maxWidth: 360, whiteSpace:"pre-wrap" }}>{k.advice || "—"}</td>
+                            <td style={{ fontSize:12, color:"#6b5e52" }}>{k.ophthalmologist || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          }
+          if (key === "branchOverview" && isOwner) {
+            return (
+              <div key={key} className="card" style={{ borderTop: `4px solid ${panel.accent}` }}>
+                <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 14, color: panel.accent }}>{panel.title}</div>
+                {BRANCHES.map(br => {
+                  const bPts   = safeArray(data.patients).filter(x => x.branch === br && x.status === "approved" && isToday(x.date));
+                  const bBills = safeArray(data.patientBill).filter(x => x.branch === br && x.status === "approved" && isToday(x.date));
+                  const bRev   = safeArray(data.invoices).filter(x => x.branch === br && x.approvalStatus === "approved" && x.status === "Paid" && isToday(x.date));
+                  return (
+                    <div key={br} style={{ padding: "10px 0", borderBottom: "1px solid #f0ede8" }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{br}</div>
+                      <div style={{ display: "flex", gap: 10 }}>
+                        {[["OP Reg", bPts.length, "#92400e", "#fef3c7"], ["K Sheets", bBills.length, "#14532d", "#dcfce7"], ["Invoices", bRev.length, "#9d174d", "#fce7f3"]].map(([l, v, c, bg]) => (
+                          <div key={l} style={{ flex: 1, background: bg, borderRadius: 8, padding: "8px 10px" }}>
+                            <div style={{ fontSize: 10, color: c, fontWeight: 700 }}>{l}</div>
+                            <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 700, color: c }}>{v}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          }
+          if (key === "activity" && isOwner) {
+            return (
+              <div key={key} className="card" style={{ borderTop: `4px solid ${panel.accent}` }}>
+                <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 14, color: panel.accent }}>{panel.title}</div>
+                {auditToday.length === 0 && <div style={{ fontSize: 13, color: "#9b8e82" }}>No activity today.</div>}
+                {auditToday.map(a => (
+                  <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f0ede8", fontSize: 12 }}>
+                    <div>
+                      <span style={{ fontWeight: 700, marginRight: 6, color: { LOGIN: "#1d4ed8", LOGOUT: "#9b8e82", ADD: "#16a34a", DELETE: "#dc2626", EDIT: "#d97706", TASK_ASSIGN:"#d97706", TASK_COMPLETE:"#16a34a", REMINDER_ADD:"#1d4ed8" }[a.action] || "#1a1714" }}>{a.action}</span>
+                      <span style={{ color: "#6b5e52" }}>{a.userName}</span>
+                      {a.branch !== "All" && <span style={{ color: "#b5a99e", marginLeft: 5 }}>· {a.branch}</span>}
+                    </div>
+                    <div style={{ color: "#b5a99e", fontSize: 11 }}>{a.at}</div>
+                  </div>
+                ))}
+              </div>
+            );
+          }
+          return null;
+        })}
       </div>
     </div>
   );
 }
+
 
 function AuditLogSection({ auditLog, accounts }) {
   const [filter, setFilter] = useState("ALL");
@@ -1672,6 +1779,183 @@ function Modal({ title, children, onClose, onSave, saveLabel = "Save", wide, xl,
         <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, fontWeight: 700, marginBottom: 18 }}>{title}</div>{children}
         <div style={{ display: "flex", gap: 10, marginTop: 22, justifyContent: "flex-end" }}><button className="btn btn-outline" onClick={onClose}>Cancel</button><button className="btn btn-dark" onClick={onSave}>{saveLabel}</button></div>
       </div>
+    </div>
+  );
+}
+// ════════════════════════════════════════════════════════════════════════
+// Patient Status — cross-section lookup of every patient's current stage
+// ════════════════════════════════════════════════════════════════════════
+function PatientStatusSection({ session, data, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "JPT Branch";
+  const [search, setSearch] = useState("");
+  const [statusF, setStatusF] = useState("ALL");
+  const [todayOnly, setTodayOnly] = useState(false);
+
+  const today = todayStr();
+  const isToday = (d) => {
+    if (!d) return false;
+    if (typeof d === "string" && d.startsWith(today)) return true;
+    try {
+      const parts = String(d).split(/[\s/,-]/).filter(Boolean);
+      if (parts.length >= 3) {
+        const [dd, mm, yyyy] = parts;
+        const iso = `${yyyy.padStart(4,"0")}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
+        if (iso === today) return true;
+      }
+    } catch {}
+    return false;
+  };
+
+  const all = safeArray(data.patients).filter(p => isOwner || p.branch === branch);
+  const enriched = all.map(p => ({ ...p, _status: getPatientStatus(p, data) }));
+  const filtered = enriched.filter(p => {
+    if (statusF !== "ALL" && p._status.key !== statusF) return false;
+    if (todayOnly && !isToday(p.date)) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (p.name || "").toLowerCase().includes(q) || (p.mrNo || "").toLowerCase().includes(q) || (p.patientId || "").toLowerCase().includes(q) || (p.phone || "").includes(q);
+  });
+
+  const tally = Object.values(PATIENT_STATUS).map(s => ({ ...s, count: enriched.filter(p => p._status.key === s.key).length }));
+
+  return (
+    <div>
+      <SectionHeader title="Patient Status" onSync={onSync} syncing={syncing} onExport={() => exportCSV(filtered.map(p => ({ mrNo:p.mrNo, patientId:p.patientId, name:p.name, phone:p.phone, branch:p.branch, status:p._status.label })), "patient_status.csv")} msg="" />
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:10, marginBottom:16 }}>
+        {tally.map(t => (
+          <div key={t.key} onClick={() => setStatusF(s => s === t.key ? "ALL" : t.key)} style={{ cursor:"pointer", padding:"12px 14px", borderRadius:12, background:t.bg, color:t.color, border: statusF === t.key ? `2px solid ${t.color}` : "2px solid transparent" }}>
+            <div style={{ fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:".06em", opacity:.85 }}>{t.label}</div>
+            <div style={{ fontFamily:"'Playfair Display',serif", fontSize:24, fontWeight:800 }}>{t.count}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display:"flex", gap:10, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
+        <input type="text" placeholder="🔍 Search name / MR / Patient ID / phone…" value={search} onChange={e=>setSearch(e.target.value)} style={{ maxWidth:360 }} />
+        <button className={`btn btn-sm ${todayOnly?"btn-dark":"btn-outline"}`} onClick={()=>setTodayOnly(t=>!t)}>{todayOnly?"📅 Today only ✓":"📅 Today only"}</button>
+        <button className={`btn btn-sm ${statusF==="ALL"?"btn-dark":"btn-outline"}`} onClick={()=>setStatusF("ALL")}>All Statuses</button>
+        <div style={{ fontSize:12, color:"#9b8e82", marginLeft:"auto" }}>{filtered.length} patient(s)</div>
+      </div>
+      <div className="card" style={{ overflowX:"auto" }}>
+        <table>
+          <thead><tr><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Branch</th><th>Registered</th><th>Current Status</th></tr></thead>
+          <tbody>
+            {filtered.length === 0 && <tr><td colSpan={7} style={{ textAlign:"center", color:"#9b8e82", padding:24 }}>No patients match.</td></tr>}
+            {filtered.map(p => (
+              <tr key={p.id}>
+                <td style={{ fontFamily:"monospace", fontWeight:700 }}>{p.mrNo || "—"}</td>
+                <td style={{ fontFamily:"monospace", color:"#1d4ed8" }}>{p.patientId || "—"}</td>
+                <td style={{ fontWeight:600 }}>{p.name}</td>
+                <td>{p.phone}</td>
+                <td><span className="tag" style={{ background:"#f0ede8", color:"#6b5e52" }}>{p.branch}</span></td>
+                <td style={{ fontSize:11, color:"#9b8e82" }}>{p.date}</td>
+                <td><span className="tag" style={{ background:p._status.bg, color:p._status.color }}>{p._status.label}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Dashboard CMS — edit blocks (title, color, icon, order, enabled) + panels
+// ════════════════════════════════════════════════════════════════════════
+function DashboardCMS({ dashCms, setDashCms }) {
+  const cms = dashCms || DEFAULT_DASH_CMS;
+  const [tab, setTab] = useState("blocks");
+
+  const updBlock = (key, patch) => setDashCms(c => ({ ...c, blocks: { ...c.blocks, [key]: { ...c.blocks[key], ...patch } } }));
+  const updPanel = (key, patch) => setDashCms(c => ({ ...c, panels: { ...c.panels, [key]: { ...c.panels[key], ...patch } } }));
+  const reset = () => { if (confirm("Reset dashboard to defaults?")) setDashCms(DEFAULT_DASH_CMS); };
+
+  const PALETTES = [
+    { label: "Amber",  bg: "linear-gradient(135deg,#fef3c7,#fde68a)", color: "#92400e" },
+    { label: "Blue",   bg: "linear-gradient(135deg,#dbeafe,#bfdbfe)", color: "#1e3a8a" },
+    { label: "Green",  bg: "linear-gradient(135deg,#dcfce7,#bbf7d0)", color: "#14532d" },
+    { label: "Pink",   bg: "linear-gradient(135deg,#fce7f3,#fbcfe8)", color: "#9d174d" },
+    { label: "Purple", bg: "linear-gradient(135deg,#ede9fe,#ddd6fe)", color: "#5b21b6" },
+    { label: "Teal",   bg: "linear-gradient(135deg,#ccfbf1,#99f6e4)", color: "#115e59" },
+    { label: "Slate",  bg: "linear-gradient(135deg,#e2e8f0,#cbd5e1)", color: "#1e293b" },
+    { label: "Orange", bg: "linear-gradient(135deg,#ffedd5,#fed7aa)", color: "#9a3412" },
+  ];
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, flexWrap:"wrap", gap:10 }}>
+        <div>
+          <div style={{ fontFamily:"'Playfair Display',serif", fontSize:22, fontWeight:700 }}>🎨 Dashboard CMS</div>
+          <div style={{ fontSize:13, color:"#9b8e82", marginTop:4 }}>Edit titles, colors, icons, order and visibility of every dashboard block. Saved to this device.</div>
+        </div>
+        <button className="btn btn-outline btn-sm" onClick={reset}>↺ Reset to Defaults</button>
+      </div>
+
+      <div style={{ display:"flex", gap:8, marginBottom:18 }}>
+        <button className={`btn btn-sm ${tab==="blocks"?"btn-dark":"btn-outline"}`} onClick={()=>setTab("blocks")}>📊 Stat Blocks</button>
+        <button className={`btn btn-sm ${tab==="panels"?"btn-dark":"btn-outline"}`} onClick={()=>setTab("panels")}>🗂 Panels</button>
+      </div>
+
+      {tab === "blocks" && (
+        <div style={{ display:"grid", gap:14 }}>
+          {Object.entries(cms.blocks).sort((a,b) => (a[1].order||0)-(b[1].order||0)).map(([key, b]) => (
+            <div key={key} className="card" style={{ display:"grid", gridTemplateColumns:"260px 1fr", gap:18 }}>
+              <div style={{ borderRadius:14, padding:"16px 18px", background:b.bg, color:b.color, opacity: b.enabled === false ? .4 : 1 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                  <div style={{ fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:".08em" }}>{b.title}</div>
+                  <div style={{ fontSize:20 }}>{b.icon}</div>
+                </div>
+                <div style={{ fontFamily:"'Playfair Display',serif", fontSize:28, fontWeight:800 }}>0</div>
+                <div style={{ fontSize:11, marginTop:4, opacity:.8 }}>{b.sub}</div>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                <div style={{ gridColumn:"1/-1", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div style={{ fontWeight:700, fontSize:13, color:"#1a1714" }}>{key.toUpperCase()}</div>
+                  <label style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", fontSize:12, margin:0, textTransform:"none", letterSpacing:0 }}>
+                    <input type="checkbox" checked={b.enabled !== false} onChange={e => updBlock(key, { enabled: e.target.checked })} /> Visible
+                  </label>
+                </div>
+                <div><label>Title</label><input type="text" value={b.title} onChange={e=>updBlock(key,{ title: e.target.value })} /></div>
+                <div><label>Subtitle</label><input type="text" value={b.sub || ""} onChange={e=>updBlock(key,{ sub: e.target.value })} /></div>
+                <div><label>Icon (emoji / char)</label><input type="text" value={b.icon} onChange={e=>updBlock(key,{ icon: e.target.value })} /></div>
+                <div><label>Order</label><input type="number" value={b.order || 0} onChange={e=>updBlock(key,{ order: parseInt(e.target.value)||0 })} /></div>
+                <div style={{ gridColumn:"1/-1" }}>
+                  <label>Color Palette</label>
+                  <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                    {PALETTES.map(p => (
+                      <button key={p.label} onClick={()=>updBlock(key,{ bg: p.bg, color: p.color })} style={{ border: b.bg === p.bg ? "2px solid #1a1714" : "1.5px solid #e2ddd8", background:p.bg, color:p.color, borderRadius:8, padding:"6px 12px", fontSize:11, fontWeight:700 }}>{p.label}</button>
+                    ))}
+                  </div>
+                </div>
+                <div><label>Background CSS</label><input type="text" value={b.bg} onChange={e=>updBlock(key,{ bg: e.target.value })} /></div>
+                <div><label>Text Color</label><input type="text" value={b.color} onChange={e=>updBlock(key,{ color: e.target.value })} /></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === "panels" && (
+        <div style={{ display:"grid", gap:12 }}>
+          {Object.entries(cms.panels).sort((a,b) => (a[1].order||0)-(b[1].order||0)).map(([key, p]) => (
+            <div key={key} className="card" style={{ borderLeft:`4px solid ${p.accent}` }}>
+              <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr 80px 80px", gap:12, alignItems:"end" }}>
+                <div><label>{key} — Title</label><input type="text" value={p.title} onChange={e=>updPanel(key,{ title: e.target.value })} /></div>
+                <div><label>Accent Color</label><input type="text" value={p.accent} onChange={e=>updPanel(key,{ accent: e.target.value })} /></div>
+                <div><label>Order</label><input type="number" value={p.order||0} onChange={e=>updPanel(key,{ order: parseInt(e.target.value)||0 })} /></div>
+                <label style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", fontSize:12, textTransform:"none", letterSpacing:0 }}>
+                  <input type="checkbox" checked={p.enabled !== false} onChange={e => updPanel(key, { enabled: e.target.checked })} /> Show
+                </label>
+                {p.ownerOnly !== undefined && (
+                  <label style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", fontSize:12, textTransform:"none", letterSpacing:0 }}>
+                    <input type="checkbox" checked={!!p.ownerOnly} onChange={e => updPanel(key, { ownerOnly: e.target.checked })} /> Owner
+                  </label>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
