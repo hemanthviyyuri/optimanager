@@ -343,17 +343,85 @@ function getPatientStatus(p, data) {
   return PATIENT_STATUS.NONE;
 }
 
+// ── Reminder due date+time helpers ──
+function reminderDue(r) {
+  if (!r || !r.reminderDate) return null;
+  const t = r.reminderTime && /^\d{1,2}:\d{2}/.test(r.reminderTime) ? r.reminderTime : "23:59";
+  const d = new Date(`${r.reminderDate}T${t.length === 4 ? "0" + t : t}`);
+  return isNaN(d.getTime()) ? null : d;
+}
+function reminderOverdue(r) {
+  if (!r || r.status === "done") return false;
+  const due = reminderDue(r);
+  return !!due && due < new Date();
+}
+
 // ── Task / Reminder color rule: done=green, pending+not overdue=yellow, overdue=red ──
 function deadlineColor(item, dateField = "deadline") {
   if (!item) return { bg: "#fef9c3", color: "#a16207", border: "#eab308", label: "Pending" };
   if (item.status === "done") return { bg: "#dcfce7", color: "#14532d", border: "#16a34a", label: "Completed" };
   const dl = item[dateField];
   if (dl) {
-    const dlDate = new Date(dl);
-    if (!isNaN(dlDate.getTime()) && dlDate < new Date(todayStr())) return { bg: "#fee2e2", color: "#7f1d1d", border: "#dc2626", label: "Overdue" };
+    if (dateField === "reminderDate") {
+      if (reminderOverdue(item)) return { bg: "#fee2e2", color: "#7f1d1d", border: "#dc2626", label: "Overdue" };
+    } else {
+      const dlDate = new Date(dl);
+      if (!isNaN(dlDate.getTime()) && dlDate < new Date(todayStr())) return { bg: "#fee2e2", color: "#7f1d1d", border: "#dc2626", label: "Overdue" };
+    }
   }
   return { bg: "#fef9c3", color: "#854d0e", border: "#eab308", label: "Pending" };
 }
+
+// Floating overdue-reminder alert — visible to every designation. Shows reminders
+// whose deadline (date + time) has passed, re-checking every 30s.
+function ReminderAlerts({ session, data, setView }) {
+  const [, setTick] = useState(0);
+  const [dismissed, setDismissed] = useState([]);
+  const [open, setOpen] = useState(true);
+  useEffect(() => { const id = setInterval(() => setTick(t => t + 1), 30000); return () => clearInterval(id); }, []);
+  if (!session) return null;
+  const isOwner = session.role === "owner";
+  const branch = session.branch;
+  const all = safeArray(data.reminders).filter(r => isOwner || r.branch === branch);
+  const overdue = all.filter(r =>
+    reminderOverdue(r) &&
+    !dismissed.includes(r.id) &&
+    (!r.targetDesignation || hasMDAccess(session) || session.designation === r.targetDesignation)
+  ).sort((a, b) => (reminderDue(a)?.getTime() || 0) - (reminderDue(b)?.getTime() || 0));
+  if (!overdue.length) return null;
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)}
+        style={{ position:"fixed", right:18, bottom:18, zIndex:9999, background:"#dc2626", color:"#fff", border:"none", borderRadius:30, padding:"10px 16px", fontWeight:800, fontSize:13, cursor:"pointer", boxShadow:"0 6px 20px rgba(220,38,38,.4)" }}>
+        ⏰ {overdue.length} Overdue
+      </button>
+    );
+  }
+  return (
+    <div style={{ position:"fixed", right:18, bottom:18, zIndex:9999, width:340, maxWidth:"90vw" }}>
+      <div style={{ background:"#fff", border:"2px solid #dc2626", borderRadius:14, boxShadow:"0 10px 34px rgba(0,0,0,.20)", overflow:"hidden" }}>
+        <div style={{ background:"#dc2626", color:"#fff", padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ fontWeight:800, fontSize:13 }}>⏰ {overdue.length} Overdue Reminder{overdue.length > 1 ? "s" : ""}</div>
+          <button onClick={() => setOpen(false)} style={{ background:"transparent", border:"none", color:"#fff", cursor:"pointer", fontSize:16, lineHeight:1 }}>✕</button>
+        </div>
+        <div style={{ maxHeight:320, overflowY:"auto" }}>
+          {overdue.slice(0, 10).map(r => (
+            <div key={r.id} onClick={() => setView("reminders")} style={{ padding:"10px 14px", borderBottom:"1px solid #f0ede8", cursor:"pointer" }}>
+              <div style={{ fontWeight:700, fontSize:13, color:"#7f1d1d" }}>{r.name} <span style={{ fontWeight:400, fontSize:11, color:"#9b8e82" }}>({r.reminderType})</span></div>
+              <div style={{ fontSize:11, color:"#dc2626", fontWeight:700 }}>Due {r.reminderDate}{r.reminderTime ? ` · ${r.reminderTime}` : ""} · {r.phone || "—"}</div>
+              {r.targetDesignation && <div style={{ fontSize:10, color:"#9b8e82" }}>For: {r.targetDesignation}</div>}
+              {r.notes && <div style={{ fontSize:11, color:"#9b8e82", marginTop:2 }}>{r.notes}</div>}
+              <button onClick={(e) => { e.stopPropagation(); setDismissed(d => [...d, r.id]); }}
+                style={{ marginTop:4, fontSize:10, background:"transparent", border:"none", color:"#9b8e82", cursor:"pointer", textDecoration:"underline" }}>Dismiss</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 
 export default function App() {
   const [session,  setSession]  = useState(() => LS.getSess());
@@ -571,6 +639,7 @@ export default function App() {
       {view === "users"        && hasOwnerOrMD(session) && <UsersSection accounts={accounts} setAccounts={updateAccounts} audit={audit} />}
       {view === "supabase"     && hasMDAccess(session) && <SupabaseSection sbCreds={sbCreds} sbStatus={sbStatus} onConnect={connectSupabase} onSync={syncFromSupabase} onPush={pushToSupabase} />}
       {view === "launchguide"  && <LaunchGuide />}
+      <ReminderAlerts session={session} data={data} setView={setView} />
     </Shell>
   );
 }
@@ -751,7 +820,13 @@ function Dashboard({ session, data, setView, auditLog, dashCms }) {
   const ptsToday    = flt(data.patients).filter(x => x.status === "approved" && isToday(x.date));
   const billsToday  = flt(data.patientBill).filter(x => x.status === "approved" && isToday(x.date));
   const invsToday   = flt(data.invoices).filter(x => x.approvalStatus === "approved" && x.status === "Paid" && isToday(x.date));
-  const revToday    = invsToday.reduce((s, i) => s + safeArray(i.items).reduce((a, x) => a + x.qty * x.price, 0) - (i.discount || 0), 0);
+  const invRevToday = invsToday.reduce((s, i) => s + safeArray(i.items).reduce((a, x) => a + x.qty * x.price, 0) - (i.discount || 0), 0);
+  // Revenue (Today) = paid invoices + OP registration amount + opticals advance + opticals balance collected on delivery
+  const opRegRevToday = ptsToday.reduce((s, p) => s + (parseFloat(p.paymentAmount) || 0), 0);
+  const balanceVal = (o) => { const b = o.balance !== "" && o.balance != null ? parseFloat(o.balance) : (parseFloat(o.totalPrice) || 0) - (parseFloat(o.advance) || 0); return Math.max(0, isNaN(b) ? 0 : b); };
+  const opticalsAdvToday = flt(data.opticals).filter(o => isToday(o.date) || isToday(o.timestamp)).reduce((s, o) => s + (parseFloat(o.advance) || 0), 0);
+  const opticalsBalToday = flt(data.opticals).filter(o => o.deliveryStatus === "Delivered" && (isToday(o.updatedAt) || isToday(o.date) || isToday(o.timestamp))).reduce((s, o) => s + balanceVal(o), 0);
+  const revToday    = invRevToday + opRegRevToday + opticalsAdvToday + opticalsBalToday;
   const revisitToday = ptsToday.filter(x => {
     const v = (x.visitType || "").toLowerCase();
     return v && v !== "new patient" && (v.includes("visit") || v.includes("review") || v.includes("camp"));
@@ -759,7 +834,8 @@ function Dashboard({ session, data, setView, auditLog, dashCms }) {
   const newRegToday = ptsToday.filter(x => !revisitToday.includes(x));
 
   const tasksToday = flt(data.tasks).filter(t => isToday(t.deadline) || isToday(t.completedAt) || isToday(t.createdAt));
-  const remToday   = flt(data.reminders).filter(r => isToday(r.reminderDate) || isToday(r.completedAt) || isToday(r.createdAt));
+  const remToday   = flt(data.reminders).filter(r => isToday(r.reminderDate) || isToday(r.completedAt) || isToday(r.createdAt) || reminderOverdue(r))
+                       .sort((a, b) => (reminderOverdue(b) ? 1 : 0) - (reminderOverdue(a) ? 1 : 0));
   const auditToday = safeArray(auditLog).filter(a => isToday(a.at)).slice(0, 12);
 
   const blockValues = { opReg: newRegToday.length, revisit: revisitToday.length, ksheet: billsToday.length, revenue: currency(revToday) };
@@ -839,6 +915,43 @@ function Dashboard({ session, data, setView, auditLog, dashCms }) {
           })()}
         </div>
       )}
+
+      {hasMDAccess(session) && (() => {
+        const balOf = (o) => { const b = o.balance !== "" && o.balance != null ? parseFloat(o.balance) : (parseFloat(o.totalPrice) || 0) - (parseFloat(o.advance) || 0); return Math.max(0, isNaN(b) ? 0 : b); };
+        const optRows = flt(data.opticals).filter(o => (o.deliveryStatus || "Not Ready") !== "Delivered");
+        return (
+          <div className="card" style={{ marginBottom: 18, borderTop: "4px solid #b45309" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 12 }}>
+              <div style={{ fontWeight: 800, fontSize: 14, color: "#b45309" }}>📦 Opticals Status</div>
+              <button className="btn btn-outline btn-sm" onClick={() => setView("opticalsStatus")}>Open Full View</button>
+            </div>
+            {optRows.length === 0 ? <div style={{ fontSize:12, color:"#9b8e82" }}>No pending opticals.</div> : (
+              <div style={{ overflowX:"auto" }}>
+                <table>
+                  <thead><tr><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Total</th><th>Advance</th><th>Balance</th><th>Delivery Status</th></tr></thead>
+                  <tbody>
+                    {optRows.slice(0, 12).map(o => { const bal = balOf(o); return (
+                      <tr key={o.id}>
+                        <td style={{ fontFamily:"monospace", fontWeight:700 }}>{o.mrNo || "—"}</td>
+                        <td style={{ fontFamily:"monospace", color:"#1d4ed8" }}>{o.patientId || "—"}</td>
+                        <td style={{ fontWeight:600 }}>{o.name}</td>
+                        <td>{o.phone || "—"}</td>
+                        <td>{o.totalPrice ? `₹${o.totalPrice}` : "—"}</td>
+                        <td>{o.advance ? `₹${o.advance}` : "—"}</td>
+                        <td style={{ fontWeight:700, color: bal > 0 ? "#dc2626" : "#16a34a" }}>{bal > 0 ? `₹${bal}` : "Fully Paid"}</td>
+                        <td><span className="tag" style={{ background: o.deliveryStatus === "Fixing Completed But Not Delivered" ? "#fef9c3" : "#fee2e2", color: o.deliveryStatus === "Fixing Completed But Not Delivered" ? "#854d0e" : "#7f1d1d" }}>{o.deliveryStatus || "Not Ready"}</span></td>
+                      </tr>
+                    );})}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+
+
 
 
 
@@ -1790,7 +1903,7 @@ function OpticalsStatusSection({ session, data, mutate, can, audit, onSync, sync
           id: uid(),
           mrNo: row.mrNo || "", patientId: row.patientId || "", name: row.name || "", phone: row.phone || "",
           reminderType: "Follow-up Visit",
-          reminderDate: todayStr(),
+          reminderDate: todayStr(), reminderTime: "18:00",
           notes: "Auto: Fixing completed but not delivered — Front Desk to call patient and arrange delivery.",
           branch: row.branch || branch,
           targetDesignation: "FRONT DESK STAFF",
@@ -2057,7 +2170,7 @@ function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
   const [msg,   setMsg]   = useState(""); const [mrLookup, setMrLookup] = useState("");
   const [filter, setFilter] = useState("upcoming");
 
-  const blank = () => ({ mrNo: "", patientId: "", name: "", phone: "", reminderType: "Lens Delivery", reminderDate: todayStr(), notes: "", branch: isOwner ? "KKD_Main Branch" : branch });
+  const blank = () => ({ mrNo: "", patientId: "", name: "", phone: "", reminderType: "Lens Delivery", reminderDate: todayStr(), reminderTime: "09:00", notes: "", branch: isOwner ? "KKD_Main Branch" : branch });
   const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
   const lookupPatient = (query) => {
@@ -2073,7 +2186,7 @@ function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
 
   const markDone = (rem) => { const updated = { ...rem, status: "done", completedAt: ts() }; mutate("reminders", arr => arr.map(x => x.id === rem.id ? updated : x), updated); };
   const del = id => { if (confirm("Delete reminder?")) { mutate("reminders", arr => arr.filter(x => x.id !== id), null, id); audit("DELETE", { type:"reminders", id }); } };
-  const isOverdue = r => r.status === "pending" && new Date(r.reminderDate) < new Date(todayStr());
+  const isOverdue = r => reminderOverdue(r);
   const isToday    = r => r.reminderDate === todayStr();
   const filtered = rows.filter(r => { if (filter === "upcoming") return r.status === "pending"; if (filter === "done") return r.status === "done"; return true; }).sort((a,b) => new Date(a.reminderDate) - new Date(b.reminderDate));
   const typeIcon = t => ({ "Lens Delivery":"🕶", "Follow-up Visit":"🔁", "Payment Due":"💰", "Review":"📋" }[t] || "🔔");
@@ -2087,7 +2200,7 @@ function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
         {filtered.map(r => (
           <div key={r.id} className="card" style={{ padding:"14px 18px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:14, borderLeft: `4px solid ${r.status==="done" ? "#16a34a" : isOverdue(r) ? "#dc2626" : isToday(r) ? "#d97706" : "#9b8e82"}` }}>
             <div style={{ display:"flex", alignItems:"center", gap:12, flex:1 }}><div style={{ fontSize:22 }}>{typeIcon(r.reminderType)}</div><div><div style={{ fontWeight:700, fontSize:14, textDecoration: r.status==="done"?"line-through":"none", color: r.status==="done"?"#9b8e82":"#1a1714" }}>{r.name} <span style={{ fontWeight:400, color:"#9b8e82", fontSize:12 }}>({r.mrNo || r.patientId || "—"})</span></div><div style={{ fontSize:12, color:"#6b5e52" }}>{r.reminderType} · {r.phone}</div>{r.notes && <div style={{ fontSize:12, color:"#9b8e82", marginTop:2 }}>{r.notes}</div>}</div></div>
-            <div style={{ textAlign:"right" }}><div style={{ fontWeight:700, fontSize:13, color: isOverdue(r)?"#dc2626":isToday(r)?"#d97706":"#1a1714" }}>{r.reminderDate}</div>{isOverdue(r) && <div style={{ fontSize:10, color:"#dc2626", fontWeight:700 }}>OVERDUE</div>}{isToday(r) && <div style={{ fontSize:10, color:"#d97706", fontWeight:700 }}>TODAY</div>}</div>
+            <div style={{ textAlign:"right" }}><div style={{ fontWeight:700, fontSize:13, color: isOverdue(r)?"#dc2626":isToday(r)?"#d97706":"#1a1714" }}>{r.reminderDate}{r.reminderTime ? ` · ${r.reminderTime}` : ""}</div>{isOverdue(r) && <div style={{ fontSize:10, color:"#dc2626", fontWeight:700 }}>OVERDUE</div>}{isToday(r) && !isOverdue(r) && <div style={{ fontSize:10, color:"#d97706", fontWeight:700 }}>TODAY</div>}</div>
             <div style={{ display:"flex", gap:6 }}>{r.status === "pending" && <button className="btn btn-outline btn-sm" onClick={()=>markDone(r)}>Done</button>}<button className="btn btn-danger btn-sm" onClick={()=>del(r.id)}>✕</button></div>
           </div>
         ))}
@@ -2099,7 +2212,7 @@ function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
             <div><label>MR No</label><input type="text" value={form.mrNo} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div><div><label>Patient ID</label><input type="text" value={form.patientId} readOnly style={{ background:"#f0ede8", color:"#9b8e82" }} /></div>
             <div style={{ gridColumn:"1/-1" }}><label>Name *</label><input type="text" value={form.name} onChange={F("name")} /></div><div><label>Phone</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} /></div>
             <div><label>Reminder Type</label><select value={form.reminderType} onChange={F("reminderType")}>{["Lens Delivery","Follow-up Visit","Payment Due","Review"].map(t=><option key={t}>{t}</option>)}</select></div>
-            <div><label>Reminder Date *</label><input type="date" value={form.reminderDate} onChange={F("reminderDate")} /></div><div style={{ gridColumn:"1/-1" }}><label>Notes</label><textarea rows={2} value={form.notes} onChange={F("notes")} /></div>
+            <div><label>Reminder Date *</label><input type="date" value={form.reminderDate} onChange={F("reminderDate")} /></div><div><label>Deadline Time</label><input type="time" value={form.reminderTime || ""} onChange={F("reminderTime")} /></div><div style={{ gridColumn:"1/-1" }}><label>Notes</label><textarea rows={2} value={form.notes} onChange={F("notes")} /></div>
           </div>
         </Modal>
       )}
