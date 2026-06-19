@@ -224,6 +224,57 @@ function exportCSV(rows, filename) {
   Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: filename }).click();
 }
 
+function downloadCSVTemplate(headers, filename) {
+  const csv = headers.join(",") + "\n";
+  Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })), download: filename }).click();
+}
+
+// Robust-ish CSV parser supporting quoted fields, escaped quotes, and CRLF.
+function parseCSV(text) {
+  const rows = [];
+  let cur = [], field = "", inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQ = false;
+      } else field += c;
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === ',') { cur.push(field); field = ""; }
+      else if (c === '\n') { cur.push(field); rows.push(cur); cur = []; field = ""; }
+      else if (c === '\r') { /* skip */ }
+      else field += c;
+    }
+  }
+  if (field.length || cur.length) { cur.push(field); rows.push(cur); }
+  if (!rows.length) return [];
+  const headers = rows[0].map(h => h.trim());
+  return rows.slice(1).filter(r => r.some(v => String(v).trim() !== "")).map(r => {
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = (r[i] ?? "").trim(); });
+    return obj;
+  });
+}
+
+function importCSVFile(onRows) {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".csv,text/csv";
+  inp.onchange = () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { onRows(parseCSV(String(reader.result || ""))); }
+      catch (e) { alert("Failed to parse CSV: " + (e && e.message ? e.message : e)); }
+    };
+    reader.readAsText(f);
+  };
+  inp.click();
+}
+
 const validate = {
   phone:     v => { const s = String(v || "").trim(); return s.length === 10 && s[0] !== "0" && /^\d+$/.test(s); },
   town:      v => { const s = String(v || "").trim(); return s.length > 0 && !/\d/.test(s); },
@@ -307,6 +358,8 @@ export default function App() {
   const [session,  setSession]  = useState(() => LS.getSess());
   const [accounts, setAccounts] = useState(() => safeArray(LS.get("opti_accounts", DEFAULT_ACCOUNTS), DEFAULT_ACCOUNTS));
   const accountsWriteInFlight = useRef(false);
+  // Per-table in-flight write counter — pauses cloud→local overwrites for that table.
+  const writesInFlight = useRef({});
   const [data,     setData]     = useState(() => { const d = LS.get("opti_data_v4", SEED_DATA); return d && typeof d === 'object' ? d : SEED_DATA; });
   const [auditLog, setAuditLog] = useState(() => safeArray(LS.get("opti_audit", [])));
   const [fieldVis, setFieldVis] = useState(() => LS.get("opti_fields", DEFAULT_FIELD_VISIBILITY) || DEFAULT_FIELD_VISIBILITY);
@@ -338,16 +391,18 @@ export default function App() {
         sbGet("patients"), sbGet("patientBill"), sbGet("optometrist"), sbGet("opticals"), sbGet("stock"), sbGet("invoices"), sbGet("accounts"), sbGet("tasks"), sbGet("reminders"),
       ]);
 
+      const w = writesInFlight.current;
+      const keep = (k, fresh, local) => (w[k] ? safeArray(local) : (Array.isArray(fresh) ? fresh : safeArray(local)));
       setData(d => ({
         ...d,
-        patients:    Array.isArray(pts)   ? pts   : safeArray(d.patients),
-        patientBill: Array.isArray(bills) ? bills : safeArray(d.patientBill),
-        optometrist: Array.isArray(optom) ? optom : safeArray(d.optometrist),
-        opticals:    Array.isArray(optcl) ? optcl : safeArray(d.opticals),
-        stock:       Array.isArray(stk)   ? stk   : safeArray(d.stock),
-        invoices:    Array.isArray(inv)   ? inv   : safeArray(d.invoices),
-        tasks:       Array.isArray(tsks)  ? tsks  : safeArray(d.tasks),
-        reminders:   Array.isArray(rems)  ? rems  : safeArray(d.reminders),
+        patients:    keep("patients",    pts,   d.patients),
+        patientBill: keep("patientBill", bills, d.patientBill),
+        optometrist: keep("optometrist", optom, d.optometrist),
+        opticals:    keep("opticals",    optcl, d.opticals),
+        stock:       keep("stock",       stk,   d.stock),
+        invoices:    keep("invoices",    inv,   d.invoices),
+        tasks:       keep("tasks",       tsks,  d.tasks),
+        reminders:   keep("reminders",   rems,  d.reminders),
       }));
 
       if (Array.isArray(accs) && accs.length > 0 && !accountsWriteInFlight.current) { setAccounts(accs); LS.set("opti_accounts", accs); }
@@ -410,22 +465,41 @@ export default function App() {
     sbInsert("audit_log", entry).catch(() => {});
   }, [session]);
 
-  const mutate = useCallback((key, fn, newRecord) => {
+  // Tracks tables with an in-flight write so the 4s background poll cannot
+  // overwrite a just-edited/just-deleted row with stale cloud data.
+  const markWrite = (key) => {
+    writesInFlight.current[key] = (writesInFlight.current[key] || 0) + 1;
+  };
+  const releaseWrite = (key) => {
+    // Keep the lock for a short tail so a poll already in-flight cannot win.
+    setTimeout(() => {
+      writesInFlight.current[key] = Math.max(0, (writesInFlight.current[key] || 1) - 1);
+    }, 1500);
+  };
+
+  const mutate = useCallback((key, fn, newRecord, deleteId) => {
     setData(d => {
       const updated = typeof fn === "function" ? fn(safeArray(d[key])) : fn;
       if (sbReady()) {
-        if (newRecord) {
+        markWrite(key);
+        if (deleteId) {
+          sbDelete(key, deleteId).finally(() => releaseWrite(key));
+        } else if (newRecord) {
           sbUpsertOne(key, newRecord).then(result => {
             if (!result.ok) {
               alert(`Warning: This record could not be saved to the cloud.\n\nReason: ${result.error}\n\nIt is only stored on this device for now. This is usually caused by a missing column in the Supabase "${SB_TABLES[key] || key}" table.`);
             }
-          });
+          }).finally(() => releaseWrite(key));
+        } else if (Array.isArray(updated)) {
+          sbUpsertMany(key, updated).catch(() => {}).finally(() => releaseWrite(key));
+        } else {
+          releaseWrite(key);
         }
-        else if (Array.isArray(updated)) sbUpsertMany(key, updated).catch(() => {});
       }
       return { ...d, [key]: updated };
     });
   }, []);
+
 
   // Surfaces real Supabase errors so a failed write never looks like
   // "data got wiped" — the user is told exactly what happened.
@@ -1079,15 +1153,73 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
     setModal(false); setMsg("Patient registered successfully.");
   };
 
-  const del = id => { if (confirm("Delete patient?")) { mutate("patients", arr => arr.filter(x => x.id !== id)); audit("DELETE", { type: "patients", id }); } };
+  const del = id => { if (confirm("Delete patient?")) { mutate("patients", arr => arr.filter(x => x.id !== id), null, id); audit("DELETE", { type: "patients", id }); } };
   const openEdit = (row) => { setForm({ ...row }); setTouch({}); setMsg(""); setDupWarning(null); setModal(true); };
+  const [viewRow, setViewRow] = useState(null);
   const canEdit = isOwner || can("patients", "edit");
+  const canViewDetail = isOwner || can("patients", "view");
+
+  const OP_CSV_HEADERS = ["date","time","mrNo","patientId","name","phone","address","visitType","ref","paymentMode","paymentAmount","paymentRefNo","branch","remarks"];
+  const handleImport = () => {
+    if (!can("patients","add") && !isOwner) { setMsg("No permission to import."); return; }
+    importCSVFile(records => {
+      if (!records.length) { setMsg("CSV is empty."); return; }
+      let added = 0, skipped = 0;
+      const existing = safeArray(data.patients);
+      const used = new Set(existing.map(p => (p.mrNo||"").toLowerCase()).filter(Boolean));
+      const startNum = (() => {
+        const nums = existing.map(p => parseInt((p.patientId||"").replace(/\D/g,""))).filter(n => !isNaN(n));
+        return nums.length ? Math.max(...nums) : 0;
+      })();
+      let counter = startNum;
+      const newRecords = [];
+      for (const r of records) {
+        const mrNo = String(r.mrNo||"").trim();
+        const name = String(r.name||"").trim();
+        const phone = String(r.phone||"").trim();
+        if (!mrNo || !name || !phone) { skipped++; continue; }
+        if (used.has(mrNo.toLowerCase())) { skipped++; continue; }
+        used.add(mrNo.toLowerCase());
+        counter += 1;
+        const rec = {
+          id: uid(),
+          timestamp: ts(), date: r.date || todayStr(), time: r.time || timeStr(),
+          mrNo, patientId: r.patientId || `PT-${String(counter).padStart(4,"0")}`,
+          name, phone, address: r.address || "",
+          visitType: r.visitType || "New Patient", visitCount: 1,
+          ref: r.ref || "",
+          paymentMode: r.paymentMode || "Cash",
+          paymentAmount: r.paymentAmount || "",
+          paymentRefNo: r.paymentRefNo || "",
+          branch: r.branch || (isOwner ? "KKD_Main Branch" : branch),
+          remarks: r.remarks || "",
+          status: "approved",
+          createdBy: session.id, createdByName: session.name, createdAt: ts(),
+        };
+        newRecords.push(rec);
+        added++;
+      }
+      if (newRecords.length) mutate("patients", arr => [...arr, ...newRecords]);
+      audit("IMPORT_CSV", { type:"patients", added, skipped });
+      setMsg(`Imported ${added} patient(s). Skipped ${skipped} (missing fields or duplicate MR No).`);
+    });
+  };
+
 
   const filtered = rows.filter(r => !search || r.name?.toLowerCase().includes(search.toLowerCase()) || r.phone?.includes(search) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) || r.patientId?.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div>
-      <SectionHeader title="OP Registration" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "op_registration.csv")} onAdd={can("patients","add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setDupWarning(null); setModal(true); } : null} msg={msg} />
+      <SectionHeader
+        title="OP Registration"
+        onSync={onSync}
+        syncing={syncing}
+        onTemplate={() => downloadCSVTemplate(OP_CSV_HEADERS, "op_registration_template.csv")}
+        onImport={(can("patients","add") || isOwner) ? handleImport : null}
+        onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "op_registration.csv")}
+        onAdd={can("patients","add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setDupWarning(null); setModal(true); } : null}
+        msg={msg}
+      />
       <div style={{ marginBottom: 12 }}>
         <input type="text" placeholder="🔍 Search by name, phone, MR No, Patient ID…" value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", maxWidth: 420, borderRadius: 10, border: "1px solid #e8e2db", padding: "8px 14px", fontSize: 13 }} />
       </div>
@@ -1098,8 +1230,8 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
             <tr key={r.id}>
               <td style={{ fontSize:11, whiteSpace:"nowrap", color:"#9b8e82" }}>{r.timestamp}</td>
               <td style={{ fontWeight:700, fontFamily:"monospace" }}>{r.mrNo}</td>
-              <td style={{ fontFamily:"monospace", color:"#1d4ed8" }}>{r.patientId}</td>
-              <td style={{ fontWeight:600 }}>{r.name}</td><td>{r.phone}</td>
+              <td style={{ fontFamily:"monospace", color:"#1d4ed8", cursor: canViewDetail?"pointer":"default", textDecoration: canViewDetail?"underline":"none" }} onClick={() => canViewDetail && setViewRow(r)}>{r.patientId}</td>
+              <td style={{ fontWeight:600, cursor: canViewDetail?"pointer":"default" }} onClick={() => canViewDetail && setViewRow(r)}>{r.name}</td><td>{r.phone}</td>
               <td style={{ maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.address}</td>
               <td><span className="tag tag-blue">{r.paymentMode}</span></td>
               <td style={{ fontWeight:600 }}>{r.paymentAmount ? `₹${r.paymentAmount}` : "—"}</td>
@@ -1108,6 +1240,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
               <td><span className="tag" style={{ background:"#f0ede8", color:"#6b5e52" }}>{r.branch}</span></td>
               <td style={{ fontSize:12, color:"#9b8e82", maxWidth:120, overflow:"hidden", textOverflow:"ellipsis" }}>{r.remarks || "—"}</td>
               <td style={{ display:"flex", gap:5 }}>
+                <button className="btn btn-outline btn-sm" disabled={!canViewDetail} style={!canViewDetail ? { opacity:.35, cursor:"not-allowed" } : {}} onClick={() => canViewDetail && setViewRow(r)}>View</button>
                 <button className="btn btn-outline btn-sm" disabled={!canEdit} style={!canEdit ? { opacity:.35, cursor:"not-allowed" } : {}} onClick={() => canEdit && openEdit(r)}>Edit</button>
                 {isOwner && <button className="btn btn-danger btn-sm" onClick={() => del(r.id)}>✕</button>}
               </td>
@@ -1115,6 +1248,19 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
           ))}</tbody>
         </table>
       </div>
+      {viewRow && (() => {
+        const kSheets = safeArray(data.patientBill)
+          .map(unpackKSheetRow)
+          .filter(k => (viewRow.mrNo && k.mrNo === viewRow.mrNo) || (viewRow.patientId && k.patientId === viewRow.patientId) || (viewRow.phone && k.phone === viewRow.phone))
+          .sort((a,b) => (b.timestamp||"").localeCompare(a.timestamp||""));
+        const latest = kSheets[0] || null;
+        return (
+          <Modal title={`Patient · ${viewRow.name || viewRow.mrNo || ""}`} onClose={() => setViewRow(null)} onSave={() => setViewRow(null)} saveLabel="Close" xl>
+            <PatientFullView patient={viewRow} kSheet={latest} kSheetCount={kSheets.length} />
+          </Modal>
+        );
+      })()}
+
       {modal && (
         <Modal title="OP Registration" onClose={() => setModal(false)} onSave={submit} saveLabel="Save Registration" wide>
           {dupWarning && <div style={{ marginBottom:14, background:"#fef9c3", border:"1px solid #fde68a", borderRadius:10, padding:"10px 14px", fontSize:13, color:"#a16207", fontWeight:600 }}>{dupWarning.msg}</div>}
@@ -1221,7 +1367,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
   const canEdit = isOwner || can("patientBill","edit");
   const canView = isOwner || can("patientBill","view");
 
-  const del = id => { if (confirm("Delete K Sheet?")) { mutate("patientBill", arr => arr.filter(x => x.id!==id)); audit("DELETE",{type:"patientBill",id}); } };
+  const del = id => { if (confirm("Delete K Sheet?")) { mutate("patientBill", arr => arr.filter(x => x.id!==id), null, id); audit("DELETE",{type:"patientBill",id}); } };
 
   // ── Designation-based tab access control ─────────────────────────────
   // Owner / MD / DEVELOPER / OPTOMOLOGIST → all 5 clinical tabs
@@ -1242,9 +1388,58 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
       : ALL_TABS.filter(t => t.id === "basic"); // FRONT DESK STAFF → patient info only
   const filtered = rows.filter(r => !search || r.name?.toLowerCase().includes(search.toLowerCase()) || r.phone?.includes(search) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) || r.patientId?.toLowerCase().includes(search.toLowerCase()));
 
+  const KS_CSV_HEADERS = [
+    "date","time","mrNo","patientId","name","phone","address","gender","age","complaint","pastHistory",
+    "iop","bp","ducts","rbs","dilatedWith","dilatedContinuee","optom",
+    "vaOd","vaOs","retinoscopyOd","retinoscopyOs",
+    "reSpherAR","reCylAR","reAxisAR","leSpherAR","leCylAR","leAxisAR",
+    "reSpherSub","reCylSub","reAxisSub","leSpherSub","leCylSub","leAxisSub","add",
+    "eyelids","conjunctiva","cornea","anteriorChamber","iris","pupil","lens","ocularMovements","fundus","advice","ophthalmologist",
+    "branch",
+  ];
+  const handleImport = () => {
+    if (!can("patientBill","add") && !isOwner) { setMsg("No permission to import."); return; }
+    importCSVFile(records => {
+      if (!records.length) { setMsg("CSV is empty."); return; }
+      let added = 0, skipped = 0;
+      const newRecords = [];
+      for (const r of records) {
+        const name = String(r.name||"").trim();
+        const mrNo = String(r.mrNo||"").trim();
+        if (!name || !mrNo) { skipped++; continue; }
+        const rec = packKSheetForLegacyTable({
+          id: uid(),
+          timestamp: ts(), date: r.date || todayStr(), time: r.time || timeStr(),
+          gender: r.gender || "Male",
+          ...r,
+          name, mrNo,
+          branch: r.branch || (isOwner ? "KKD_Main Branch" : branch),
+          status: "approved",
+          createdBy: session.id, createdByName: session.name, createdAt: ts(),
+        });
+        delete rec._lookup;
+        newRecords.push(rec);
+        added++;
+      }
+      if (newRecords.length) mutate("patientBill", arr => [...arr, ...newRecords]);
+      audit("IMPORT_CSV", { type:"patientBill", added, skipped });
+      setMsg(`Imported ${added} K Sheet(s). Skipped ${skipped} (missing name or MR No).`);
+    });
+  };
+
   return (
     <div>
-      <SectionHeader title="K Sheet Entry" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({id,...r})=>r), "k_sheet.csv")} onAdd={can("patientBill","add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setTab("basic"); setMrLookup(""); setModal(true); } : null} msg={msg} />
+      <SectionHeader
+        title="K Sheet Entry"
+        onSync={onSync}
+        syncing={syncing}
+        onTemplate={() => downloadCSVTemplate(KS_CSV_HEADERS, "k_sheet_template.csv")}
+        onImport={(can("patientBill","add") || isOwner) ? handleImport : null}
+        onExport={() => exportCSV(rows.map(({id,...r})=>r), "k_sheet.csv")}
+        onAdd={can("patientBill","add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setTab("basic"); setMrLookup(""); setModal(true); } : null}
+        msg={msg}
+      />
+
       <div style={{ marginBottom:12 }}><input type="text" placeholder="🔍 Search by name, phone, MR No, Patient ID…" value={search} onChange={e=>setSearch(e.target.value)} style={{ width:"100%", maxWidth:420, borderRadius:10, border:"1px solid #e8e2db", padding:"8px 14px", fontSize:13 }} /></div>
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
@@ -1374,15 +1569,8 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
         </Modal>
       )}
       {viewRow && (
-        <Modal title={`Patient Record · ${viewRow.name || viewRow.mrNo || ""}`} onClose={()=>setViewRow(null)} onSave={()=>setViewRow(null)} saveLabel="Close" wide>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:10, fontSize:12 }}>
-            {Object.entries(viewRow).filter(([k])=>!["_lookup"].includes(k)).map(([k,v]) => (
-              <div key={k} style={{ background:"#faf9f7", border:"1px solid #f0ede8", borderRadius:8, padding:"8px 10px" }}>
-                <div style={{ fontSize:10, color:"#9b8e82", textTransform:"uppercase", fontWeight:700, letterSpacing:".05em" }}>{k}</div>
-                <div style={{ fontFamily:"monospace", wordBreak:"break-word", marginTop:3 }}>{v===""||v==null?"—":String(v)}</div>
-              </div>
-            ))}
-          </div>
+        <Modal title={`K Sheet · ${viewRow.name || viewRow.mrNo || ""}`} onClose={()=>setViewRow(null)} onSave={()=>setViewRow(null)} saveLabel="Close" xl>
+          <PatientFullView patient={viewRow} kSheet={viewRow} />
         </Modal>
       )}
     </div>
@@ -1418,7 +1606,7 @@ function OptometristSection({ session, data, mutate, can, audit, onSync, syncing
     mutate("optometrist", arr=>[...arr, record], record); setModal(false); setMsg("Saved.");
   };
 
-  const del = id => { if (confirm("Delete?")) { mutate("optometrist", arr=>arr.filter(x=>x.id!==id)); audit("DELETE",{type:"optometrist",id}); } };
+  const del = id => { if (confirm("Delete?")) { mutate("optometrist", arr=>arr.filter(x=>x.id!==id), null, id); audit("DELETE",{type:"optometrist",id}); } };
   const filtered = rows.filter(r => !search || r.name?.toLowerCase().includes(search.toLowerCase()) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) || r.patientId?.toLowerCase().includes(search.toLowerCase()));
 
   return (
@@ -1500,7 +1688,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
   const openEdit = (row) => { setForm({ ...row }); setRxPreview(null); setMrLookup(""); setMsg(""); setModal(true); };
   const canEdit = isOwner || can("opticals","edit");
 
-  const del = id => { if (confirm("Delete?")) { mutate("opticals", arr=>arr.filter(x=>x.id!==id)); audit("DELETE",{type:"opticals",id}); } };
+  const del = id => { if (confirm("Delete?")) { mutate("opticals", arr=>arr.filter(x=>x.id!==id), null, id); audit("DELETE",{type:"opticals",id}); } };
   const filtered = rows.filter(r => !search || r.name?.toLowerCase().includes(search.toLowerCase()) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) || r.patientId?.toLowerCase().includes(search.toLowerCase()));
 
   return (
@@ -1592,7 +1780,7 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
               <td>{s.lensType && s.category === "Lenses" ? <span className="tag tag-blue">{s.lensType}</span> : "—"}</td><td style={{ fontFamily: "monospace", fontSize: 12 }}>{s.boxNo || "—"}</td>
               <td style={{ fontWeight: 600 }}>{currency(s.price)}</td><td style={{ fontSize: 12, color: "#9b8e82" }}>{s.location}</td>
               <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{s.branch}</span></td><td style={{ fontSize: 11, color: "#9b8e82" }}>{s.createdByName || "—"}</td>
-              {(can("inventory", "edit") || isOwner) && (<td style={{ display: "flex", gap: 5 }}><button className="btn btn-outline btn-sm" onClick={() => open(s)}>Edit</button>{isOwner && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) { mutate("stock", arr => arr.filter(x => x.id !== s.id)); audit("DELETE", { type: "stock", id: s.id }); } }}>✕</button>}</td>)}
+              {(can("inventory", "edit") || isOwner) && (<td style={{ display: "flex", gap: 5 }}><button className="btn btn-outline btn-sm" onClick={() => open(s)}>Edit</button>{isOwner && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) { mutate("stock", arr => arr.filter(x => x.id !== s.id), null, s.id); audit("DELETE", { type: "stock", id: s.id }); } }}>✕</button>}</td>)}
             </tr>
           ))}</tbody>
         </table>
@@ -1643,7 +1831,7 @@ function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing })
               <td><span className={`tag ${inv.status === "Paid" ? "tag-green" : "tag-yellow"}`}>{inv.status}</span></td><td style={{ fontSize: 11, color: "#9b8e82" }}>{inv.createdByName || "—"}</td><td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{inv.branch}</span></td>
               <td style={{ display: "flex", gap: 5 }}>
                 {(isOwner || can("invoices", "edit")) && inv.status === "Pending" && <button className="btn btn-sm" style={{ background: "#dcfce7", color: "#16a34a", border: "none", fontWeight: 700 }} onClick={() => mutate("invoices", arr => arr.map(i => i.id === inv.id ? { ...i, status: "Paid" } : i))}>✓ Paid</button>}
-                {isOwner && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) mutate("invoices", arr => arr.filter(i => i.id !== inv.id)); }}>✕</button>}
+                {isOwner && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) mutate("invoices", arr => arr.filter(i => i.id !== inv.id), null, inv.id); }}>✕</button>}
               </td>
             </tr>
           ))}</tbody>
@@ -1704,7 +1892,7 @@ function TasksSection({ session, data, mutate, audit, accounts, onSync, syncing 
     const updated = { ...task, status: "done", completedAt: ts() };
     mutate("tasks", arr => arr.map(x => x.id === task.id ? updated : x), updated); audit("TASK_COMPLETE", { title: task.title });
   };
-  const del = id => { if (confirm("Delete task?")) { mutate("tasks", arr => arr.filter(x => x.id !== id)); audit("DELETE", { type:"tasks", id }); } };
+  const del = id => { if (confirm("Delete task?")) { mutate("tasks", arr => arr.filter(x => x.id !== id), null, id); audit("DELETE", { type:"tasks", id }); } };
   const isOverdue = t => t.status === "pending" && new Date(t.deadline) < new Date(todayStr());
   const filtered = rows.filter(t => { if (filter === "pending") return t.status === "pending" && !isOverdue(t); if (filter === "done") return t.status === "done"; if (filter === "overdue") return isOverdue(t); return true; });
   const staffName = id => staffList.find(s => s.id === id)?.name || id;
@@ -1765,7 +1953,7 @@ function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
   };
 
   const markDone = (rem) => { const updated = { ...rem, status: "done", completedAt: ts() }; mutate("reminders", arr => arr.map(x => x.id === rem.id ? updated : x), updated); };
-  const del = id => { if (confirm("Delete reminder?")) { mutate("reminders", arr => arr.filter(x => x.id !== id)); audit("DELETE", { type:"reminders", id }); } };
+  const del = id => { if (confirm("Delete reminder?")) { mutate("reminders", arr => arr.filter(x => x.id !== id), null, id); audit("DELETE", { type:"reminders", id }); } };
   const isOverdue = r => r.status === "pending" && new Date(r.reminderDate) < new Date(todayStr());
   const isToday    = r => r.reminderDate === todayStr();
   const filtered = rows.filter(r => { if (filter === "upcoming") return r.status === "pending"; if (filter === "done") return r.status === "done"; return true; }).sort((a,b) => new Date(a.reminderDate) - new Date(b.reminderDate));
@@ -1885,11 +2073,147 @@ function SupabaseSection({ sbCreds, sbStatus, onConnect, onSync, onPush }) {
 
 function LaunchGuide() { return <div style={{ padding: 20 }}>See previous instructions for launch steps.</div>; }
 
-function SectionHeader({ title, onAdd, onExport, onSync, syncing, msg }) {
+function SectionHeader({ title, onAdd, onExport, onImport, onTemplate, onSync, syncing, msg }) {
   return (
     <div style={{ marginBottom: 18 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div className="section-title">{title}</div><div style={{ display: "flex", gap: 10 }}>{onSync && <button className="btn btn-outline btn-sm" onClick={onSync} disabled={syncing}>{syncing ? "⟳ Syncing…" : "⟳ Sync"}</button>}{onExport && <button className="btn btn-outline btn-sm" onClick={onExport}>⬇ CSV</button>}{onAdd && <button className="btn btn-dark btn-sm" onClick={onAdd}>+ Add</button>}</div></div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div className="section-title">{title}</div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {onSync && <button className="btn btn-outline btn-sm" onClick={onSync} disabled={syncing}>{syncing ? "⟳ Syncing…" : "⟳ Sync"}</button>}
+          {onTemplate && <button className="btn btn-outline btn-sm" onClick={onTemplate} title="Download CSV template">⬇ Template</button>}
+          {onImport && <button className="btn btn-outline btn-sm" onClick={onImport}>⬆ Import CSV</button>}
+          {onExport && <button className="btn btn-outline btn-sm" onClick={onExport}>⬇ CSV</button>}
+          {onAdd && <button className="btn btn-dark btn-sm" onClick={onAdd}>+ Add</button>}
+        </div>
+      </div>
       {msg && <div style={{ marginTop: 8, fontSize: 13, padding: "8px 14px", borderRadius: 8, background: "#dcfce7", color: "#16a34a" }}>{msg}</div>}
+    </div>
+  );
+}
+
+// ── Read-only grouped view of a patient + K-Sheet record ─────────────
+// Mirrors the 5 K-Sheet tabs:
+//   1. Patient Info, 2. History & Vitals, 3. Acuity & Retinoscopy,
+//   4. AR & Subjective, 5. Eye Exam (MD)
+function PatientFullView({ patient, kSheet, kSheetCount }) {
+  const k = kSheet || {};
+  const p = patient || {};
+  const get = (key) => {
+    const v = k[key] !== undefined && k[key] !== "" ? k[key] : p[key];
+    return v === "" || v === undefined || v === null ? "—" : String(v);
+  };
+  const Row = ({ label, value }) => (
+    <div style={{ background:"#faf9f7", border:"1px solid #f0ede8", borderRadius:8, padding:"8px 10px" }}>
+      <div style={{ fontSize:10, color:"#9b8e82", textTransform:"uppercase", fontWeight:700, letterSpacing:".05em" }}>{label}</div>
+      <div style={{ fontFamily:"monospace", wordBreak:"break-word", marginTop:3, fontSize:12 }}>{value}</div>
+    </div>
+  );
+  const Section = ({ title, children, cols = 3 }) => (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ fontFamily:"'Playfair Display',serif", fontSize: 14, fontWeight: 700, marginBottom: 8, color:"#3b2f25", borderBottom:"1px solid #e8e2db", paddingBottom: 6 }}>{title}</div>
+      <div style={{ display:"grid", gridTemplateColumns:`repeat(${cols}, 1fr)`, gap: 8 }}>{children}</div>
+    </div>
+  );
+  return (
+    <div>
+      {typeof kSheetCount === "number" && (
+        <div style={{ marginBottom: 14, fontSize: 12, color:"#6b5e52" }}>
+          {kSheetCount > 0
+            ? `Showing most recent K Sheet · ${kSheetCount} total record(s) for this patient.`
+            : "No K Sheet records yet for this patient."}
+        </div>
+      )}
+
+      <Section title="1. Patient Info">
+        <Row label="MR No" value={get("mrNo")} />
+        <Row label="Patient ID" value={get("patientId")} />
+        <Row label="Name" value={get("name")} />
+        <Row label="Phone" value={get("phone")} />
+        <Row label="Gender" value={get("gender")} />
+        <Row label="Age" value={get("age")} />
+        <Row label="Address" value={get("address")} />
+        <Row label="Visit Type" value={get("visitType")} />
+        <Row label="Branch" value={get("branch")} />
+        <Row label="Date" value={get("date")} />
+        <Row label="Time" value={get("time")} />
+        <Row label="Ref / Camp" value={get("ref")} />
+        <Row label="Payment Mode" value={get("paymentMode")} />
+        <Row label="Payment Amount" value={get("paymentAmount")} />
+        <Row label="Remarks" value={get("remarks")} />
+      </Section>
+
+      <Section title="2. History & Vitals (Optom)" cols={3}>
+        <Row label="Complaint" value={get("complaint")} />
+        <Row label="Past History" value={get("pastHistory")} />
+        <Row label="Optom Name" value={get("optom")} />
+        <Row label="HTN" value={get("htn")} />
+        <Row label="HTN Rx" value={get("htnRx")} />
+        <Row label="DM" value={get("dm")} />
+        <Row label="DM Rx" value={get("dmRx")} />
+        <Row label="CAD" value={get("cad")} />
+        <Row label="CAD Rx" value={get("cadRx")} />
+        <Row label="Asthmatic" value={get("asthmatic")} />
+        <Row label="Asthmatic Rx" value={get("asthmaticRx")} />
+        <Row label="Allergies" value={get("allergies")} />
+        <Row label="Allergies Rx" value={get("allergiesRx")} />
+        <Row label="Others" value={get("others")} />
+        <Row label="Others Rx" value={get("othersRx")} />
+        <Row label="IOP" value={get("iop")} />
+        <Row label="BP" value={get("bp")} />
+        <Row label="Ducts" value={get("ducts")} />
+        <Row label="RBS" value={get("rbs")} />
+        <Row label="Dilated With" value={get("dilatedWith")} />
+        <Row label="Dilated Continuee" value={get("dilatedContinuee")} />
+      </Section>
+
+      <Section title="3. Acuity & Retinoscopy" cols={4}>
+        <Row label="PG.OD" value={get("pgOd")} />
+        <Row label="PG.OD Add" value={get("pgOdAdd")} />
+        <Row label="PG.OS" value={get("pgOs")} />
+        <Row label="PG.OS Add" value={get("pgOsAdd")} />
+        <Row label="VA OD" value={get("vaOd")} />
+        <Row label="OD cPGP" value={get("odCpgp")} />
+        <Row label="OD PH" value={get("odPh")} />
+        <Row label="OD NV" value={get("odNv")} />
+        <Row label="OD PGP-" value={get("odPgp")} />
+        <Row label="VA OS" value={get("vaOs")} />
+        <Row label="OS cPGP" value={get("osCpgp")} />
+        <Row label="OS PH" value={get("osPh")} />
+        <Row label="OS PV / NV" value={get("osPv")} />
+        <Row label="OS PGP-" value={get("osPgp")} />
+        <Row label="Retinoscopy OD" value={get("retinoscopyOd")} />
+        <Row label="Retinoscopy OS" value={get("retinoscopyOs")} />
+      </Section>
+
+      <Section title="4. AR & Subjective" cols={3}>
+        <Row label="RE AR Sph" value={get("reSpherAR")} />
+        <Row label="RE AR Cyl" value={get("reCylAR")} />
+        <Row label="RE AR Axis" value={get("reAxisAR")} />
+        <Row label="LE AR Sph" value={get("leSpherAR")} />
+        <Row label="LE AR Cyl" value={get("leCylAR")} />
+        <Row label="LE AR Axis" value={get("leAxisAR")} />
+        <Row label="RE Sub Sph" value={get("reSpherSub")} />
+        <Row label="RE Sub Cyl" value={get("reCylSub")} />
+        <Row label="RE Sub Axis" value={get("reAxisSub")} />
+        <Row label="LE Sub Sph" value={get("leSpherSub")} />
+        <Row label="LE Sub Cyl" value={get("leCylSub")} />
+        <Row label="LE Sub Axis" value={get("leAxisSub")} />
+        <Row label="ADD" value={get("add")} />
+      </Section>
+
+      <Section title="5. Eye Exam (MD)" cols={3}>
+        <Row label="Eyelids" value={get("eyelids")} />
+        <Row label="Conjunctiva" value={get("conjunctiva")} />
+        <Row label="Cornea" value={get("cornea")} />
+        <Row label="Anterior Chamber" value={get("anteriorChamber")} />
+        <Row label="Iris" value={get("iris")} />
+        <Row label="Pupil" value={get("pupil")} />
+        <Row label="Lens" value={get("lens")} />
+        <Row label="Ocular Movements" value={get("ocularMovements")} />
+        <Row label="Fundus" value={get("fundus")} />
+        <Row label="Advice" value={get("advice")} />
+        <Row label="Ophthalmologist" value={get("ophthalmologist")} />
+      </Section>
     </div>
   );
 }
