@@ -456,7 +456,7 @@ function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastS
     { id: "dashboard",    label: "Dashboard",        icon: "⬡", show: true },
     { id: "patients",     label: "OP Registration",  icon: "◉", show: can("patients", "view") },
     { id: "patientBill",  label: "K Sheet Entry",    icon: "🧾", show: can("patientBill", "view") },
-    { id: "optometrist",  label: "Optometrist",      icon: "👁", show: can("optometrist", "view") },
+    
     { id: "opticals",     label: "Opticals",         icon: "🔭", show: can("opticals", "view") },
     { id: "inventory",    label: "Inventory",        icon: "▦", show: can("inventory", "view") },
     { id: "invoices",     label: "Sales & Invoices", icon: "◆", show: can("invoices", "view") },
