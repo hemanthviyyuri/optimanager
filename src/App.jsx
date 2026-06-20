@@ -66,7 +66,7 @@ const DEFAULT_ACCOUNTS = [
 ];
 
 const DEFAULT_FIELD_VISIBILITY = {
-  patients:     ["timestamp","date","time","mrNo","patientId","name","phone","address","ref","paymentAmount","paymentMode","paymentRefNo","branch","remarks","visitType"],
+  patients:     ["timestamp","date","time","mrNo","patientId","name","phone","address","gender","age","designation","aadharNo","ref","paymentAmount","paymentMode","paymentRefNo","branch","remarks","visitType"],
   patientBill:  ["timestamp","date","time","mrNo","patientId","name","phone","address","gender","age","complaint","pastHistory"],
   optometrist:  ["timestamp","mrNo","patientId","name","complaint","pastHistory"],
   opticals:     ["timestamp","mrNo","patientId","name","phone","address","totalPrice","advance","advancePaymentMethod","transactionId","balance","optomName"],
@@ -1126,7 +1126,7 @@ function DashboardBuilder({ fieldVis, setFieldVis, accounts, setAccounts }) {
   const [section, setSection] = useState("patients");
 
   const ALL_FIELDS = {
-    patients:    ["timestamp","date","time","mrNo","patientId","name","phone","address","ref","paymentAmount","paymentMode","paymentRefNo","branch","remarks","visitType"],
+    patients:    ["timestamp","date","time","mrNo","patientId","name","phone","address","gender","age","designation","aadharNo","ref","paymentAmount","paymentMode","paymentRefNo","branch","remarks","visitType"],
     patientBill: ["timestamp","date","time","mrNo","patientId","name","phone","address","gender","age","complaint","pastHistory"],
     optometrist: ["timestamp","mrNo","patientId","name","complaint","pastHistory"],
     opticals:    ["timestamp","mrNo","patientId","name","phone","address","totalPrice","advance","advancePaymentMethod","transactionId","balance","optomName"],
@@ -1235,7 +1235,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
 
   const blank = () => ({
     timestamp: ts(), date: todayStr(), time: timeStr(), mrNo: "", patientId: nextPatientId(),
-    name: "", phone: "", address: "", gender: "", age: "", ref: "", paymentAmount: "", paymentMode: "Cash", paymentRefNo: "",
+    name: "", phone: "", address: "", gender: "", age: "", designation: "", aadharNo: "", ref: "", paymentAmount: "", paymentMode: "Cash", paymentRefNo: "",
     branch: isOwner ? "KKD_Main Branch" : branch, remarks: "", visitType: "New Patient", visitCount: 1,
   });
 
@@ -1284,7 +1284,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
   const canEdit = isOwner || can("patients", "edit");
   const canViewDetail = isOwner || can("patients", "view");
 
-  const OP_CSV_HEADERS = ["date","time","mrNo","patientId","name","phone","address","gender","age","visitType","ref","paymentMode","paymentAmount","paymentRefNo","branch","remarks"];
+  const OP_CSV_HEADERS = ["date","time","mrNo","patientId","name","phone","address","gender","age","designation","aadharNo","visitType","ref","paymentMode","paymentAmount","paymentRefNo","branch","remarks"];
   const handleImport = () => {
     if (!can("patients","add") && !isOwner) { setMsg("No permission to import."); return; }
     importCSVFile(records => {
@@ -1312,6 +1312,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
           mrNo, patientId: r.patientId || `PT-${String(counter).padStart(4,"0")}`,
           name, phone, address: r.address || "",
           gender: r.gender || "", age: r.age || "",
+          designation: r.designation || "", aadharNo: r.aadharNo || "",
           visitType: r.visitType || "New Patient", visitCount: 1,
           ref: r.ref || "",
           paymentMode: r.paymentMode || "Cash",
@@ -1351,7 +1352,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
       </div>
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
-          <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Address</th><th>Payment</th><th>Payment Ref No</th><th>Amount</th><th>Ref/Camp</th><th>Visit</th><th>Branch</th><th>Remarks</th><th></th></tr></thead>
+          <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Designation</th><th>Aadhar No</th><th>Address</th><th>Payment</th><th>Payment Ref No</th><th>Amount</th><th>Ref/Camp</th><th>Visit</th><th>Branch</th><th>Remarks</th><th></th></tr></thead>
           <tbody>{filtered.map(r => (
             <tr key={r.id}>
               <td style={{ fontSize:11, whiteSpace:"nowrap", color:"#9b8e82" }}>{r.timestamp}</td>
@@ -1359,6 +1360,8 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
               <td style={{ fontFamily:"monospace", color:"#1d4ed8", cursor: canViewDetail?"pointer":"default", textDecoration: canViewDetail?"underline":"none" }} onClick={() => canViewDetail && setViewRow(r)}>{r.patientId}</td>
               <td style={{ fontWeight:600, cursor: canViewDetail?"pointer":"default" }} onClick={() => canViewDetail && setViewRow(r)}>{r.name}</td><td>{r.phone}</td>
               {(() => { const k = kInfo(r); return (<><td>{r.gender || k?.gender || "—"}</td><td>{r.age || k?.age || "—"}</td></>); })()}
+              <td>{r.designation || "—"}</td>
+              <td style={{ fontFamily:"monospace" }}>{r.aadharNo || "—"}</td>
               <td style={{ maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.address}</td>
               <td><span className="tag tag-blue">{r.paymentMode}</span></td>
               <td style={{ fontSize:11, fontFamily:"monospace", color:"#9b8e82" }}>{r.paymentRefNo || "—"}</td>
@@ -1403,6 +1406,8 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
             <div><label>Phone * (10 digits)</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} onBlur={handlePhoneBlur} style={vStyle(form.phone, validate.phone, touch.phone)} />{vMsg(form.phone, validate.phone, touch.phone, "10 digits, not starting 0.")}</div>
             <div><label>Gender</label><select value={form.gender || ""} onChange={F("gender")}><option value="">— Select —</option><option>Male</option><option>Female</option><option>Other</option></select></div>
             <div><label>Age</label><input type="number" min="0" placeholder="Age" value={form.age || ""} onChange={F("age")} /></div>
+            <div><label>Designation</label><input type="text" placeholder="Designation" value={form.designation || ""} onChange={F("designation")} /></div>
+            <div><label>Aadhar No</label><input type="text" maxLength={12} placeholder="12-digit Aadhar" value={form.aadharNo || ""} onChange={F("aadharNo")} /></div>
             <div style={{ gridColumn:"span 2" }}><label>Address *</label><input type="text" value={form.address} onChange={F("address")} onBlur={T("address")} style={vStyle(form.address, v => v.trim().length > 0, touch.address)} />{vMsg(form.address, v => v.trim().length > 0, touch.address, "Required.")}</div>
             <div><label>Ref / Camp {form.visitType === "Camp" ? "*" : ""}</label><input type="text" placeholder={form.visitType === "Camp" ? "Camp name (required)" : "Camp name or referrer"} value={form.ref} onChange={F("ref")} style={form.visitType === "Camp" && !form.ref ? { borderColor: "#dc2626" } : {}} /></div>
             <div><label>Payment Amount (₹)</label><input type="number" value={form.paymentAmount} onChange={F("paymentAmount")} /></div>
@@ -2410,6 +2415,8 @@ function PatientFullView({ patient, kSheet, kSheetCount }) {
         <Row label="Phone" value={get("phone")} />
         <Row label="Gender" value={get("gender")} />
         <Row label="Age" value={get("age")} />
+        <Row label="Designation" value={get("designation")} />
+        <Row label="Aadhar No" value={get("aadharNo")} />
         <Row label="Address" value={get("address")} />
         <Row label="Visit Type" value={get("visitType")} />
         <Row label="Branch" value={get("branch")} />
