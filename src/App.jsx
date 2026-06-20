@@ -1235,9 +1235,14 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
 
   const blank = () => ({
     timestamp: ts(), date: todayStr(), time: timeStr(), mrNo: "", patientId: nextPatientId(),
-    name: "", phone: "", address: "", ref: "", paymentAmount: "", paymentMode: "Cash", paymentRefNo: "",
+    name: "", phone: "", address: "", gender: "", age: "", ref: "", paymentAmount: "", paymentMode: "Cash", paymentRefNo: "",
     branch: isOwner ? "KKD_Main Branch" : branch, remarks: "", visitType: "New Patient", visitCount: 1,
   });
+
+  // Lookup gender / age from the K Sheet for a patient row
+  const kInfo = (r) => safeArray(data.patientBill).map(unpackKSheetRow).find(k =>
+    (r.mrNo && k.mrNo === r.mrNo) || (r.patientId && k.patientId === r.patientId) || (r.phone && k.phone === r.phone)
+  ) || null;
 
   const F = k => e => { setForm(f => ({ ...f, [k]: e.target.value })); setDupWarning(null); };
   const T = k => () => setTouch(t => ({ ...t, [k]: true }));
@@ -1250,6 +1255,9 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
       setDupWarning({ msg: `⚠ Existing patient found: ${match.name} (${match.patientId}) — Visit #${newCount}`, patient: match, visitCount: newCount });
       setForm(f => ({ ...f, visitType: newCount === 2 ? "2nd Visit" : newCount === 3 ? "3rd Visit" : `${newCount}th Visit`, visitCount: newCount }));
     }
+    // Auto-fill gender / age from the K Sheet when available
+    const k = safeArray(data.patientBill).map(unpackKSheetRow).find(kr => kr.phone === form.phone || (form.mrNo && kr.mrNo === form.mrNo));
+    if (k) setForm(f => ({ ...f, gender: f.gender || k.gender || "", age: f.age || k.age || "" }));
   };
 
   const submit = () => {
@@ -1276,7 +1284,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
   const canEdit = isOwner || can("patients", "edit");
   const canViewDetail = isOwner || can("patients", "view");
 
-  const OP_CSV_HEADERS = ["date","time","mrNo","patientId","name","phone","address","visitType","ref","paymentMode","paymentAmount","paymentRefNo","branch","remarks"];
+  const OP_CSV_HEADERS = ["date","time","mrNo","patientId","name","phone","address","gender","age","visitType","ref","paymentMode","paymentAmount","paymentRefNo","branch","remarks"];
   const handleImport = () => {
     if (!can("patients","add") && !isOwner) { setMsg("No permission to import."); return; }
     importCSVFile(records => {
@@ -1303,6 +1311,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
           timestamp: ts(), date: r.date || todayStr(), time: r.time || timeStr(),
           mrNo, patientId: r.patientId || `PT-${String(counter).padStart(4,"0")}`,
           name, phone, address: r.address || "",
+          gender: r.gender || "", age: r.age || "",
           visitType: r.visitType || "New Patient", visitCount: 1,
           ref: r.ref || "",
           paymentMode: r.paymentMode || "Cash",
@@ -1342,13 +1351,14 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
       </div>
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
-          <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Address</th><th>Payment</th><th>Payment Ref No</th><th>Amount</th><th>Ref/Camp</th><th>Visit</th><th>Branch</th><th>Remarks</th><th></th></tr></thead>
+          <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Address</th><th>Payment</th><th>Payment Ref No</th><th>Amount</th><th>Ref/Camp</th><th>Visit</th><th>Branch</th><th>Remarks</th><th></th></tr></thead>
           <tbody>{filtered.map(r => (
             <tr key={r.id}>
               <td style={{ fontSize:11, whiteSpace:"nowrap", color:"#9b8e82" }}>{r.timestamp}</td>
               <td style={{ fontWeight:700, fontFamily:"monospace" }}>{r.mrNo}</td>
               <td style={{ fontFamily:"monospace", color:"#1d4ed8", cursor: canViewDetail?"pointer":"default", textDecoration: canViewDetail?"underline":"none" }} onClick={() => canViewDetail && setViewRow(r)}>{r.patientId}</td>
               <td style={{ fontWeight:600, cursor: canViewDetail?"pointer":"default" }} onClick={() => canViewDetail && setViewRow(r)}>{r.name}</td><td>{r.phone}</td>
+              {(() => { const k = kInfo(r); return (<><td>{r.gender || k?.gender || "—"}</td><td>{r.age || k?.age || "—"}</td></>); })()}
               <td style={{ maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.address}</td>
               <td><span className="tag tag-blue">{r.paymentMode}</span></td>
               <td style={{ fontSize:11, fontFamily:"monospace", color:"#9b8e82" }}>{r.paymentRefNo || "—"}</td>
@@ -1391,6 +1401,8 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
             <div><label>Visit Type</label><select value={form.visitType} onChange={F("visitType")}>{["New Patient","2nd Visit","3rd Visit","4th Visit","5th Visit","Review","Camp"].map(v => <option key={v}>{v}</option>)}</select></div>
             <div style={{ gridColumn:"1/-1" }}><label>Name *</label><input type="text" value={form.name} onChange={F("name")} onBlur={T("name")} style={vStyle(form.name, v => v.trim().length > 0, touch.name)} />{vMsg(form.name, v => v.trim().length > 0, touch.name, "Required.")}</div>
             <div><label>Phone * (10 digits)</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} onBlur={handlePhoneBlur} style={vStyle(form.phone, validate.phone, touch.phone)} />{vMsg(form.phone, validate.phone, touch.phone, "10 digits, not starting 0.")}</div>
+            <div><label>Gender</label><select value={form.gender || ""} onChange={F("gender")}><option value="">— Select —</option><option>Male</option><option>Female</option><option>Other</option></select></div>
+            <div><label>Age</label><input type="number" min="0" placeholder="Age" value={form.age || ""} onChange={F("age")} /></div>
             <div style={{ gridColumn:"span 2" }}><label>Address *</label><input type="text" value={form.address} onChange={F("address")} onBlur={T("address")} style={vStyle(form.address, v => v.trim().length > 0, touch.address)} />{vMsg(form.address, v => v.trim().length > 0, touch.address, "Required.")}</div>
             <div><label>Ref / Camp {form.visitType === "Camp" ? "*" : ""}</label><input type="text" placeholder={form.visitType === "Camp" ? "Camp name (required)" : "Camp name or referrer"} value={form.ref} onChange={F("ref")} style={form.visitType === "Camp" && !form.ref ? { borderColor: "#dc2626" } : {}} /></div>
             <div><label>Payment Amount (₹)</label><input type="number" value={form.paymentAmount} onChange={F("paymentAmount")} /></div>
@@ -1810,9 +1822,44 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
   const del = id => { if (confirm("Delete?")) { mutate("opticals", arr=>arr.filter(x=>x.id!==id), null, id); audit("DELETE",{type:"opticals",id}); } };
   const filtered = rows.filter(r => !search || r.name?.toLowerCase().includes(search.toLowerCase()) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) || r.patientId?.toLowerCase().includes(search.toLowerCase()));
 
+  const OPT_CSV_HEADERS = ["date","time","mrNo","patientId","name","phone","address","lensType","frameNo","totalPrice","advance","advancePaymentMethod","transactionId","balance","deliveryStatus","optomName","branch"];
+  const handleImport = () => {
+    if (!can("opticals","add") && !isOwner) { setMsg("No permission to import."); return; }
+    importCSVFile(records => {
+      if (!records.length) { setMsg("CSV is empty."); return; }
+      let added = 0, skipped = 0;
+      const newRecords = [];
+      for (const r of records) {
+        const name = String(r.name||"").trim();
+        if (!name) { skipped++; continue; }
+        const totalPrice = r.totalPrice || "";
+        const advance = r.advance || "";
+        const balance = r.balance || String(Math.max(0, (parseFloat(totalPrice)||0) - (parseFloat(advance)||0)));
+        newRecords.push({
+          id: uid(),
+          timestamp: ts(), date: r.date || todayStr(), time: r.time || timeStr(),
+          mrNo: r.mrNo || "", patientId: r.patientId || "", name, phone: r.phone || "", address: r.address || "",
+          lensType: r.lensType || "Single Vision", frameNo: r.frameNo || "",
+          totalPrice, advance, advancePaymentMethod: r.advancePaymentMethod || "Cash",
+          transactionId: r.transactionId || "", balance,
+          deliveryStatus: r.deliveryStatus || "Not Ready",
+          optomName: r.optomName || session.name,
+          branch: r.branch || (isOwner ? "KKD_Main Branch" : branch),
+          status: "approved",
+          createdBy: session.id, createdByName: session.name, createdAt: ts(),
+        });
+        added++;
+      }
+      if (newRecords.length) mutate("opticals", arr => [...arr, ...newRecords]);
+      audit("IMPORT_CSV", { type:"opticals", added, skipped });
+      setMsg(`Imported ${added} opticals record(s). Skipped ${skipped} (missing name).`);
+    });
+  };
+
+
   return (
     <div>
-      <SectionHeader title="Opticals" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({id,...r})=>r),"opticals.csv")} onAdd={can("opticals","add") ? () => { setForm(blank()); setMsg(""); setRxPreview(null); setMrLookup(""); setModal(true); } : null} msg={msg} />
+      <SectionHeader title="Opticals" onSync={onSync} syncing={syncing} onTemplate={() => downloadCSVTemplate(OPT_CSV_HEADERS, "opticals_template.csv")} onImport={(can("opticals","add") || isOwner) ? handleImport : null} onExport={() => exportCSV(rows.map(({id,...r})=>r),"opticals.csv")} onAdd={can("opticals","add") ? () => { setForm(blank()); setMsg(""); setRxPreview(null); setMrLookup(""); setModal(true); } : null} msg={msg} />
       <div style={{ marginBottom:12 }}><input type="text" placeholder="🔍 Search by name, MR No, Patient ID…" value={search} onChange={e=>setSearch(e.target.value)} style={{ width:"100%", maxWidth:420, borderRadius:10, border:"1px solid #e8e2db", padding:"8px 14px", fontSize:13 }} /></div>
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
