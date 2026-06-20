@@ -118,6 +118,27 @@ function packKSheetForLegacyTable(row) {
 
 const missingColumnFromError = (txt) => String(txt || "").match(/'([^']+)' column/)?.[1] || null;
 
+// Numeric columns in the cloud DB. Empty strings must become null, otherwise
+// Postgres rejects them with: invalid input syntax for type numeric: ""
+const NUMERIC_FIELDS = new Set([
+  "age", "paymentAmount", "amount", "totalPrice", "advance", "balance",
+  "price", "quantity", "qty", "rate", "total", "subtotal", "discount",
+  "tax", "gst", "stock", "minStock", "cost", "mrp",
+]);
+function sanitizeNumericRow(row) {
+  if (!row || typeof row !== "object") return row;
+  const out = { ...row };
+  for (const k of Object.keys(out)) {
+    if (NUMERIC_FIELDS.has(k)) {
+      const v = out[k];
+      if (v === "" || v === undefined || v === null) { out[k] = null; continue; }
+      const n = typeof v === "number" ? v : Number(String(v).replace(/[^0-9.+-]/g, ""));
+      out[k] = Number.isFinite(n) ? n : null;
+    }
+  }
+  return out;
+}
+
 function sbHeaders() { return { "Content-Type": "application/json", "apikey": _sb.key, "Authorization": `Bearer ${_sb.key}` }; }
 
 async function sbPostPayload(table, payload, prefer) {
@@ -158,7 +179,7 @@ async function sbGet(table) {
 async function sbUpsertOne(table, row) {
   if (!_sb) return { ok: false, error: "Not connected" };
   try {
-    const payload = table === "patientBill" ? packKSheetForLegacyTable(row) : row;
+    const payload = table === "patientBill" ? packKSheetForLegacyTable(row) : sanitizeNumericRow(row);
     let result = await sbPostPayload(table, payload, "resolution=merge-duplicates,return=minimal");
     if (!result.ok) result = await sbPostPayloadPruned(table, payload, "resolution=merge-duplicates,return=minimal");
     if (!result.ok) console.error(`sbUpsertOne [${table}]:`, result.error);
@@ -184,7 +205,7 @@ async function sbUpsertMany(table, rows) {
   if (!_sb) return { ok: false, error: "Not connected" };
   if (!rows.length) return { ok: true, error: null };
   try {
-    const packed = table === "patientBill" ? rows.map(packKSheetForLegacyTable) : rows;
+    const packed = table === "patientBill" ? rows.map(packKSheetForLegacyTable) : rows.map(sanitizeNumericRow);
     const payload = normalizeRowKeys(packed);
     let result = await sbPostPayload(table, payload, "resolution=merge-duplicates,return=minimal");
     if (!result.ok) result = await sbPostPayloadPruned(table, payload, "resolution=merge-duplicates,return=minimal");
