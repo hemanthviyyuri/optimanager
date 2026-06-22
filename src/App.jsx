@@ -314,7 +314,8 @@ const DATE_SORT_KEYS = new Set(["timestamp", "date", "createdAt", "reminderDate"
 function rowTime(v) {
   if (!v) return 0;
   const s = String(v).trim();
-  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ ,]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?)?/i);
+  // dd/mm/yyyy or dd-mm-yyyy or dd.mm.yyyy (optional time). ISO yyyy-mm-dd falls through to Date.parse.
+  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:[ ,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?)?/i);
   if (m) {
     let h = Number(m[4] || 0); const ap = (m[7] || "").toLowerCase();
     if (ap === "pm" && h < 12) h += 12; if (ap === "am" && h === 12) h = 0;
@@ -323,6 +324,59 @@ function rowTime(v) {
   }
   const t = Date.parse(s);
   return isNaN(t) ? 0 : t;
+}
+// Returns true when the date value (ISO or dd/mm/yyyy etc.) is today.
+function isTodayDate(d) {
+  if (!d) return false;
+  const today = now().toISOString().split("T")[0];
+  if (typeof d === "string" && d.startsWith(today)) return true;
+  try {
+    const parts = String(d).split(/[\s/,.\-]/).filter(Boolean);
+    if (parts.length >= 3 && parts[0].length <= 2) {
+      const [dd, mm, yyyy] = parts;
+      const iso = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+      if (iso === today) return true;
+    }
+  } catch {}
+  return false;
+}
+// Visit label for the Nth chronological visit of a patient.
+function visitOrdinalLabel(n) {
+  if (n <= 1) return "New Patient";
+  const suffix = n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`;
+  return `${suffix} Visit`;
+}
+// De-duplicate OP registrations and assign visit numbers.
+// • Same person = same (name + phone). Records with both blank stay separate.
+// • Exact duplicate (same person + same MR No + same Date) → kept once.
+// • Remaining records ordered by date; 1st = New Patient, 2nd/3rd/… Visit.
+// • Any record with camp data (visitType "Camp" or a Ref/Camp value) → "Camp".
+function dedupePatientVisits(rows) {
+  const norm = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const groups = new Map();
+  for (const r of safeArray(rows)) {
+    const nm = norm(r.name), ph = norm(r.phone);
+    const key = (nm || ph) ? `${nm}|${ph}` : `__${r.id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+  const out = [];
+  for (const recs of groups.values()) {
+    const seen = new Map();
+    for (const r of recs) {
+      const ek = `${norm(r.mrNo)}|${String(r.date || "").trim()}`;
+      if (!seen.has(ek)) seen.set(ek, r);
+    }
+    const uniq = [...seen.values()].sort(
+      (a, b) => (rowTime(a.date) || rowTime(a.timestamp)) - (rowTime(b.date) || rowTime(b.timestamp))
+    );
+    uniq.forEach((r, i) => {
+      const camp = norm(r.visitType) === "camp" || String(r.ref || "").trim() !== "";
+      const visitType = camp ? "Camp" : visitOrdinalLabel(i + 1);
+      out.push({ ...r, visitType, visitCount: i + 1 });
+    });
+  }
+  return out;
 }
 function sortRows(rows, key, dir) {
   if (!key) return rows;
@@ -524,8 +578,14 @@ export default function App() {
   
   const [sbStatus, setSbStatus] = useState("idle");
   const [view,     setView]     = useState("dashboard");
+  const [navToday, setNavToday] = useState(false);
   const [lastSync, setLastSync] = useState(null);
   const [syncing,  setSyncing]  = useState(false);
+
+  // Navigate from a dashboard card to a section, optionally highlighting today's rows.
+  const navTo = useCallback((v, today = false) => { setNavToday(!!today); setView(v); }, []);
+  // Sidebar / manual navigation always clears the today highlight.
+  const setViewNav = useCallback((v) => { setNavToday(false); setView(v); }, []);
 
   useEffect(() => { LS.set("opti_accounts", accounts); }, [accounts]);
   useEffect(() => { LS.set("opti_data_v4",  data);     }, [data]);
@@ -703,13 +763,13 @@ export default function App() {
   const sharedProps = { session, data, mutate, can, audit, fieldVis, onSync: () => syncFromCloud(sbCreds.url, sbCreds.key), syncing };
 
   return (
-    <Shell session={session} onLogout={logout} view={view} setView={setView} can={can} sbStatus={sbStatus} syncing={syncing} lastSync={lastSync} onManualSync={() => syncFromCloud(sbCreds.url, sbCreds.key)}>
-      {view === "dashboard"    && <Dashboard session={session} data={data} setView={setView} auditLog={auditLog} dashCms={dashCms} />}
+    <Shell session={session} onLogout={logout} view={view} setView={setViewNav} can={can} sbStatus={sbStatus} syncing={syncing} lastSync={lastSync} onManualSync={() => syncFromCloud(sbCreds.url, sbCreds.key)}>
+      {view === "dashboard"    && <Dashboard session={session} data={data} setView={navTo} auditLog={auditLog} dashCms={dashCms} />}
       {view === "patientStatus"&& <PatientStatusSection session={session} data={data} onSync={() => syncFromCloud(sbCreds.url, sbCreds.key)} syncing={syncing} />}
       {view === "counselling"  && hasMDAccess(session) && <CounsellingSection {...sharedProps} />}
       {view === "dashcms"      && hasMDAccess(session) && <DashboardCMS dashCms={dashCms} setDashCms={setDashCms} />}
-      {view === "patients"     && <PatientsSection     {...sharedProps} />}
-      {view === "patientBill"  && <PatientBillSection  {...sharedProps} />}
+      {view === "patients"     && <PatientsSection     {...sharedProps} highlightToday={navToday} />}
+      {view === "patientBill"  && <PatientBillSection  {...sharedProps} highlightToday={navToday} />}
       {view === "optometrist"  && <OptometristSection  {...sharedProps} />}
       {view === "opticals"     && <OpticalsSection     {...sharedProps} />}
       {view === "opticalsStatus" && <OpticalsStatusSection {...sharedProps} />}
@@ -723,7 +783,7 @@ export default function App() {
       {view === "users"        && hasOwnerOrMD(session) && <UsersSection accounts={accounts} setAccounts={updateAccounts} audit={audit} />}
       {view === "supabase"     && hasMDAccess(session) && <SupabaseSection sbCreds={sbCreds} sbStatus={sbStatus} onConnect={connectSupabase} onSync={syncFromSupabase} onPush={pushToSupabase} />}
       {view === "launchguide"  && <LaunchGuide />}
-      <ReminderAlerts session={session} data={data} setView={setView} />
+      <ReminderAlerts session={session} data={data} setView={setViewNav} />
     </Shell>
   );
 }
@@ -901,7 +961,8 @@ function Dashboard({ session, data, setView, auditLog, dashCms }) {
     return false;
   };
 
-  const ptsToday    = flt(data.patients).filter(x => x.status === "approved" && isToday(x.date));
+  const allPts      = dedupePatientVisits(flt(data.patients).filter(x => x.status === "approved"));
+  const ptsToday    = allPts.filter(x => isToday(x.date));
   const billsToday  = flt(data.patientBill).filter(x => x.status === "approved" && isToday(x.date));
   const invsToday   = flt(data.invoices).filter(x => x.approvalStatus === "approved" && x.status === "Paid" && isToday(x.date));
   const invRevToday = invsToday.reduce((s, i) => s + safeArray(i.items).reduce((a, x) => a + x.qty * x.price, 0) - (i.discount || 0), 0);
@@ -927,7 +988,7 @@ function Dashboard({ session, data, setView, auditLog, dashCms }) {
   const blocks = Object.entries(cms.blocks || {})
     .filter(([, b]) => b.enabled !== false)
     .sort((a, b) => (a[1].order || 0) - (b[1].order || 0))
-    .map(([key, b]) => ({ key, ...b, value: blockValues[key] ?? 0, click: () => setView(b.link || blockLinks[key] || "dashboard") }));
+    .map(([key, b]) => ({ key, ...b, value: blockValues[key] ?? 0, click: () => setView(b.link || blockLinks[key] || "dashboard", ["opReg", "ksheet", "revisit"].includes(key)) }));
 
   const sortedPanels = Object.entries(cms.panels || {})
     .filter(([, p]) => p.enabled !== false && (!p.ownerOnly || hasMDAccess(session)))
@@ -976,7 +1037,7 @@ function Dashboard({ session, data, setView, auditLog, dashCms }) {
             <button className="btn btn-outline btn-sm" onClick={() => setView("patientStatus")}>Open Full View</button>
           </div>
           {(() => {
-            const todayPts = flt(data.patients).filter(x => isToday(x.date)).map(p => ({ ...p, _status: getPatientStatus(p, data) }));
+            const todayPts = dedupePatientVisits(flt(data.patients)).filter(x => isToday(x.date)).map(p => ({ ...p, _status: getPatientStatus(p, data) }));
             if (!todayPts.length) return <div style={{ fontSize:12, color:"#9b8e82" }}>No patients registered today.</div>;
             return (
               <div style={{ overflowX:"auto" }}>
@@ -1298,7 +1359,7 @@ function DashboardBuilder({ fieldVis, setFieldVis, accounts, setAccounts }) {
   );
 }
 
-function PatientsSection({ session, data, mutate, can, audit, onSync, syncing }) {
+function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, highlightToday }) {
   const isOwner  = session.role === "owner";
   const branch   = session.branch || "KKD_Main Branch";
   const rows = safeArray(data.patients).filter(x => (isOwner || x.branch === branch));
@@ -1309,13 +1370,13 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
   const [msg,   setMsg]   = useState("");
   const [search,setSearch]= useState("");
   const [filterField, setFilterField] = useState("");
-  const [sortKey, setSortKey] = useState("timestamp");
+  const [sortKey, setSortKey] = useState("date");
   const [sortDir, setSortDir] = useState("desc");
   const FS_FIELDS = [
-    { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
+    { key:"date", label:"Date" }, { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
     { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"gender", label:"Gender" }, { key:"age", label:"Age" },
     { key:"designation", label:"Designation" }, { key:"aadharNo", label:"Aadhar No" }, { key:"address", label:"Address" },
-    { key:"paymentMode", label:"Payment" }, { key:"paymentAmount", label:"Amount" }, { key:"ref", label:"Ref/Camp" }, { key:"branch", label:"Branch" },
+    { key:"paymentMode", label:"Payment" }, { key:"paymentAmount", label:"Amount" }, { key:"ref", label:"Ref/Camp" }, { key:"visitType", label:"Visit" }, { key:"branch", label:"Branch" },
   ];
   const [dupWarning, setDupWarning] = useState(null);
 
@@ -1425,7 +1486,8 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
   };
 
 
-  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField)), sortKey, sortDir);
+  const deduped = dedupePatientVisits(rows);
+  const filtered = sortRows(deduped.filter(r => matchSearch(r, search, FS_FIELDS, filterField)), sortKey, sortDir);
 
   return (
     <div>
@@ -1445,7 +1507,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
         <table>
           <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Designation</th><th>Aadhar No</th><th>Address</th><th>Payment</th><th>Payment Ref No</th><th>Amount</th><th>Ref/Camp</th><th>Visit</th><th>Branch</th><th>Remarks</th><th></th></tr></thead>
           <tbody>{filtered.map(r => (
-            <tr key={r.id}>
+            <tr key={r.id} style={highlightToday && isTodayDate(r.date) ? { background:"#fef9c3" } : undefined}>
               <td style={{ fontSize:11, whiteSpace:"nowrap", color:"#9b8e82" }}>{r.timestamp}</td>
               <td style={{ fontWeight:700, fontFamily:"monospace" }}>{r.mrNo}</td>
               <td style={{ fontFamily:"monospace", color:"#1d4ed8", cursor: canViewDetail?"pointer":"default", textDecoration: canViewDetail?"underline":"none" }} onClick={() => canViewDetail && setViewRow(r)}>{r.patientId}</td>
@@ -1513,7 +1575,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
   );
 }
 
-function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing }) {
+function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing, highlightToday }) {
   const isOwner = session.role === "owner";
   const branch  = session.branch || "KKD_Main Branch";
   const rows    = safeArray(data.patientBill).filter(x => (isOwner || x.branch === branch));
@@ -1525,10 +1587,10 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
   const [msg,   setMsg]   = useState("");
   const [search,setSearch]= useState("");
   const [filterField, setFilterField] = useState("");
-  const [sortKey, setSortKey] = useState("timestamp");
+  const [sortKey, setSortKey] = useState("date");
   const [sortDir, setSortDir] = useState("desc");
   const FS_FIELDS = [
-    { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
+    { key:"date", label:"Date" }, { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
     { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"gender", label:"Gender" }, { key:"age", label:"Age" },
     { key:"complaint", label:"Complaint" }, { key:"optom", label:"Optom" }, { key:"branch", label:"Branch" },
   ];
@@ -1679,7 +1741,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
         <table>
           <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Complaint</th><th>IOP</th><th>Optom</th><th>By</th><th>Branch</th><th>Actions</th></tr></thead>
           <tbody>{filtered.map(r => (
-            <tr key={r.id}>
+            <tr key={r.id} style={highlightToday && isTodayDate(r.date) ? { background:"#fef9c3" } : undefined}>
               <td style={{ fontSize:11, color:"#9b8e82", whiteSpace:"nowrap" }}>{r.timestamp}</td>
               <td style={{ fontWeight:700, fontFamily:"monospace" }}>{r.mrNo}</td>
               <td style={{ fontFamily:"monospace", color:"#1d4ed8", cursor: canView?"pointer":"default", textDecoration: canView?"underline":"none" }} onClick={()=>canView && openView(r)}>{r.patientId || "—"}</td>
@@ -2681,7 +2743,7 @@ function PatientStatusSection({ session, data, onSync, syncing }) {
     return false;
   };
 
-  const all = safeArray(data.patients).filter(p => isOwner || p.branch === branch);
+  const all = dedupePatientVisits(safeArray(data.patients).filter(p => isOwner || p.branch === branch));
   const enriched = all.map(p => ({ ...p, _status: getPatientStatus(p, data) }));
   // Base set respects the "Today only" toggle so the status tiles and the list
   // always show matching numbers.
