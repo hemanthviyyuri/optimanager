@@ -168,11 +168,23 @@ async function sbPostPayloadPruned(table, payload, prefer) {
 async function sbGet(table) {
   if (!_sb) return null;
   try {
-    const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}?select=*`, { headers: sbHeaders() });
-    if (!r.ok) return null;
-    const d = await r.json();
-    if (!Array.isArray(d)) return null;
-    return table === "patientBill" ? d.map(unpackKSheetRow) : d;
+    const tbl = encodeURIComponent(SB_TABLES[table] || table);
+    const PAGE = 1000;
+    let offset = 0;
+    let acc = [];
+    // PostgREST caps each response at 1000 rows — page through with Range headers.
+    for (let i = 0; i < 1000; i += 1) {
+      const r = await fetch(`${_sb.url}/rest/v1/${tbl}?select=*`, {
+        headers: { ...sbHeaders(), "Range-Unit": "items", "Range": `${offset}-${offset + PAGE - 1}` },
+      });
+      if (!r.ok) { if (offset === 0) return null; break; }
+      const d = await r.json();
+      if (!Array.isArray(d)) { if (offset === 0) return null; break; }
+      acc = acc.concat(d);
+      if (d.length < PAGE) break;
+      offset += PAGE;
+    }
+    return table === "patientBill" ? acc.map(unpackKSheetRow) : acc;
   } catch(e) { return null; }
 }
 
@@ -295,6 +307,57 @@ function importCSVFile(onRows) {
     reader.readAsText(f);
   };
   inp.click();
+}
+
+// ── Shared filter + sort helpers ──────────────────────────────────────────
+const DATE_SORT_KEYS = new Set(["timestamp", "date", "createdAt", "reminderDate", "completedAt", "updatedAt", "deliveryDate"]);
+function rowTime(v) {
+  if (!v) return 0;
+  const s = String(v).trim();
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ ,]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?)?/i);
+  if (m) {
+    let h = Number(m[4] || 0); const ap = (m[7] || "").toLowerCase();
+    if (ap === "pm" && h < 12) h += 12; if (ap === "am" && h === 12) h = 0;
+    const yr = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+    return new Date(yr, Number(m[2]) - 1, Number(m[1]), h, Number(m[5] || 0), Number(m[6] || 0)).getTime();
+  }
+  const t = Date.parse(s);
+  return isNaN(t) ? 0 : t;
+}
+function sortRows(rows, key, dir) {
+  if (!key) return rows;
+  const mul = dir === "asc" ? 1 : -1;
+  const isDate = DATE_SORT_KEYS.has(key);
+  const isNum = NUMERIC_FIELDS.has(key);
+  return [...rows].sort((a, b) => {
+    const av = a?.[key], bv = b?.[key];
+    if (isDate) return (rowTime(av) - rowTime(bv)) * mul;
+    if (isNum) return ((parseFloat(av) || 0) - (parseFloat(bv) || 0)) * mul;
+    return String(av ?? "").localeCompare(String(bv ?? ""), undefined, { numeric: true, sensitivity: "base" }) * mul;
+  });
+}
+function matchSearch(row, search, fields, filterField) {
+  if (!search) return true;
+  const q = search.toLowerCase();
+  const keys = filterField ? [filterField] : fields.map(f => f.key);
+  return keys.some(k => String(row?.[k] ?? "").toLowerCase().includes(q));
+}
+const _fsSelStyle = { borderRadius: 10, border: "1px solid #e8e2db", padding: "8px 10px", fontSize: 13, background: "#fff" };
+function FilterSortBar({ search, setSearch, placeholder, fields, filterField, setFilterField, sortKey, setSortKey, sortDir, setSortDir, children }) {
+  return (
+    <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+      <input type="text" placeholder={placeholder} value={search} onChange={e => setSearch(e.target.value)} style={{ flex: "1 1 240px", minWidth: 200, maxWidth: 380, borderRadius: 10, border: "1px solid #e8e2db", padding: "8px 14px", fontSize: 13 }} />
+      <select value={filterField} onChange={e => setFilterField(e.target.value)} style={_fsSelStyle} title="Filter by a specific field">
+        <option value="">🔎 All fields</option>
+        {fields.map(f => <option key={f.key} value={f.key}>In: {f.label}</option>)}
+      </select>
+      <select value={sortKey} onChange={e => setSortKey(e.target.value)} style={_fsSelStyle} title="Sort by">
+        {fields.map(f => <option key={f.key} value={f.key}>Sort: {f.label}</option>)}
+      </select>
+      <button className="btn btn-outline btn-sm" onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")} title="Toggle ascending / descending">{sortDir === "asc" ? "↑ Asc" : "↓ Desc"}</button>
+      {children}
+    </div>
+  );
 }
 
 const validate = {
@@ -1245,7 +1308,17 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
   const [touch, setTouch] = useState({});
   const [msg,   setMsg]   = useState("");
   const [search,setSearch]= useState("");
+  const [filterField, setFilterField] = useState("");
+  const [sortKey, setSortKey] = useState("timestamp");
+  const [sortDir, setSortDir] = useState("desc");
+  const FS_FIELDS = [
+    { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
+    { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"gender", label:"Gender" }, { key:"age", label:"Age" },
+    { key:"designation", label:"Designation" }, { key:"aadharNo", label:"Aadhar No" }, { key:"address", label:"Address" },
+    { key:"paymentMode", label:"Payment" }, { key:"paymentAmount", label:"Amount" }, { key:"ref", label:"Ref/Camp" }, { key:"branch", label:"Branch" },
+  ];
   const [dupWarning, setDupWarning] = useState(null);
+
 
   const nextPatientId = () => {
     const all = safeArray(data.patients);
@@ -1312,7 +1385,6 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
       if (!records.length) { setMsg("CSV is empty."); return; }
       let added = 0, skipped = 0;
       const existing = safeArray(data.patients);
-      const used = new Set(existing.map(p => (p.mrNo||"").toLowerCase()).filter(Boolean));
       const startNum = (() => {
         const nums = existing.map(p => parseInt((p.patientId||"").replace(/\D/g,""))).filter(n => !isNaN(n));
         return nums.length ? Math.max(...nums) : 0;
@@ -1320,12 +1392,11 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
       let counter = startNum;
       const newRecords = [];
       for (const r of records) {
+        // Import EVERY row — duplicate MR No is allowed (reset daily) and
+        // missing fields are kept blank. Only Patient ID + date are ensured.
         const mrNo = String(r.mrNo||"").trim();
         const name = String(r.name||"").trim();
         const phone = String(r.phone||"").trim();
-        if (!mrNo || !name || !phone) { skipped++; continue; }
-        if (used.has(mrNo.toLowerCase())) { skipped++; continue; }
-        used.add(mrNo.toLowerCase());
         counter += 1;
         const rec = {
           id: uid(),
@@ -1349,12 +1420,12 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
       }
       if (newRecords.length) mutate("patients", arr => [...arr, ...newRecords]);
       audit("IMPORT_CSV", { type:"patients", added, skipped });
-      setMsg(`Imported ${added} patient(s). Skipped ${skipped} (missing fields or duplicate MR No).`);
+      setMsg(`Imported ${added} patient(s).${skipped ? ` Skipped ${skipped} empty row(s).` : ""}`);
     });
   };
 
 
-  const filtered = rows.filter(r => !search || r.name?.toLowerCase().includes(search.toLowerCase()) || r.phone?.includes(search) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) || r.patientId?.toLowerCase().includes(search.toLowerCase()));
+  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField)), sortKey, sortDir);
 
   return (
     <div>
@@ -1368,9 +1439,8 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing })
         onAdd={can("patients","add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setDupWarning(null); setModal(true); } : null}
         msg={msg}
       />
-      <div style={{ marginBottom: 12 }}>
-        <input type="text" placeholder="🔍 Search by name, phone, MR No, Patient ID…" value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", maxWidth: 420, borderRadius: 10, border: "1px solid #e8e2db", padding: "8px 14px", fontSize: 13 }} />
-      </div>
+      <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, phone, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
+
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
           <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Designation</th><th>Aadhar No</th><th>Address</th><th>Payment</th><th>Payment Ref No</th><th>Amount</th><th>Ref/Camp</th><th>Visit</th><th>Branch</th><th>Remarks</th><th></th></tr></thead>
@@ -1454,6 +1524,14 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
   const [tab,   setTab]   = useState("basic");
   const [msg,   setMsg]   = useState("");
   const [search,setSearch]= useState("");
+  const [filterField, setFilterField] = useState("");
+  const [sortKey, setSortKey] = useState("timestamp");
+  const [sortDir, setSortDir] = useState("desc");
+  const FS_FIELDS = [
+    { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
+    { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"gender", label:"Gender" }, { key:"age", label:"Age" },
+    { key:"complaint", label:"Complaint" }, { key:"optom", label:"Optom" }, { key:"branch", label:"Branch" },
+  ];
   const [mrLookup, setMrLookup] = useState("");
 
   const lookupPatient = (query) => {
@@ -1542,7 +1620,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
     : desig === "OPTOM"
       ? ALL_TABS.filter(t => t.id !== "eye")
       : ALL_TABS.filter(t => t.id === "basic"); // FRONT DESK STAFF → patient info only
-  const filtered = rows.filter(r => !search || r.name?.toLowerCase().includes(search.toLowerCase()) || r.phone?.includes(search) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) || r.patientId?.toLowerCase().includes(search.toLowerCase()));
+  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField)), sortKey, sortDir);
 
   const KS_CSV_HEADERS = [
     "date","time","mrNo","patientId","name","phone","address","gender","age","complaint","pastHistory",
@@ -1596,7 +1674,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
         msg={msg}
       />
 
-      <div style={{ marginBottom:12 }}><input type="text" placeholder="🔍 Search by name, phone, MR No, Patient ID…" value={search} onChange={e=>setSearch(e.target.value)} style={{ width:"100%", maxWidth:420, borderRadius:10, border:"1px solid #e8e2db", padding:"8px 14px", fontSize:13 }} /></div>
+      <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, phone, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
           <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Complaint</th><th>IOP</th><th>Optom</th><th>By</th><th>Branch</th><th>Actions</th></tr></thead>
@@ -1743,6 +1821,14 @@ function OptometristSection({ session, data, mutate, can, audit, onSync, syncing
   const [msg,   setMsg]   = useState("");
   const [mrLookup, setMrLookup] = useState("");
   const [search, setSearch] = useState("");
+  const [filterField, setFilterField] = useState("");
+  const [sortKey, setSortKey] = useState("timestamp");
+  const [sortDir, setSortDir] = useState("desc");
+  const FS_FIELDS = [
+    { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
+    { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"complaint", label:"Complaint" },
+    { key:"optomName", label:"Optometrist" }, { key:"branch", label:"Branch" },
+  ];
 
   const blank = () => ({ timestamp: ts(), date: todayStr(), time: timeStr(), mrNo:"", patientId:"", name:"", phone:"", complaint:"", pastHistory:"", optomName: session.name });
   const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -1763,12 +1849,12 @@ function OptometristSection({ session, data, mutate, can, audit, onSync, syncing
   };
 
   const del = id => { if (confirm("Delete?")) { mutate("optometrist", arr=>arr.filter(x=>x.id!==id), null, id); audit("DELETE",{type:"optometrist",id}); } };
-  const filtered = rows.filter(r => !search || r.name?.toLowerCase().includes(search.toLowerCase()) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) || r.patientId?.toLowerCase().includes(search.toLowerCase()));
+  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField)), sortKey, sortDir);
 
   return (
     <div>
       <SectionHeader title="Optometrist" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({id,...r})=>r),"optometrist.csv")} onAdd={can("optometrist","add") ? () => { setForm(blank()); setMsg(""); setMrLookup(""); setModal(true); } : null} msg={msg} />
-      <div style={{ marginBottom:12 }}><input type="text" placeholder="🔍 Search by name, MR No, Patient ID…" value={search} onChange={e=>setSearch(e.target.value)} style={{ width:"100%", maxWidth:420, borderRadius:10, border:"1px solid #e8e2db", padding:"8px 14px", fontSize:13 }} /></div>
+      <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
           <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Complaint</th><th>Past History</th><th>Optometrist</th><th>Branch</th>{isOwner&&<th></th>}</tr></thead>
@@ -1810,6 +1896,15 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
   const [rxPreview,setRxPreview]= useState(null);
   const [mrLookup, setMrLookup] = useState("");
   const [search,   setSearch]   = useState("");
+  const [filterField, setFilterField] = useState("");
+  const [sortKey, setSortKey] = useState("timestamp");
+  const [sortDir, setSortDir] = useState("desc");
+  const FS_FIELDS = [
+    { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
+    { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"lensType", label:"Lens Type" }, { key:"frameNo", label:"Frame No" },
+    { key:"totalPrice", label:"Total Price" }, { key:"advance", label:"Advance" }, { key:"balance", label:"Balance" },
+    { key:"deliveryStatus", label:"Delivery" }, { key:"optomName", label:"Rep" }, { key:"branch", label:"Branch" },
+  ];
 
   const blank = () => ({ timestamp: ts(), date: todayStr(), time: timeStr(), mrNo:"", patientId:"", name:"", phone:"", address:"", lensType:"Single Vision", frameNo:"", totalPrice:"", advance:"", advancePaymentMethod:"Cash", transactionId:"", balance:"", deliveryStatus:"Not Ready", optomName: session.name });
   const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -1846,7 +1941,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
   const canEdit = isOwner || can("opticals","edit");
 
   const del = id => { if (confirm("Delete?")) { mutate("opticals", arr=>arr.filter(x=>x.id!==id), null, id); audit("DELETE",{type:"opticals",id}); } };
-  const filtered = rows.filter(r => !search || r.name?.toLowerCase().includes(search.toLowerCase()) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) || r.patientId?.toLowerCase().includes(search.toLowerCase()));
+  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField)), sortKey, sortDir);
 
   const OPT_CSV_HEADERS = ["date","time","mrNo","patientId","name","phone","address","lensType","frameNo","totalPrice","advance","advancePaymentMethod","transactionId","balance","deliveryStatus","optomName","branch"];
   const handleImport = () => {
@@ -1886,7 +1981,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
   return (
     <div>
       <SectionHeader title="Opticals" onSync={onSync} syncing={syncing} onTemplate={() => downloadCSVTemplate(OPT_CSV_HEADERS, "opticals_template.csv")} onImport={(can("opticals","add") || isOwner) ? handleImport : null} onExport={() => exportCSV(rows.map(({id,...r})=>r),"opticals.csv")} onAdd={can("opticals","add") ? () => { setForm(blank()); setMsg(""); setRxPreview(null); setMrLookup(""); setModal(true); } : null} msg={msg} />
-      <div style={{ marginBottom:12 }}><input type="text" placeholder="🔍 Search by name, MR No, Patient ID…" value={search} onChange={e=>setSearch(e.target.value)} style={{ width:"100%", maxWidth:420, borderRadius:10, border:"1px solid #e8e2db", padding:"8px 14px", fontSize:13 }} /></div>
+      <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
           <thead><tr>
@@ -1942,6 +2037,14 @@ function OpticalsStatusSection({ session, data, mutate, can, audit, onSync, sync
   const rows    = safeArray(data.opticals).filter(x => (isOwner || x.branch === branch));
 
   const [search, setSearch] = useState("");
+  const [filterField, setFilterField] = useState("");
+  const [sortKey, setSortKey] = useState("timestamp");
+  const [sortDir, setSortDir] = useState("desc");
+  const FS_FIELDS = [
+    { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
+    { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"totalPrice", label:"Total" }, { key:"advance", label:"Advance" },
+    { key:"advancePaymentMethod", label:"Payment Method" }, { key:"balance", label:"Balance" }, { key:"deliveryStatus", label:"Delivery Status" }, { key:"optomName", label:"Rep" },
+  ];
   const [msg,    setMsg]    = useState("");
   const [refEdits, setRefEdits] = useState({});
 
@@ -1993,12 +2096,12 @@ function OpticalsStatusSection({ session, data, mutate, can, audit, onSync, sync
     }
   };
 
-  const filtered = rows.filter(r => !search || r.name?.toLowerCase().includes(search.toLowerCase()) || r.mrNo?.toLowerCase().includes(search.toLowerCase()) || r.patientId?.toLowerCase().includes(search.toLowerCase()) || r.phone?.includes(search));
+  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField)), sortKey, sortDir);
 
   return (
     <div>
       <SectionHeader title="Opticals Status" onSync={onSync} syncing={syncing} msg={msg} />
-      <div style={{ marginBottom:12 }}><input type="text" placeholder="🔍 Search by name, MR No, Patient ID, phone…" value={search} onChange={e=>setSearch(e.target.value)} style={{ width:"100%", maxWidth:420, borderRadius:10, border:"1px solid #e8e2db", padding:"8px 14px", fontSize:13 }} /></div>
+      <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, MR No, Patient ID, phone…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
           <thead><tr>
@@ -2053,11 +2156,19 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
   const branch  = session.branch || "KKD_Main Branch";
   const rows    = safeArray(data.stock).filter(x => isOwner || x.branch === branch);
   const [search, setSearch] = useState(""); const [cat, setCat] = useState("All");
+  const [filterField, setFilterField] = useState("");
+  const [sortKey, setSortKey] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
+  const FS_FIELDS = [
+    { key:"sku", label:"SKU" }, { key:"name", label:"Name" }, { key:"category", label:"Category" }, { key:"brand", label:"Brand" },
+    { key:"qty", label:"Qty" }, { key:"lensPower", label:"Lens Power" }, { key:"lensType", label:"Lens Type" }, { key:"boxNo", label:"Box No" },
+    { key:"price", label:"Price" }, { key:"location", label:"Location" }, { key:"branch", label:"Branch" },
+  ];
   const [modal,  setModal]  = useState(null); const [msg, setMsg] = useState("");
   const blank = { sku: "", name: "", category: "Frames", brand: "", qty: 0, reorder: 5, cost: 0, price: 0, location: "", lensPower: "", lensType: "Single Vision", boxNo: "" };
   const [form, setForm] = useState(blank);
   const cats = ["All", "Frames", "Contact Lenses", "Lenses", "Accessories"];
-  const filtered = rows.filter(s => (cat === "All" || s.category === cat) && (s.name.toLowerCase().includes(search.toLowerCase()) || s.sku.toLowerCase().includes(search.toLowerCase())));
+  const filtered = sortRows(rows.filter(s => (cat === "All" || s.category === cat) && matchSearch(s, search, FS_FIELDS, filterField)), sortKey, sortDir);
   const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
   
   const open = s => { setForm(s ? { ...s } : { ...blank, branch: isOwner ? "KKD_Main Branch" : branch }); setModal(s || "add"); };
@@ -2075,6 +2186,9 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
       <div className="card" style={{ overflowX: "auto" }}>
         <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
           <input type="text" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} style={{ maxWidth: 200 }} />
+          <select value={filterField} onChange={e => setFilterField(e.target.value)} style={_fsSelStyle} title="Filter by a specific field"><option value="">🔎 All fields</option>{FS_FIELDS.map(f => <option key={f.key} value={f.key}>In: {f.label}</option>)}</select>
+          <select value={sortKey} onChange={e => setSortKey(e.target.value)} style={_fsSelStyle} title="Sort by">{FS_FIELDS.map(f => <option key={f.key} value={f.key}>Sort: {f.label}</option>)}</select>
+          <button className="btn btn-outline btn-sm" onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")} title="Toggle ascending / descending">{sortDir === "asc" ? "↑ Asc" : "↓ Desc"}</button>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{cats.map(c => <button key={c} className={`btn btn-sm ${cat === c ? "btn-dark" : "btn-outline"}`} onClick={() => setCat(c)}>{c}</button>)}</div>
         </div>
         <table><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>Qty</th><th>Lens Power</th><th>Lens Type</th><th>Box No</th><th>Price</th><th>Location</th><th>Branch</th><th>By</th>{(can("inventory", "edit") || isOwner) && <th></th>}</tr></thead>
@@ -2544,6 +2658,13 @@ function PatientStatusSection({ session, data, onSync, syncing }) {
   const [search, setSearch] = useState("");
   const [statusF, setStatusF] = useState("ALL");
   const [todayOnly, setTodayOnly] = useState(false);
+  const [filterField, setFilterField] = useState("");
+  const [sortKey, setSortKey] = useState("date");
+  const [sortDir, setSortDir] = useState("desc");
+  const FS_FIELDS = [
+    { key:"date", label:"Registered Date" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
+    { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"branch", label:"Branch" },
+  ];
 
   const today = todayStr();
   const isToday = (d) => {
@@ -2562,19 +2683,19 @@ function PatientStatusSection({ session, data, onSync, syncing }) {
 
   const all = safeArray(data.patients).filter(p => isOwner || p.branch === branch);
   const enriched = all.map(p => ({ ...p, _status: getPatientStatus(p, data) }));
-  const filtered = enriched.filter(p => {
+  // Base set respects the "Today only" toggle so the status tiles and the list
+  // always show matching numbers.
+  const base = enriched.filter(p => !todayOnly || isToday(p.date));
+  const filtered = sortRows(base.filter(p => {
     if (statusF !== "ALL" && p._status.key !== statusF) return false;
-    if (todayOnly && !isToday(p.date)) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (p.name || "").toLowerCase().includes(q) || (p.mrNo || "").toLowerCase().includes(q) || (p.patientId || "").toLowerCase().includes(q) || (p.phone || "").includes(q);
-  });
+    return matchSearch(p, search, FS_FIELDS, filterField);
+  }), sortKey, sortDir);
 
-  const tally = Object.values(PATIENT_STATUS).map(s => ({ ...s, count: enriched.filter(p => p._status.key === s.key).length }));
+  const tally = Object.values(PATIENT_STATUS).map(s => ({ ...s, count: base.filter(p => p._status.key === s.key).length }));
 
   return (
     <div>
-      <SectionHeader title="Patient Status" onSync={onSync} syncing={syncing} onExport={() => exportCSV(filtered.map(p => ({ mrNo:p.mrNo, patientId:p.patientId, name:p.name, phone:p.phone, branch:p.branch, status:p._status.label })), "patient_status.csv")} msg="" />
+      <SectionHeader title="Patient Status" onSync={onSync} syncing={syncing} onExport={() => exportCSV(filtered.map(p => ({ mrNo:p.mrNo, patientId:p.patientId, name:p.name, phone:p.phone, branch:p.branch, registered:p.date, status:p._status.label })), "patient_status.csv")} msg="" />
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:10, marginBottom:16 }}>
         {tally.map(t => (
           <div key={t.key} onClick={() => setStatusF(s => s === t.key ? "ALL" : t.key)} style={{ cursor:"pointer", padding:"12px 14px", borderRadius:12, background:t.bg, color:t.color, border: statusF === t.key ? `2px solid ${t.color}` : "2px solid transparent" }}>
@@ -2583,8 +2704,11 @@ function PatientStatusSection({ session, data, onSync, syncing }) {
           </div>
         ))}
       </div>
-      <div style={{ display:"flex", gap:10, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
-        <input type="text" placeholder="🔍 Search name / MR / Patient ID / phone…" value={search} onChange={e=>setSearch(e.target.value)} style={{ maxWidth:360 }} />
+      <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
+        <input type="text" placeholder="🔍 Search name / MR / Patient ID / phone…" value={search} onChange={e=>setSearch(e.target.value)} style={{ flex:"1 1 220px", minWidth:200, maxWidth:340, borderRadius:10, border:"1px solid #e8e2db", padding:"8px 14px", fontSize:13 }} />
+        <select value={filterField} onChange={e=>setFilterField(e.target.value)} style={_fsSelStyle} title="Filter by a specific field"><option value="">🔎 All fields</option>{FS_FIELDS.map(f => <option key={f.key} value={f.key}>In: {f.label}</option>)}</select>
+        <select value={sortKey} onChange={e=>setSortKey(e.target.value)} style={_fsSelStyle} title="Sort by">{FS_FIELDS.map(f => <option key={f.key} value={f.key}>Sort: {f.label}</option>)}</select>
+        <button className="btn btn-outline btn-sm" onClick={()=>setSortDir(d=>d==="asc"?"desc":"asc")} title="Toggle ascending / descending">{sortDir==="asc"?"↑ Asc":"↓ Desc"}</button>
         <button className={`btn btn-sm ${todayOnly?"btn-dark":"btn-outline"}`} onClick={()=>setTodayOnly(t=>!t)}>{todayOnly?"📅 Today only ✓":"📅 Today only"}</button>
         <button className={`btn btn-sm ${statusF==="ALL"?"btn-dark":"btn-outline"}`} onClick={()=>setStatusF("ALL")}>All Statuses</button>
         <div style={{ fontSize:12, color:"#9b8e82", marginLeft:"auto" }}>{filtered.length} patient(s)</div>
@@ -2727,6 +2851,14 @@ function CounsellingSection({ session, data, mutate, audit, onSync, syncing }) {
   const [msg,   setMsg]   = useState("");
   const [mrLookup, setMrLookup] = useState("");
   const [search, setSearch] = useState("");
+  const [filterField, setFilterField] = useState("");
+  const [sortKey, setSortKey] = useState("timestamp");
+  const [sortDir, setSortDir] = useState("desc");
+  const FS_FIELDS = [
+    { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
+    { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"advice", label:"Advice" }, { key:"remarks", label:"Remarks" },
+    { key:"counsellor", label:"Counsellor" }, { key:"branch", label:"Branch" },
+  ];
 
   const blank = () => ({
     timestamp: ts(), date: todayStr(), time: timeStr(),
@@ -2770,12 +2902,7 @@ function CounsellingSection({ session, data, mutate, audit, onSync, syncing }) {
   const del = id => { if (confirm("Delete counselling entry?")) { mutate("counselling", arr => safeArray(arr).filter(x => x.id !== id)); audit("DELETE", { type: "counselling", id }); } };
   const openEdit = (row) => { setForm({ ...row }); setMrLookup(""); setMsg(""); setModal(true); };
 
-  const filtered = rows.filter(r => !search
-    || r.name?.toLowerCase().includes(search.toLowerCase())
-    || r.mrNo?.toLowerCase().includes(search.toLowerCase())
-    || r.patientId?.toLowerCase().includes(search.toLowerCase())
-    || r.phone?.includes(search)
-  );
+  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField)), sortKey, sortDir);
 
   return (
     <div>
@@ -2783,9 +2910,7 @@ function CounsellingSection({ session, data, mutate, audit, onSync, syncing }) {
         onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "counselling.csv")}
         onAdd={() => { setForm(blank()); setMrLookup(""); setMsg(""); setModal(true); }} msg={msg} />
 
-      <div style={{ marginBottom: 12 }}>
-        <input type="text" placeholder="🔍 Search by name, MR No, Patient ID, phone…" value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", maxWidth: 420, borderRadius: 10, border: "1px solid #e8e2db", padding: "8px 14px", fontSize: 13 }} />
-      </div>
+      <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, MR No, Patient ID, phone…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
 
       <div className="card" style={{ overflowX: "auto" }}>
         <table>
