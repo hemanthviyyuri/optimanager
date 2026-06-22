@@ -325,14 +325,18 @@ function rowTime(v) {
   const t = Date.parse(s);
   return isNaN(t) ? 0 : t;
 }
-// Returns true when the date value (ISO or dd/mm/yyyy etc.) is today.
+// Returns true when the date value (ISO, ISO datetime, or locale dd/mm/yyyy timestamp) is today.
 function isTodayDate(d) {
   if (!d) return false;
   const today = now().toISOString().split("T")[0];
-  if (typeof d === "string" && d.startsWith(today)) return true;
+  const s = String(d).trim();
+  // ISO date "2026-06-22" or ISO datetime "2026-06-22T08:46:39"
+  if (s.startsWith(today)) return true;
   try {
-    const parts = String(d).split(/[\s/,.\-]/).filter(Boolean);
-    if (parts.length >= 3 && parts[0].length <= 2) {
+    // Locale timestamp from ts(): "22/6/2026, 08:46:39 am" — isolate date part before comma/space
+    const datePart = s.split(/[,\s]/)[0]; // "22/6/2026"
+    const parts = datePart.split("/").filter(Boolean);
+    if (parts.length === 3 && parts[0].length <= 2) {
       const [dd, mm, yyyy] = parts;
       const iso = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
       if (iso === today) return true;
@@ -949,10 +953,14 @@ function Dashboard({ session, data, setView, auditLog, dashCms }) {
 
   const isToday = (d) => {
     if (!d) return false;
-    if (typeof d === "string" && d.startsWith(today)) return true;
+    const s = String(d).trim();
+    // ISO date or ISO datetime: "2026-06-22" or "2026-06-22T08:46:39"
+    if (s.startsWith(today)) return true;
     try {
-      const parts = String(d).split(/[\s/,-]/).filter(Boolean);
-      if (parts.length >= 3) {
+      // Locale timestamp from ts(): "22/6/2026, 08:46:39 am" — extract date part before comma/space
+      const datePart = s.split(/[,\s]/)[0]; // "22/6/2026"
+      const parts = datePart.split("/").filter(Boolean);
+      if (parts.length === 3) {
         const [dd, mm, yyyy] = parts;
         const iso = `${yyyy.padStart(4,"0")}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
         if (iso === today) return true;
@@ -969,8 +977,9 @@ function Dashboard({ session, data, setView, auditLog, dashCms }) {
   // Revenue (Today) = paid invoices + OP registration amount + opticals advance + opticals balance collected on delivery
   const opRegRevToday = ptsToday.reduce((s, p) => s + (parseFloat(p.paymentAmount) || 0), 0);
   const balanceVal = (o) => { const b = o.balance !== "" && o.balance != null ? parseFloat(o.balance) : (parseFloat(o.totalPrice) || 0) - (parseFloat(o.advance) || 0); return Math.max(0, isNaN(b) ? 0 : b); };
-  const opticalsAdvToday = flt(data.opticals).filter(o => isToday(o.date) || isToday(o.timestamp)).reduce((s, o) => s + (parseFloat(o.advance) || 0), 0);
-  const opticalsBalToday = flt(data.opticals).filter(o => o.deliveryStatus === "Delivered" && (isToday(o.updatedAt) || isToday(o.date) || isToday(o.timestamp))).reduce((s, o) => s + balanceVal(o), 0);
+  // Prefer the `date` column (ISO "YYYY-MM-DD") over timestamp (locale string) for "today" checks
+  const opticalsAdvToday = flt(data.opticals).filter(o => isToday(o.date || o.timestamp)).reduce((s, o) => s + (parseFloat(o.advance) || 0), 0);
+  const opticalsBalToday = flt(data.opticals).filter(o => o.deliveryStatus === "Delivered" && isToday(o.updatedAt || o.date || o.timestamp)).reduce((s, o) => s + balanceVal(o), 0);
   const revToday    = invRevToday + opRegRevToday + opticalsAdvToday + opticalsBalToday;
   const revisitToday = ptsToday.filter(x => {
     const v = (x.visitType || "").toLowerCase();
