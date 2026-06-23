@@ -82,6 +82,39 @@ function initSB(url, key) {
 }
 function sbReady() { return _sb !== null; }
 
+// ---- Realtime (live updates across devices) ----
+// Uses a WebSocket connection so changes made on one device appear on others
+// in ~1 second, instead of waiting for the periodic poll. Browser-only.
+let _sbRealtimeClient = null;
+let _sbRealtimeChannel = null;
+let _sbRealtimeKey = "";
+async function startRealtime(url, key, onChange) {
+  if (typeof window === "undefined" || !url || !key) return;
+  const sig = `${url}::${key}`;
+  if (_sbRealtimeKey === sig && _sbRealtimeChannel) return; // already connected
+  stopRealtime();
+  try {
+    const { createClient } = await import("@supabase/supabase-js");
+    _sbRealtimeClient = createClient(url.replace(/\/$/, ""), key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      realtime: { params: { eventsPerSecond: 10 } },
+    });
+    _sbRealtimeKey = sig;
+    const ch = _sbRealtimeClient.channel("opti-live");
+    // Listen to every change on every table in the public schema.
+    ch.on("postgres_changes", { event: "*", schema: "public" }, () => {
+      try { onChange && onChange(); } catch {}
+    });
+    ch.subscribe();
+    _sbRealtimeChannel = ch;
+  } catch (e) { /* realtime is best-effort; polling remains as fallback */ }
+}
+function stopRealtime() {
+  try { if (_sbRealtimeChannel && _sbRealtimeClient) _sbRealtimeClient.removeChannel(_sbRealtimeChannel); } catch {}
+  _sbRealtimeChannel = null;
+  _sbRealtimeKey = "";
+}
+
 const SB_TABLES = {
   patients: "patients", patientBill: "patientBill", optometrist: "optometrist", opticals: "opticals",
   stock: "stock", invoices: "invoices", accounts: "accounts", audit_log: "audit_log", tasks: "tasks", reminders: "reminders",
@@ -678,8 +711,26 @@ export default function App() {
     if (!sbCreds.url || !sbCreds.key) return;
     initSB(sbCreds.url, sbCreds.key);
     syncRef.current(sbCreds.url, sbCreds.key);
-    const id = setInterval(() => syncRef.current(sbCreds.url, sbCreds.key), 4000);
-    return () => clearInterval(id);
+
+    // Live updates: when any table changes on the server, pull the latest
+    // immediately (debounced ~600ms so a burst of changes triggers one sync).
+    let liveTimer = null;
+    const onLiveChange = () => {
+      if (liveTimer) return;
+      liveTimer = setTimeout(() => {
+        liveTimer = null;
+        syncRef.current(sbCreds.url, sbCreds.key);
+      }, 600);
+    };
+    startRealtime(sbCreds.url, sbCreds.key, onLiveChange);
+
+    // Fallback poll (in case realtime is not enabled on the project / drops).
+    const id = setInterval(() => syncRef.current(sbCreds.url, sbCreds.key), 8000);
+    return () => {
+      clearInterval(id);
+      if (liveTimer) clearTimeout(liveTimer);
+      stopRealtime();
+    };
   }, [sbCreds.url, sbCreds.key]);
 
   const connectSupabase = async (url, key) => {
