@@ -649,6 +649,38 @@ function ReminderAlerts({ session, data, setView }) {
 
 
 
+
+/* =========================
+   INVOICE MODULE FOUNDATION
+   ========================= */
+
+export const canGenerateInvoice = (order) => {
+  const status = String(
+    order?.deliveryStatus ||
+    order?.status ||
+    order?.opticalStatus ||
+    ""
+  ).toLowerCase();
+
+  return status === "booked" || status === "delivered";
+};
+
+export const INVOICE_TEMPLATE_TYPES = {
+  STANDARD: "standard",
+  RETAIL: "retail",
+  CORPORATE: "corporate"
+};
+
+export const DEFAULT_INVOICE_EDITOR_STATE = {
+  template: INVOICE_TEMPLATE_TYPES.STANDARD,
+  showLogo: true,
+  showBalance: true,
+  showAdvance: true,
+  showPrescription: true,
+  showPatientInfo: true
+};
+
+
 export default function App() {
   const [session,  setSession]  = useState(() => LS.getSess());
   const [accounts, setAccounts] = useState(() => safeArray(LS.get("opti_accounts", DEFAULT_ACCOUNTS), DEFAULT_ACCOUNTS));
