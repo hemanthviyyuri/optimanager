@@ -338,7 +338,8 @@ function rowTime(v) {
   const t = Date.parse(s);
   return isNaN(t) ? 0 : t;
 }
-// Returns true when the date value (ISO, ISO datetime, or locale dd/mm/yyyy timestamp) is today.
+// Returns true ONLY when the `date` column value equals today (compares date part, ignores time).
+// Accepts ISO "yyyy-mm-dd", ISO datetime, "dd/mm/yyyy", "dd-mm-yyyy", and locale timestamps with date prefix.
 function isTodayDate(d) {
   if (!d) return false;
   const today = now().toISOString().split("T")[0];
@@ -346,13 +347,21 @@ function isTodayDate(d) {
   // ISO date "2026-06-22" or ISO datetime "2026-06-22T08:46:39"
   if (s.startsWith(today)) return true;
   try {
-    // Locale timestamp from ts(): "22/6/2026, 08:46:39 am" — isolate date part before comma/space
-    const datePart = s.split(/[,\s]/)[0]; // "22/6/2026"
-    const parts = datePart.split("/").filter(Boolean);
-    if (parts.length === 3 && parts[0].length <= 2) {
-      const [dd, mm, yyyy] = parts;
-      const iso = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-      if (iso === today) return true;
+    // Take the leading date token (before comma/space/T)
+    const datePart = s.split(/[,\sT]/)[0];
+    // dd/mm/yyyy or dd-mm-yyyy
+    const parts = datePart.split(/[\/\-]/).filter(Boolean);
+    if (parts.length === 3) {
+      // If first token is 4 digits, treat as yyyy-mm-dd already
+      if (parts[0].length === 4) {
+        const [yyyy, mm, dd] = parts;
+        const iso = `${yyyy.padStart(4,"0")}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
+        if (iso === today) return true;
+      } else {
+        const [dd, mm, yyyy] = parts;
+        const iso = `${yyyy.padStart(4, "0")}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+        if (iso === today) return true;
+      }
     }
   } catch {}
   return false;
@@ -964,23 +973,8 @@ function Dashboard({ session, data, setView, auditLog, dashCms }) {
   const [, setTick] = useState(0);
   useEffect(() => { const id = setInterval(() => setTick(t => t + 1), 1000); return () => clearInterval(id); }, []);
 
-  const isToday = (d) => {
-    if (!d) return false;
-    const s = String(d).trim();
-    // ISO date or ISO datetime: "2026-06-22" or "2026-06-22T08:46:39"
-    if (s.startsWith(today)) return true;
-    try {
-      // Locale timestamp from ts(): "22/6/2026, 08:46:39 am" — extract date part before comma/space
-      const datePart = s.split(/[,\s]/)[0]; // "22/6/2026"
-      const parts = datePart.split("/").filter(Boolean);
-      if (parts.length === 3) {
-        const [dd, mm, yyyy] = parts;
-        const iso = `${yyyy.padStart(4,"0")}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
-        if (iso === today) return true;
-      }
-    } catch {}
-    return false;
-  };
+  // Strictly uses the `date` column value (date part only). Shared with isTodayDate.
+  const isToday = (d) => isTodayDate(d);
 
   const allPts      = dedupePatientVisits(flt(data.patients).filter(x => x.status === "approved"));
   const ptsToday    = allPts.filter(x => isToday(x.date));
@@ -990,9 +984,9 @@ function Dashboard({ session, data, setView, auditLog, dashCms }) {
   // Revenue (Today) = paid invoices + OP registration amount + opticals advance + opticals balance collected on delivery
   const opRegRevToday = ptsToday.reduce((s, p) => s + (parseFloat(p.paymentAmount) || 0), 0);
   const balanceVal = (o) => { const b = o.balance !== "" && o.balance != null ? parseFloat(o.balance) : (parseFloat(o.totalPrice) || 0) - (parseFloat(o.advance) || 0); return Math.max(0, isNaN(b) ? 0 : b); };
-  // Prefer the `date` column (ISO "YYYY-MM-DD") over timestamp (locale string) for "today" checks
-  const opticalsAdvToday = flt(data.opticals).filter(o => isToday(o.date || o.timestamp)).reduce((s, o) => s + (parseFloat(o.advance) || 0), 0);
-  const opticalsBalToday = flt(data.opticals).filter(o => o.deliveryStatus === "Delivered" && isToday(o.updatedAt || o.date || o.timestamp)).reduce((s, o) => s + balanceVal(o), 0);
+  // Use the `date` column only (no timestamp fallback) so "today" reflects the column value, not when the row was created.
+  const opticalsAdvToday = flt(data.opticals).filter(o => isToday(o.date)).reduce((s, o) => s + (parseFloat(o.advance) || 0), 0);
+  const opticalsBalToday = flt(data.opticals).filter(o => o.deliveryStatus === "Delivered" && isToday(o.date)).reduce((s, o) => s + balanceVal(o), 0);
   const revToday    = invRevToday + opRegRevToday + opticalsAdvToday + opticalsBalToday;
   const revisitToday = ptsToday.filter(x => {
     const v = (x.visitType || "").toLowerCase();
