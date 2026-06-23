@@ -122,6 +122,8 @@ const SB_TABLES = {
   stock: "stock", invoices: "invoices", accounts: "accounts", audit_log: "audit_log", tasks: "tasks", reminders: "reminders",
   counselling: "counselling",
 };
+// Tables that exist only on this device (no cloud table provisioned).
+const LOCAL_ONLY_TABLES = new Set(["purchaseOrders", "lensSale"]);
 
 const K_SHEET_PACK_PREFIX = "\n\n__K_SHEET_FULL__:";
 const K_SHEET_DIRECT_FIELDS = new Set(["id","timestamp","date","time","mrNo","patientId","name","phone","address","gender","age","complaint","pastHistory","branch","status","createdBy","createdByName","createdAt"]);
@@ -225,6 +227,7 @@ async function sbGet(table) {
 
 async function sbUpsertOne(table, row) {
   if (!_sb) return { ok: false, error: "Not connected" };
+  if (LOCAL_ONLY_TABLES.has(table)) return { ok: true, error: null, skipped: true };
   try {
     const payload = table === "patientBill" ? packKSheetForLegacyTable(row) : sanitizeNumericRow(row);
     let result = await sbPostPayload(table, payload, "resolution=merge-duplicates,return=minimal");
@@ -250,6 +253,7 @@ function normalizeRowKeys(rows) {
 
 async function sbUpsertMany(table, rows) {
   if (!_sb) return { ok: false, error: "Not connected" };
+  if (LOCAL_ONLY_TABLES.has(table)) return { ok: true, error: null, skipped: true };
   if (!rows.length) return { ok: true, error: null };
   try {
     const packed = table === "patientBill" ? rows.map(packKSheetForLegacyTable) : rows.map(sanitizeNumericRow);
@@ -263,6 +267,7 @@ async function sbUpsertMany(table, rows) {
 
 async function sbDelete(table, id) {
   if (!_sb) return false;
+  if (LOCAL_ONLY_TABLES.has(table)) return true;
   try {
     const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}?id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers: sbHeaders() });
     return r.ok;
@@ -271,6 +276,7 @@ async function sbDelete(table, id) {
 
 async function sbInsert(table, row) {
   if (!_sb) return false;
+  if (LOCAL_ONLY_TABLES.has(table)) return true;
   try {
     const r = await fetch(`${_sb.url}/rest/v1/${encodeURIComponent(SB_TABLES[table] || table)}`, {
       method: "POST", headers: { ...sbHeaders(), "Prefer": "return=minimal" }, body: JSON.stringify(row),
