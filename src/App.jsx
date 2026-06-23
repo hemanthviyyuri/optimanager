@@ -251,6 +251,19 @@ const timeStr  = () => now().toLocaleTimeString("en-IN", { hour: "2-digit", minu
 const currency = (n) => `₹${Number(n || 0).toFixed(2)}`;
 const uid      = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
+// HTML date inputs only display yyyy-mm-dd. Imported CSV/view data can be dd-mm-yyyy.
+const toISODate = (value) => {
+  if (!value) return "";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().split("T")[0];
+  const raw = String(value).trim();
+  const iso = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (iso) return `${iso[1]}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`;
+  const dmy = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (dmy) return `${dmy[3]}-${String(dmy[2]).padStart(2, "0")}-${String(dmy[1]).padStart(2, "0")}`;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().split("T")[0];
+};
+
 function exportCSV(rows, filename) {
   if (!rows.length) return;
   const keys = Object.keys(rows[0]);
@@ -1443,7 +1456,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, h
   };
 
   const del = id => { if (confirm("Delete patient?")) { mutate("patients", arr => arr.filter(x => x.id !== id), null, id); audit("DELETE", { type: "patients", id }); } };
-  const openEdit = (row) => { setForm({ ...row }); setTouch({}); setMsg(""); setDupWarning(null); setModal(true); };
+  const openEdit = (row) => { setForm({ ...row, date: toISODate(row.date) || todayStr() }); setTouch({}); setMsg(""); setDupWarning(null); setModal(true); };
   const [viewRow, setViewRow] = useState(null);
   const canEdit = isOwner || can("patients", "edit");
   const canViewDetail = isOwner || can("patients", "view");
@@ -1665,7 +1678,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
     setModal(false); setMsg("K Sheet saved successfully. Full optom details are packed for lookup sync.");
   };
 
-  const openEdit = (row) => { setForm(unpackKSheetRow({ ...row })); setTouch({}); setMsg(""); setTab("basic"); setMrLookup(""); setModal(true); };
+  const openEdit = (row) => { const u = unpackKSheetRow({ ...row }); u.date = toISODate(u.date) || todayStr(); setForm(u); setTouch({}); setMsg(""); setTab("basic"); setMrLookup(""); setModal(true); };
   const [viewRow, setViewRow] = useState(null);
   const openView = (row) => setViewRow(unpackKSheetRow({ ...row }));
 
