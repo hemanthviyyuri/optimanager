@@ -422,8 +422,20 @@ function matchSearch(row, search, fields, filterField) {
   const keys = filterField ? [filterField] : fields.map(f => f.key);
   return keys.some(k => String(row?.[k] ?? "").toLowerCase().includes(q));
 }
+// Returns true when the row's date (falls back to timestamp) is within [from, to].
+// `from` / `to` are ISO yyyy-mm-dd strings from date inputs; blank = unbounded.
+function inDateRange(row, from, to, key = "date") {
+  if (!from && !to) return true;
+  const t = rowTime(row?.[key]) || rowTime(row?.timestamp);
+  if (!t) return false;
+  if (from) { const f = new Date(from + "T00:00:00").getTime(); if (!isNaN(f) && t < f) return false; }
+  if (to)   { const e = new Date(to   + "T23:59:59").getTime(); if (!isNaN(e) && t > e) return false; }
+  return true;
+}
 const _fsSelStyle = { borderRadius: 10, border: "1px solid #e8e2db", padding: "8px 10px", fontSize: 13, background: "#fff" };
-function FilterSortBar({ search, setSearch, placeholder, fields, filterField, setFilterField, sortKey, setSortKey, sortDir, setSortDir, children }) {
+const _fsDateStyle = { borderRadius: 10, border: "1px solid #e8e2db", padding: "7px 9px", fontSize: 13, background: "#fff", color: "#6b5e52" };
+function FilterSortBar({ search, setSearch, placeholder, fields, filterField, setFilterField, sortKey, setSortKey, sortDir, setSortDir, dateFrom, setDateFrom, dateTo, setDateTo, dateKey, children }) {
+  const hasDateRange = typeof setDateFrom === "function" && typeof setDateTo === "function";
   return (
     <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
       <input type="text" placeholder={placeholder} value={search} onChange={e => setSearch(e.target.value)} style={{ flex: "1 1 240px", minWidth: 200, maxWidth: 380, borderRadius: 10, border: "1px solid #e8e2db", padding: "8px 14px", fontSize: 13 }} />
@@ -435,6 +447,15 @@ function FilterSortBar({ search, setSearch, placeholder, fields, filterField, se
         {fields.map(f => <option key={f.key} value={f.key}>Sort: {f.label}</option>)}
       </select>
       <button className="btn btn-outline btn-sm" onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")} title="Toggle ascending / descending">{sortDir === "asc" ? "↑ Asc" : "↓ Desc"}</button>
+      {hasDateRange && (
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, color: "#9b8e82" }}>📅 From</span>
+          <input type="date" value={dateFrom || ""} onChange={e => setDateFrom(e.target.value)} style={_fsDateStyle} title="Start date" />
+          <span style={{ fontSize: 12, color: "#9b8e82" }}>To</span>
+          <input type="date" value={dateTo || ""} onChange={e => setDateTo(e.target.value)} style={_fsDateStyle} title="End date" />
+          {(dateFrom || dateTo) && <button className="btn btn-outline btn-sm" onClick={() => { setDateFrom(""); setDateTo(""); }} title="Clear date range">✕ Clear</button>}
+        </span>
+      )}
       {children}
     </div>
   );
@@ -1388,6 +1409,8 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, h
   const [filterField, setFilterField] = useState("");
   const [sortKey, setSortKey] = useState("date");
   const [sortDir, setSortDir] = useState("desc");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const FS_FIELDS = [
     { key:"date", label:"Date" }, { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
     { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"gender", label:"Gender" }, { key:"age", label:"Age" },
@@ -1503,7 +1526,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, h
 
 
   const deduped = dedupePatientVisits(rows);
-  const filtered = sortRows(deduped.filter(r => matchSearch(r, search, FS_FIELDS, filterField)), sortKey, sortDir);
+  const filtered = sortRows(deduped.filter(r => matchSearch(r, search, FS_FIELDS, filterField) && inDateRange(r, dateFrom, dateTo)), sortKey, sortDir);
 
   return (
     <div>
@@ -1517,14 +1540,14 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, h
         onAdd={can("patients","add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setDupWarning(null); setModal(true); } : null}
         msg={msg}
       />
-      <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, phone, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
+      <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, phone, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} />
 
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
-          <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Designation</th><th>Aadhar No</th><th>Address</th><th>Payment</th><th>Payment Ref No</th><th>Amount</th><th>Ref/Camp</th><th>Visit</th><th>Branch</th><th>Remarks</th><th></th></tr></thead>
+          <thead><tr><th>Date</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Designation</th><th>Aadhar No</th><th>Address</th><th>Payment</th><th>Payment Ref No</th><th>Amount</th><th>Ref/Camp</th><th>Visit</th><th>Branch</th><th>Remarks</th><th></th></tr></thead>
           <tbody>{filtered.map(r => (
             <tr key={r.id} style={highlightToday && isTodayDate(r.date) ? { background:"#fef9c3" } : undefined}>
-              <td style={{ fontSize:11, whiteSpace:"nowrap", color:"#9b8e82" }}>{r.timestamp}</td>
+              <td style={{ fontSize:12, whiteSpace:"nowrap", color:"#6b5e52" }}>{r.date || r.timestamp}</td>
               <td style={{ fontWeight:700, fontFamily:"monospace" }}>{r.mrNo}</td>
               <td style={{ fontFamily:"monospace", color:"#1d4ed8", cursor: canViewDetail?"pointer":"default", textDecoration: canViewDetail?"underline":"none" }} onClick={() => canViewDetail && setViewRow(r)}>{r.patientId}</td>
               <td style={{ fontWeight:600, cursor: canViewDetail?"pointer":"default" }} onClick={() => canViewDetail && setViewRow(r)}>{r.name}</td><td>{r.phone}</td>
@@ -1605,6 +1628,8 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
   const [filterField, setFilterField] = useState("");
   const [sortKey, setSortKey] = useState("date");
   const [sortDir, setSortDir] = useState("desc");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const FS_FIELDS = [
     { key:"date", label:"Date" }, { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
     { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"gender", label:"Gender" }, { key:"age", label:"Age" },
@@ -1698,7 +1723,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
     : desig === "OPTOM"
       ? ALL_TABS.filter(t => t.id !== "eye")
       : ALL_TABS.filter(t => t.id === "basic"); // FRONT DESK STAFF → patient info only
-  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField)), sortKey, sortDir);
+  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField) && inDateRange(r, dateFrom, dateTo)), sortKey, sortDir);
 
   const KS_CSV_HEADERS = [
     "date","time","mrNo","patientId","name","phone","address","gender","age","complaint","pastHistory",
@@ -1752,13 +1777,13 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
         msg={msg}
       />
 
-      <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, phone, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
+      <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, phone, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
-          <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Complaint</th><th>IOP</th><th>Optom</th><th>By</th><th>Branch</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Date</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Complaint</th><th>IOP</th><th>Optom</th><th>By</th><th>Branch</th><th>Actions</th></tr></thead>
           <tbody>{filtered.map(r => (
             <tr key={r.id} style={highlightToday && isTodayDate(r.date) ? { background:"#fef9c3" } : undefined}>
-              <td style={{ fontSize:11, color:"#9b8e82", whiteSpace:"nowrap" }}>{r.timestamp}</td>
+              <td style={{ fontSize:12, color:"#6b5e52", whiteSpace:"nowrap" }}>{r.date || r.timestamp}</td>
               <td style={{ fontWeight:700, fontFamily:"monospace" }}>{r.mrNo}</td>
               <td style={{ fontFamily:"monospace", color:"#1d4ed8", cursor: canView?"pointer":"default", textDecoration: canView?"underline":"none" }} onClick={()=>canView && openView(r)}>{r.patientId || "—"}</td>
               <td style={{ fontWeight:600, cursor: canView?"pointer":"default" }} onClick={()=>canView && openView(r)}>{r.name}</td><td>{r.phone}</td><td>{r.gender}</td><td>{r.age}</td>
