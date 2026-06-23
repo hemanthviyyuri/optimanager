@@ -11,7 +11,7 @@ const BRAND_TAG  = "powered by OptiManager HMS";
 const APP_VER  = "4.10";
 const BRANCHES = ["KKD_Main Branch"];
 const SECTIONS = ["patients","patientBill","optometrist","opticals","inventory","invoices","alerts"];
-const SECTION_LABELS = { patients:"OP Registration", patientBill:"K Sheet Entry", optometrist:"Optometrist", opticals:"Opticals", inventory:"Inventory", invoices:"Sales & Invoices", alerts:"Low Stock Alerts" };
+const SECTION_LABELS = { patients:"OP Registration", patientBill:"K Sheet Entry", optometrist:"Optometrist", opticals:"Opticals", inventory:"Inventory", purchaseOrders:"Purchase Orders", invoices:"Sales & Invoices", alerts:"Low Stock Alerts" };
 const LENS_TYPES     = ["Single Vision","Bifocal","Progressive","Anti-Reflective","Photochromic","Blue Cut","UV400","Polarized","High Index 1.60","High Index 1.67","High Index 1.74","Trivex","Polycarbonate","Toric (Contact)","Multifocal (Contact)"];
 const DELIVERY_STATUS= ["Delivered","Not Ready","Fixing Completed But Not Delivered"];
 const DESIGNATIONS   = ["FRONT DESK STAFF", "OPTOM", "OPTOMOLOGIST", "MD", "COUNSELLING ROOM", "DEVELOPER"];
@@ -190,14 +190,14 @@ async function sbPostPayloadPruned(table, payload, prefer) {
   const removed = new Set();
   for (let i = 0; i < 20; i += 1) {
     const result = await sbPostPayload(table, nextPayload, prefer);
-    if (result.ok) return result;
+    if (result.ok) return { ...result, removedColumns: Array.from(removed) };
     const col = missingColumnFromError(result.raw);
-    if (!col || removed.has(col)) return result;
+    if (!col || removed.has(col)) return { ...result, removedColumns: Array.from(removed) };
     removed.add(col);
     const prune = row => { const copy = { ...(row || {}) }; delete copy[col]; return copy; };
     nextPayload = Array.isArray(nextPayload) ? nextPayload.map(prune) : prune(nextPayload);
   }
-  return { ok: false, error: "Too many missing database columns." };
+  return { ok: false, error: "Too many missing database columns.", removedColumns: Array.from(removed) };
 }
 
 async function sbGet(table) {
@@ -514,7 +514,7 @@ const LS = {
   getSess: ()    => { try { return JSON.parse(sessionStorage.getItem("opti_sess")); } catch { return null; } },
 };
 
-const SEED_DATA = { patients: [], patientBill: [], optometrist: [], opticals: [], lensSale: [], stock: [], invoices: [], tasks: [], reminders: [], counselling: [] };
+const SEED_DATA = { patients: [], patientBill: [], optometrist: [], opticals: [], lensSale: [], stock: [], purchaseOrders: [], invoices: [], tasks: [], reminders: [], counselling: [] };
 const safeArray = (arr, fallback = []) => Array.isArray(arr) ? arr : fallback;
 
 // ── Dashboard CMS defaults (editable in DashboardCMS view) ──────────────
@@ -801,6 +801,8 @@ export default function App() {
           sbUpsertOne(key, newRecord).then(result => {
             if (!result.ok) {
               alert(`Warning: This record could not be saved to the cloud.\n\nReason: ${result.error}\n\nIt is only stored on this device for now. This is usually caused by a missing column in the Supabase "${SB_TABLES[key] || key}" table.`);
+            } else if (result.removedColumns && result.removedColumns.length) {
+              alert(`Saved — but these field(s) don't exist yet in the Supabase "${SB_TABLES[key] || key}" table, so they were NOT synced to the cloud:\n\n${result.removedColumns.join(", ")}\n\nThey're kept on this device for now, but may get overwritten next time data syncs from the cloud. Ask your admin to add these columns in Supabase, then re-save this record.`);
             }
           }).finally(() => releaseWrite(key));
         } else if (Array.isArray(updated)) {
@@ -875,6 +877,7 @@ export default function App() {
       {view === "lensSale"     && <LensSaleSection     {...sharedProps} />}
       {view === "opticalsStatus" && <OpticalsStatusSection {...sharedProps} />}
       {view === "inventory"    && <InventorySection    {...sharedProps} />}
+      {view === "purchaseOrders" && <PurchaseOrderSection {...sharedProps} />}
       {view === "invoices"     && <InvoicesSection     {...sharedProps} />}
       {view === "alerts"       && <AlertsSection       {...sharedProps} />}
       {view === "tasks"        && <TasksSection        {...sharedProps} accounts={accounts} />}
@@ -988,6 +991,7 @@ function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastS
     { id: "lensSale",     label: "Lens Sale",        icon: "🔍", show: can("opticals", "view") },
     { id: "opticalsStatus",label: "Opticals Status", icon: "📦", show: can("opticals", "view") },
     { id: "inventory",    label: "Inventory",        icon: "▦", show: can("inventory", "view") },
+    { id: "purchaseOrders",label: "Purchase Orders", icon: "🧾", show: can("inventory", "view") },
     { id: "invoices",     label: "Sales & Invoices", icon: "◆", show: can("invoices", "view") },
     { id: "alerts",       label: "Low Stock Alerts", icon: "▲", show: can("alerts", "view") },
     { id: "tasks",        label: "Tasks",            icon: "📌", show: true },
@@ -2332,10 +2336,12 @@ function LensSaleSection({ session, data, mutate, can, audit, onSync, syncing })
   const addLine = () => setForm(f => ({ ...f, items: [...f.items, blankLine()] }));
   const delLine = (i) => setForm(f => ({ ...f, items: f.items.filter((_,idx) => idx!==i) }));
 
+  const poRows = safeArray(data.purchaseOrders).filter(p => p.category === "Lenses" && (isOwner || p.branch === branch));
   const pickLens = (i, sku) => {
     const s = lensStock.find(x => x.sku === sku); if (!s) return;
+    const po = [...poRows].reverse().find(p => p.sku === sku) || {};
     updLine(i, "code", s.sku);
-    setForm(f => ({ ...f, items: f.items.map((l,idx) => idx===i ? { ...l, code:s.sku, name:s.name, sph:s.sph||"", cyl:s.cyl||"", axis:s.axis||"", addPwr:s.addPwr||"", price: Number(s.sellingPrice||s.price||0) } : l) }));
+    setForm(f => ({ ...f, items: f.items.map((l,idx) => idx===i ? { ...l, code:s.sku, name:s.name, sph:po.sph||"", cyl:po.cyl||"", axis:po.axis||"", addPwr:po.addPwr||"", price: Number(po.sellingPrice||0) } : l) }));
   };
 
   const lookupPatient = () => {
@@ -2405,17 +2411,17 @@ function LensSaleSection({ session, data, mutate, can, audit, onSync, syncing })
             <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div>
           </div>
 
-          <div style={{ fontWeight:700, marginBottom:6, color:"#1d4ed8" }}>Particular (Lens lookup → Inventory · Lenses)</div>
+          <div style={{ fontWeight:700, marginBottom:6, color:"#1d4ed8" }}>Particular (PO Lens lookup → Lens Location)</div>
           <div style={{ overflowX:"auto", border:"1px solid #e8e2db", borderRadius:10 }}>
             <table style={{ fontSize:12 }}>
               <thead style={{ background:"#fafafa" }}><tr>
-                <th>SN</th><th>Code</th><th>Item Name</th><th>Unit</th><th>DIA</th><th>Eye</th><th>SPH</th><th>CYL</th><th>Axis</th><th>Add</th><th>Qty</th><th>Price</th><th>Dis%</th><th>Dis Amt</th><th>Total</th><th></th>
+                <th>SN</th><th>Code · Location</th><th>Item Name</th><th>Unit</th><th>DIA</th><th>Eye</th><th>SPH</th><th>CYL</th><th>Axis</th><th>Add</th><th>Qty</th><th>Price</th><th>Dis%</th><th>Dis Amt</th><th>Total</th><th></th>
               </tr></thead>
               <tbody>{form.items.map((l,i) => {
                 const lt = lineTotal(l); const dis = (Number(l.qty)||0)*(Number(l.price)||0)*((Number(l.disPct)||0)/100);
                 return (<tr key={l.id}>
                   <td>{i+1}</td>
-                  <td><select value={l.code} onChange={e=>pickLens(i,e.target.value)} style={{ minWidth:90, padding:"4px" }}><option value="">—</option>{lensStock.map(s=><option key={s.sku} value={s.sku}>{s.sku}</option>)}</select></td>
+                  <td><select value={l.code} onChange={e=>pickLens(i,e.target.value)} style={{ minWidth:160, padding:"4px" }}><option value="">—</option>{lensStock.map(s=><option key={s.sku} value={s.sku}>{s.sku} {s.location?`· 📍${s.location}`:""}{s.boxNo?` · Box ${s.boxNo}`:""}</option>)}</select></td>
                   <td><input type="text" value={l.name} onChange={e=>updLine(i,"name",e.target.value)} style={{ minWidth:140 }} /></td>
                   <td><input type="text" value={l.unit} onChange={e=>updLine(i,"unit",e.target.value)} style={{ width:60 }} /></td>
                   <td><input type="text" value={l.dia} onChange={e=>updLine(i,"dia",e.target.value)} style={{ width:50 }} /></td>
@@ -2452,6 +2458,205 @@ function LensSaleSection({ session, data, mutate, can, audit, onSync, syncing })
   );
 }
 
+// ── Purchase Orders: record incoming stock from logistics or local market ──
+function PurchaseOrderSection({ session, data, mutate, can, audit, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "KKD_Main Branch";
+  const rows    = safeArray(data.purchaseOrders).filter(x => isOwner || x.branch === branch);
+  const FRAME_TYPES = ["Full Rim", "Half Rim", "Rimless", "Sports", "Kids"];
+  const ACCESSORY_TYPES = ["Spects Box", "Cloths", "Lens Cleaner Spray"];
+  const CATS = ["Lenses", "Frames", "Accessories"];
+  const CAT_COLORS = { Frames: { bg:"#dbeafe", color:"#1d4ed8" }, Lenses: { bg:"#dcfce7", color:"#166534" }, Accessories: { bg:"#fef3c7", color:"#92400e" } };
+
+  const [cat, setCat] = useState("All");
+  const [search, setSearch] = useState("");
+  const [modal, setModal] = useState(null);
+  const [msg, setMsg] = useState("");
+
+  const blank = () => ({
+    poNo: `PO-${(rows.length||0)+1}/${new Date().getFullYear()}`,
+    date: todayStr(),
+    category: "Lenses",
+    sku: "",
+    name: "",
+    trackingNo: "",        // tracking/LR no, or "LM" for local market
+    logisticsName: "",     // required if not LM
+    partyAC: "",           // wholesale / retail party / LM shop name
+    sph: "", cyl: "", axis: "", addPwr: "", lensType: "Single Vision",
+    frameType: "Full Rim", color: "",
+    accessoryType: "Spects Box",
+    poPrice: 0, sellingPrice: 0,
+    qty: 1,
+    location: "", boxNo: "",
+    remarks: "",
+  });
+  const [form, setForm] = useState(blank());
+  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const open = (r) => { setForm(r ? { ...blank(), ...r } : blank()); setMsg(""); setModal(r ? r : "add"); };
+
+  const validate = () => {
+    const req = (v) => v !== "" && v !== null && v !== undefined;
+    if (!req(form.poNo)) return "PO No required.";
+    if (!req(form.date)) return "Date required.";
+    if (!req(form.trackingNo)) return "Tracking / LR No required (use 'LM' for local market).";
+    const isLM = String(form.trackingNo).trim().toUpperCase() === "LM";
+    if (!isLM && !req(form.logisticsName)) return "Logistics name required when not local market.";
+    if (!req(form.partyAC)) return "Party A/C (shop / wholesale / retail) required.";
+    if (!req(form.sku)) return "SKU required.";
+    if (!req(form.name)) return "Item name required.";
+    if (Number(form.qty) <= 0) return "Quantity must be > 0.";
+    if (Number(form.poPrice) < 0 || Number(form.sellingPrice) < 0) return "Prices must be ≥ 0.";
+    if (form.category === "Lenses") {
+      if (!req(form.sph) || !req(form.cyl) || !req(form.axis) || !req(form.addPwr) || !req(form.lensType)) return "Lens fields (SPH/CYL/Axis/Add/Lens Type) all required.";
+    }
+    if (form.category === "Frames") {
+      if (!req(form.frameType) || !req(form.color)) return "Frame type and colour required.";
+    }
+    if (form.category === "Accessories") {
+      if (!req(form.accessoryType)) return "Accessory type required.";
+    }
+    return "";
+  };
+
+  // PO auto-creates or updates a stock row (by SKU+branch)
+  const upsertStock = (rec) => {
+    mutate("stock", arr => {
+      const i = arr.findIndex(s => s.sku === rec.sku && s.branch === rec.branch);
+      if (i === -1) {
+        return [...arr, {
+          id: uid(), sku: rec.sku, name: rec.name, category: rec.category, brand: rec.brand || "",
+          qty: Number(rec.qty), reorder: 5, location: rec.location || "", boxNo: rec.boxNo || "",
+          branch: rec.branch, createdBy: session.id, createdByName: session.name,
+        }];
+      }
+      const ex = arr[i];
+      const next = { ...ex, qty: Number(ex.qty || 0) + Number(rec.qty), location: rec.location || ex.location, boxNo: rec.boxNo || ex.boxNo };
+      return [...arr.slice(0, i), next, ...arr.slice(i+1)];
+    });
+  };
+
+  const save = () => {
+    const err = validate();
+    if (err) { setMsg(err); return; }
+    const rec = {
+      id: modal === "add" ? uid() : modal.id,
+      ...form,
+      qty: Number(form.qty), poPrice: Number(form.poPrice), sellingPrice: Number(form.sellingPrice),
+      branch: isOwner ? (form.branch || "KKD_Main Branch") : branch,
+      createdBy: session.id, createdByName: session.name, createdAt: ts(),
+    };
+    if (modal === "add") {
+      mutate("purchaseOrders", arr => [...arr, rec], rec);
+      audit("ADD", { type: "purchaseOrders", poNo: rec.poNo, sku: rec.sku });
+      upsertStock(rec);
+    } else {
+      mutate("purchaseOrders", arr => arr.map(x => x.id === rec.id ? rec : x), rec);
+      audit("EDIT", { type: "purchaseOrders", id: rec.id });
+    }
+    setModal(null);
+    setMsg("Purchase Order saved.");
+  };
+
+  const catTag = (c) => { const s = CAT_COLORS[c] || { bg:"#f0ede8", color:"#6b5e52" }; return <span className="tag" style={{ background:s.bg, color:s.color, fontWeight:700 }}>{c}</span>; };
+  const detail = (r) => {
+    if (r.category === "Lenses") return [r.sph && `SPH ${r.sph}`, r.cyl && `CYL ${r.cyl}`, r.axis && `Ax ${r.axis}`, r.addPwr && `Add ${r.addPwr}`, r.lensType].filter(Boolean).join(" · ");
+    if (r.category === "Frames") return [r.frameType, r.color].filter(Boolean).join(" · ");
+    if (r.category === "Accessories") return r.accessoryType || "—";
+    return "—";
+  };
+  const filtered = rows.filter(r => (cat === "All" || r.category === cat) && (
+    !search || [r.poNo, r.sku, r.name, r.partyAC, r.trackingNo, r.logisticsName].some(v => String(v||"").toLowerCase().includes(search.toLowerCase()))
+  ));
+  const isLM = String(form.trackingNo).trim().toUpperCase() === "LM";
+
+  return (
+    <div>
+      <SectionHeader title="Purchase Orders (PO)" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({id,...r})=>r), "purchase_orders.csv")} onAdd={can("inventory","add") ? () => open(null) : null} msg={msg} />
+      <div className="card" style={{ overflowX:"auto" }}>
+        <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap" }}>
+          <input type="text" placeholder="Search PO / SKU / party / tracking…" value={search} onChange={e=>setSearch(e.target.value)} style={{ maxWidth:280 }} />
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+            {["All", ...CATS].map(c => <button key={c} className={`btn btn-sm ${cat===c?"btn-dark":"btn-outline"}`} onClick={()=>setCat(c)}>{c}</button>)}
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>PO No</th><th>Date</th><th>Category</th><th>SKU</th><th>Item</th><th>Detail</th><th>Tracking/LR</th><th>Logistics</th><th>Party A/C</th><th>Qty</th><th>PO ₹</th><th>Sell ₹</th><th>Branch</th>{(can("inventory","edit") || isOwner) && <th></th>}</tr></thead>
+          <tbody>{filtered.map(r => (
+            <tr key={r.id}>
+              <td style={{ fontWeight:700, color:"#1d4ed8", fontFamily:"monospace" }}>{r.poNo}</td>
+              <td>{r.date}</td>
+              <td>{catTag(r.category)}</td>
+              <td style={{ fontFamily:"monospace", fontSize:11 }}>{r.sku}</td>
+              <td style={{ fontWeight:600 }}>{r.name}</td>
+              <td style={{ fontFamily:"monospace", fontSize:12 }}>{detail(r)}</td>
+              <td style={{ fontFamily:"monospace" }}>{r.trackingNo}</td>
+              <td>{String(r.trackingNo).trim().toUpperCase() === "LM" ? <span style={{ color:"#9b8e82" }}>— Local —</span> : (r.logisticsName || "—")}</td>
+              <td>{r.partyAC}</td>
+              <td style={{ fontWeight:700 }}>{r.qty}</td>
+              <td style={{ color:"#9b8e82" }}>{currency(r.poPrice)}</td>
+              <td style={{ fontWeight:700, color:"#166534" }}>{currency(r.sellingPrice)}</td>
+              <td><span className="tag" style={{ background:"#f0ede8", color:"#6b5e52" }}>{r.branch}</span></td>
+              {(can("inventory","edit") || isOwner) && (
+                <td style={{ display:"flex", gap:5 }}>
+                  <button className="btn btn-outline btn-sm" onClick={()=>open(r)}>Edit</button>
+                  {isOwner && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete PO?")) { mutate("purchaseOrders", arr => arr.filter(x => x.id !== r.id), null, r.id); audit("DELETE", { type:"purchaseOrders", id:r.id }); } }}>✕</button>}
+                </td>
+              )}
+            </tr>
+          ))}</tbody>
+        </table>
+        {filtered.length === 0 && <div style={{ color:"#9b8e82", fontSize:13, padding:20, textAlign:"center" }}>No purchase orders yet.</div>}
+      </div>
+
+      {modal && (
+        <Modal title={modal === "add" ? "New Purchase Order" : "Edit Purchase Order"} onClose={() => setModal(null)} onSave={save} saveLabel="Save PO" wide>
+          <div style={{ background:"linear-gradient(90deg,#166534,#16a34a)", color:"#fff", padding:"10px 14px", borderRadius:10, marginBottom:14, fontWeight:700 }}>Purchase Order · {form.category}</div>
+
+          <div className="form-grid">
+            <div><label>PO No *</label><input type="text" value={form.poNo} onChange={F("poNo")} /></div>
+            <div><label>Date *</label><input type="date" value={form.date} onChange={F("date")} /></div>
+            <div><label>Category *</label><select value={form.category} onChange={F("category")}>{CATS.map(c => <option key={c}>{c}</option>)}</select></div>
+
+            <div><label>Tracking / LR No * <span style={{ color:"#9b8e82", fontWeight:400 }}>(enter "LM" for local market)</span></label><input type="text" placeholder="LR-12345 or LM" value={form.trackingNo} onChange={F("trackingNo")} /></div>
+            <div><label>Logistics Name {isLM ? <span style={{ color:"#9b8e82", fontWeight:400 }}>(not required for LM)</span> : "*"}</label><input type="text" placeholder="DTDC / BlueDart / …" value={form.logisticsName} onChange={F("logisticsName")} disabled={isLM} /></div>
+            <div><label>Party A/C * <span style={{ color:"#9b8e82", fontWeight:400 }}>(LM shop / wholesale / retail)</span></label><input type="text" placeholder="Shop name / wholesaler" value={form.partyAC} onChange={F("partyAC")} /></div>
+
+            <div><label>SKU *</label><input type="text" value={form.sku} onChange={F("sku")} /></div>
+            <div className="full"><label>Item Name *</label><input type="text" value={form.name} onChange={F("name")} /></div>
+
+            {form.category === "Lenses" && <>
+              <div><label>SPH *</label><input type="text" placeholder="-2.50" value={form.sph} onChange={F("sph")} /></div>
+              <div><label>CYL *</label><input type="text" placeholder="-1.00" value={form.cyl} onChange={F("cyl")} /></div>
+              <div><label>Axis *</label><input type="text" placeholder="0–180" value={form.axis} onChange={F("axis")} /></div>
+              <div><label>Add *</label><input type="text" placeholder="+1.75" value={form.addPwr} onChange={F("addPwr")} /></div>
+              <div><label>Lens Type *</label><select value={form.lensType} onChange={F("lensType")}>{LENS_TYPES.map(l => <option key={l}>{l}</option>)}</select></div>
+            </>}
+
+            {form.category === "Frames" && <>
+              <div><label>Type of Frame *</label><select value={form.frameType} onChange={F("frameType")}>{FRAME_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
+              <div><label>Colour *</label><input type="text" placeholder="Black / Gold" value={form.color} onChange={F("color")} /></div>
+            </>}
+
+            {form.category === "Accessories" && <>
+              <div><label>Accessory Type *</label><select value={form.accessoryType} onChange={F("accessoryType")}>{ACCESSORY_TYPES.map(a => <option key={a}>{a}</option>)}</select></div>
+            </>}
+
+            <div><label>PO Price (₹) *</label><input type="number" value={form.poPrice} onChange={F("poPrice")} /></div>
+            <div><label>Selling Price (₹) *</label><input type="number" value={form.sellingPrice} onChange={F("sellingPrice")} /></div>
+            <div><label>Quantity *</label><input type="number" min={1} value={form.qty} onChange={F("qty")} /></div>
+
+            <div><label>Location</label><input type="text" placeholder="Shelf / Rack" value={form.location} onChange={F("location")} /></div>
+            <div><label>Box No</label><input type="text" placeholder="B-14" value={form.boxNo} onChange={F("boxNo")} /></div>
+            <div className="full"><label>Remarks</label><input type="text" value={form.remarks} onChange={F("remarks")} /></div>
+          </div>
+
+          {msg && <div style={{ marginTop:10, fontSize:12, color: msg.includes("saved") ? "#16a34a" : "#dc2626", background: msg.includes("saved") ? "#dcfce7" : "#fee2e2", padding:"8px 12px", borderRadius:8 }}>{msg}</div>}
+        </Modal>
+      )}
+    </div>
+  );
+}
 
 
 function InventorySection({ session, data, mutate, can, audit, onSync, syncing }) {
@@ -2464,13 +2669,11 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
   const [sortDir, setSortDir] = useState("asc");
   const FS_FIELDS = [
     { key:"sku", label:"SKU" }, { key:"name", label:"Name" }, { key:"category", label:"Category" }, { key:"brand", label:"Brand" },
-    { key:"qty", label:"Qty" }, { key:"sph", label:"SPH" }, { key:"cyl", label:"CYL" }, { key:"axis", label:"Axis" }, { key:"addPwr", label:"Add" },
-    { key:"frameType", label:"Frame Type" }, { key:"color", label:"Colour" }, { key:"accessoryType", label:"Accessory Type" },
-    { key:"lensType", label:"Lens Type" }, { key:"boxNo", label:"Box No" },
-    { key:"sellingPrice", label:"Selling Price" }, { key:"poPrice", label:"PO Price" }, { key:"location", label:"Location" }, { key:"branch", label:"Branch" },
+    { key:"qty", label:"Qty" }, { key:"boxNo", label:"Box No" },
+    { key:"location", label:"Location" }, { key:"branch", label:"Branch" },
   ];
   const [modal,  setModal]  = useState(null); const [msg, setMsg] = useState("");
-  const blank = { sku: "", name: "", category: "Frames", brand: "", qty: 0, reorder: 5, sellingPrice: 0, poPrice: 0, location: "", sph: "", cyl: "", axis: "", addPwr: "", lensType: "Single Vision", boxNo: "", frameType: "Full Rim", color: "", accessoryType: "Spects Box" };
+  const blank = { sku: "", name: "", category: "Frames", brand: "", qty: 0, reorder: 5, location: "", boxNo: "" };
   const [form, setForm] = useState(blank);
   const cats = ["All", "Frames", "Contact Lenses", "Lenses", "Accessories"];
   const FRAME_TYPES = ["Full Rim", "Half Rim", "Rimless", "Sports", "Kids"];
@@ -2482,19 +2685,16 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
   const open = s => { setForm(s ? { ...blank, ...s } : { ...blank, branch: isOwner ? "KKD_Main Branch" : branch }); setModal(s || "add"); };
   
   const save = () => {
-    const item = { ...form, qty: Number(form.qty), reorder: Number(form.reorder), sellingPrice: Number(form.sellingPrice), poPrice: Number(form.poPrice), price: Number(form.sellingPrice), cost: Number(form.poPrice) };
-    if (modal === "add") { mutate("stock", arr => [...arr, { id: uid(), ...item, createdBy: session.id, createdByName: session.name }], { id: uid(), ...item, createdBy: session.id, createdByName: session.name }); audit("ADD", { type: "stock", sku: item.sku }); }
+    const item = { ...form, qty: Number(form.qty), reorder: Number(form.reorder) };
+    if (modal === "add") { const rec = { id: uid(), ...item, createdBy: session.id, createdByName: session.name }; mutate("stock", arr => [...arr, rec], rec); audit("ADD", { type: "stock", sku: item.sku }); }
     else { mutate("stock", arr => arr.map(x => x.id === modal.id ? { ...modal, ...item } : x), { ...modal, ...item }); audit("EDIT", { type: "stock", id: modal.id }); }
     setModal(null);
   };
   
   const catTag = (c) => { const s = CAT_COLORS[c] || { bg:"#f0ede8", color:"#6b5e52" }; return <span className="tag" style={{ background:s.bg, color:s.color, fontWeight:700 }}>{c}</span>; };
   const detailText = (s) => {
-    if (s.category === "Lenses") return [s.sph && `SPH ${s.sph}`, s.cyl && `CYL ${s.cyl}`, s.axis && `Ax ${s.axis}`, s.addPwr && `Add ${s.addPwr}`].filter(Boolean).join(" · ") || (s.lensPower ? `Pwr ${s.lensPower}` : "—");
-    if (s.category === "Frames") return [s.frameType, s.color].filter(Boolean).join(" · ") || "—";
-    if (s.category === "Accessories") return s.accessoryType || "—";
-    if (s.category === "Contact Lenses") return s.lensPower || "—";
-    return "—";
+    const pos = [s.location && `📍${s.location}`, s.boxNo && `Box ${s.boxNo}`].filter(Boolean).join(" · ");
+    return pos || "—";
   };
   
   return (
@@ -2508,16 +2708,15 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
           <button className="btn btn-outline btn-sm" onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")} title="Toggle ascending / descending">{sortDir === "asc" ? "↑ Asc" : "↓ Desc"}</button>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{cats.map(c => <button key={c} className={`btn btn-sm ${cat === c ? "btn-dark" : "btn-outline"}`} onClick={() => setCat(c)}>{c}</button>)}</div>
         </div>
-        <table><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>Qty</th><th>Details</th><th>Box No</th><th>Selling ₹</th><th>PO ₹</th><th>Location</th><th>Branch</th><th>By</th>{(can("inventory", "edit") || isOwner) && <th></th>}</tr></thead>
+        <table><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>Brand</th><th>Qty</th><th>Reorder</th><th>Box No</th><th>Location</th><th>Branch</th><th>By</th>{(can("inventory", "edit") || isOwner) && <th></th>}</tr></thead>
           <tbody>{filtered.map(s => (
             <tr key={s.id}>
               <td style={{ fontFamily: "monospace", fontSize: 11 }}>{s.sku}</td><td style={{ fontWeight: 600 }}>{s.name}</td><td>{catTag(s.category)}</td>
+              <td>{s.brand || "—"}</td>
               <td><span style={{ fontWeight: 700, color: s.qty <= s.reorder ? "#dc2626" : "#16a34a" }}>{s.qty}</span></td>
-              <td style={{ fontFamily: "monospace", fontSize: 12 }}>{detailText(s)}</td>
+              <td style={{ color:"#9b8e82" }}>{s.reorder}</td>
               <td style={{ fontFamily: "monospace", fontSize: 12 }}>{s.boxNo || "—"}</td>
-              <td style={{ fontWeight: 700, color:"#166534" }}>{currency(s.sellingPrice ?? s.price)}</td>
-              <td style={{ color:"#9b8e82" }}>{currency(s.poPrice ?? s.cost)}</td>
-              <td style={{ fontSize: 12, color: "#9b8e82" }}>{s.location}</td>
+              <td style={{ fontSize: 12, color: "#9b8e82" }}>{s.location || "—"}</td>
               <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{s.branch}</span></td><td style={{ fontSize: 11, color: "#9b8e82" }}>{s.createdByName || "—"}</td>
               {(can("inventory", "edit") || isOwner) && (<td style={{ display: "flex", gap: 5 }}><button className="btn btn-outline btn-sm" onClick={() => open(s)}>Edit</button>{isOwner && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) { mutate("stock", arr => arr.filter(x => x.id !== s.id), null, s.id); audit("DELETE", { type: "stock", id: s.id }); } }}>✕</button>}</td>)}
             </tr>
@@ -2527,26 +2726,17 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
       {modal && (
         <Modal title={modal === "add" ? "Add Stock" : "Edit Stock"} onClose={() => setModal(null)} onSave={save} saveLabel="Save Inventory">
           <div className="form-grid">
-            <div><label>SKU</label><input type="text" value={form.sku} onChange={F("sku")} /></div><div><label>Category</label><select value={form.category} onChange={F("category")}>{["Frames", "Contact Lenses", "Lenses", "Accessories"].map(c => <option key={c}>{c}</option>)}</select></div>
+            <div><label>SKU</label><input type="text" value={form.sku} onChange={F("sku")} /></div>
+            <div><label>Category</label><select value={form.category} onChange={F("category")}>{["Frames", "Contact Lenses", "Lenses", "Accessories"].map(c => <option key={c}>{c}</option>)}</select></div>
             <div className="full"><label>Name</label><input type="text" value={form.name} onChange={F("name")} /></div>
-            <div><label>Brand</label><input type="text" value={form.brand} onChange={F("brand")} /></div><div><label>Location</label><input type="text" value={form.location} onChange={F("location")} /></div>
-            <div><label>Qty</label><input type="number" value={form.qty} onChange={F("qty")} /></div><div><label>Reorder At</label><input type="number" value={form.reorder} onChange={F("reorder")} /></div>
-            <div><label>Selling Price (₹)</label><input type="number" value={form.sellingPrice} onChange={F("sellingPrice")} /></div><div><label>Purchase Order Price (₹)</label><input type="number" value={form.poPrice} onChange={F("poPrice")} /></div>
-            {form.category === "Lenses" && <>
-              <div><label>SPH</label><input type="text" placeholder="-2.50" value={form.sph} onChange={F("sph")} /></div>
-              <div><label>CYL</label><input type="text" placeholder="-1.00" value={form.cyl} onChange={F("cyl")} /></div>
-              <div><label>Axis</label><input type="text" placeholder="0–180" value={form.axis} onChange={F("axis")} /></div>
-              <div><label>Add</label><input type="text" placeholder="+1.75" value={form.addPwr} onChange={F("addPwr")} /></div>
-              <div><label>Lens Type</label><select value={form.lensType} onChange={F("lensType")}>{LENS_TYPES.map(l => <option key={l}>{l}</option>)}</select></div>
-              <div><label>Box Number</label><input type="text" placeholder="B-14" value={form.boxNo} onChange={F("boxNo")} /></div>
-            </>}
-            {form.category === "Frames" && <>
-              <div><label>Type of Frame</label><select value={form.frameType} onChange={F("frameType")}>{FRAME_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
-              <div><label>Colour</label><input type="text" placeholder="e.g. Black / Gold" value={form.color} onChange={F("color")} /></div>
-            </>}
-            {form.category === "Accessories" && <>
-              <div><label>Accessory Type</label><select value={form.accessoryType} onChange={F("accessoryType")}>{ACCESSORY_TYPES.map(a => <option key={a}>{a}</option>)}</select></div>
-            </>}
+            <div><label>Brand</label><input type="text" value={form.brand} onChange={F("brand")} /></div>
+            <div><label>Location</label><input type="text" value={form.location} onChange={F("location")} /></div>
+            <div><label>Qty</label><input type="number" value={form.qty} onChange={F("qty")} /></div>
+            <div><label>Reorder At</label><input type="number" value={form.reorder} onChange={F("reorder")} /></div>
+            <div><label>Box Number</label><input type="text" placeholder="B-14" value={form.boxNo} onChange={F("boxNo")} /></div>
+          </div>
+          <div style={{ marginTop:14, padding:"10px 14px", background:"#fef3c7", borderRadius:8, fontSize:12, color:"#92400e" }}>
+            ℹ Pricing, prescription power (SPH/CYL/Axis/Add), frame type, colour and accessory type are now managed in <b>Purchase Orders</b>.
           </div>
         </Modal>
       )}
