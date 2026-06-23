@@ -94,7 +94,9 @@ async function startRealtime(url, key, onChange) {
   if (_sbRealtimeKey === sig && _sbRealtimeChannel) return; // already connected
   stopRealtime();
   try {
-    const { createClient } = await import("@supabase/supabase-js");
+    // Loaded from a CDN at runtime (not bundled) so the build doesn't require
+    // "@supabase/supabase-js" to be installed as an npm dependency.
+    const { createClient } = await import(/* @vite-ignore */ "https://esm.sh/@supabase/supabase-js@2");
     _sbRealtimeClient = createClient(url.replace(/\/$/, ""), key, {
       auth: { persistSession: false, autoRefreshToken: false },
       realtime: { params: { eventsPerSecond: 10 } },
