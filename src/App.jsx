@@ -512,7 +512,7 @@ const LS = {
   getSess: ()    => { try { return JSON.parse(sessionStorage.getItem("opti_sess")); } catch { return null; } },
 };
 
-const SEED_DATA = { patients: [], patientBill: [], optometrist: [], opticals: [], stock: [], invoices: [], tasks: [], reminders: [], counselling: [] };
+const SEED_DATA = { patients: [], patientBill: [], optometrist: [], opticals: [], lensSale: [], stock: [], invoices: [], tasks: [], reminders: [], counselling: [] };
 const safeArray = (arr, fallback = []) => Array.isArray(arr) ? arr : fallback;
 
 // ── Dashboard CMS defaults (editable in DashboardCMS view) ──────────────
@@ -870,6 +870,7 @@ export default function App() {
       {view === "patientBill"  && <PatientBillSection  {...sharedProps} highlightToday={navToday} />}
       {view === "optometrist"  && <OptometristSection  {...sharedProps} />}
       {view === "opticals"     && <OpticalsSection     {...sharedProps} />}
+      {view === "lensSale"     && <LensSaleSection     {...sharedProps} />}
       {view === "opticalsStatus" && <OpticalsStatusSection {...sharedProps} />}
       {view === "inventory"    && <InventorySection    {...sharedProps} />}
       {view === "invoices"     && <InvoicesSection     {...sharedProps} />}
@@ -982,6 +983,7 @@ function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastS
     { id: "patientBill",  label: "K Sheet Entry",    icon: "🧾", show: can("patientBill", "view") },
     
     { id: "opticals",     label: "Opticals",         icon: "🔭", show: can("opticals", "view") },
+    { id: "lensSale",     label: "Lens Sale",        icon: "🔍", show: can("opticals", "view") },
     { id: "opticalsStatus",label: "Opticals Status", icon: "📦", show: can("opticals", "view") },
     { id: "inventory",    label: "Inventory",        icon: "▦", show: can("inventory", "view") },
     { id: "invoices",     label: "Sales & Invoices", icon: "◆", show: can("invoices", "view") },
@@ -2304,6 +2306,151 @@ function OpticalsStatusSection({ session, data, mutate, can, audit, onSync, sync
   );
 }
 
+// ── Lens Sale: bill for lens sold against an opticals order ──
+function LensSaleSection({ session, data, mutate, can, audit, onSync, syncing }) {
+  const isOwner = session.role === "owner";
+  const branch  = session.branch || "KKD_Main Branch";
+  const rows    = safeArray(data.lensSale).filter(x => (isOwner || x.branch === branch));
+  const lensStock = safeArray(data.stock).filter(s => s.category === "Lenses" && (isOwner || s.branch === branch));
+
+  const [modal, setModal] = useState(false);
+  const [msg, setMsg] = useState("");
+  const blankLine = () => ({ id: uid(), code:"", name:"", unit:"PCS", dia:"", eye:"RE", sph:"", cyl:"", axis:"", addPwr:"", qty:1, price:0, disPct:0 });
+  const blank = () => ({
+    billSeries:"SALE-L", billNo: `${(rows.length||0)+1}/${new Date().getFullYear()}`,
+    date: todayStr(), billType:"INCLUSIVE GST(L)", godown:"MC 1", bookedBy: session.name,
+    partyAC:"CASH", address:"", contactNo:"", stateCode:"CG",
+    mrNo:"", patientId:"",
+    items:[blankLine()], remarks:"", deliveryDate: todayStr(),
+  });
+  const [form, setForm] = useState(blank());
+
+  const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  const updLine = (i, k, v) => setForm(f => ({ ...f, items: f.items.map((l,idx) => idx===i ? { ...l, [k]: v } : l) }));
+  const addLine = () => setForm(f => ({ ...f, items: [...f.items, blankLine()] }));
+  const delLine = (i) => setForm(f => ({ ...f, items: f.items.filter((_,idx) => idx!==i) }));
+
+  const pickLens = (i, sku) => {
+    const s = lensStock.find(x => x.sku === sku); if (!s) return;
+    updLine(i, "code", s.sku);
+    setForm(f => ({ ...f, items: f.items.map((l,idx) => idx===i ? { ...l, code:s.sku, name:s.name, sph:s.sph||"", cyl:s.cyl||"", axis:s.axis||"", addPwr:s.addPwr||"", price: Number(s.sellingPrice||s.price||0) } : l) }));
+  };
+
+  const lookupPatient = () => {
+    const q = (form._lookup||"").trim(); if (!q) return;
+    const p = safeArray(data.patients).find(p => p.mrNo?.toLowerCase()===q.toLowerCase() || p.patientId?.toLowerCase()===q.toLowerCase() || p.phone===q);
+    if (!p) { setMsg("No patient found."); return; }
+    setForm(f => ({ ...f, mrNo:p.mrNo||"", patientId:p.patientId||"", partyAC:p.name, address:p.address||"", contactNo:p.phone||"" }));
+    setMsg(`✓ Loaded ${p.name}`);
+  };
+
+  const lineTotal = l => Math.max(0, (Number(l.qty)||0) * (Number(l.price)||0) * (1 - (Number(l.disPct)||0)/100));
+  const grandTotal = form.items.reduce((s,l) => s + lineTotal(l), 0);
+  const taxable = form.billType?.includes("INCLUSIVE") ? grandTotal/1.12 : grandTotal;
+
+  const submit = () => {
+    if (!form.partyAC?.trim()) { setMsg("Party A/C required."); return; }
+    if (!form.items.some(l => l.name)) { setMsg("Add at least one lens line."); return; }
+    const record = { id: uid(), branch: isOwner ? "KKD_Main Branch" : branch, ...form, grandTotal, taxable, createdBy: session.id, createdByName: session.name, createdAt: ts(), timestamp: ts() };
+    mutate("lensSale", arr => [...arr, record], record);
+    audit("ADD", { type:"lensSale", billNo: record.billNo });
+    setModal(false); setMsg("Lens Sale saved.");
+  };
+
+  return (
+    <div>
+      <SectionHeader title="Lens Sale" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({id,items,...r})=>({...r, items: JSON.stringify(items)})),"lens_sale.csv")} onAdd={can("opticals","add") ? () => { setForm(blank()); setMsg(""); setModal(true); } : null} msg={msg} />
+      <div className="card" style={{ overflowX:"auto" }}>
+        <table>
+          <thead><tr><th>Bill No</th><th>Date</th><th>Party</th><th>MR No</th><th>Items</th><th>Total ₹</th><th>By</th><th>Branch</th></tr></thead>
+          <tbody>{rows.map(r => (
+            <tr key={r.id}>
+              <td style={{ fontFamily:"monospace", fontWeight:700, color:"#1d4ed8" }}>{r.billSeries} · {r.billNo}</td>
+              <td>{r.date}</td><td style={{ fontWeight:600 }}>{r.partyAC}</td>
+              <td style={{ fontFamily:"monospace" }}>{r.mrNo||"—"}</td>
+              <td style={{ fontSize:12 }}>{safeArray(r.items).map(i => `${i.name}(${i.eye} ${i.sph||""}/${i.cyl||""}×${i.axis||""})`).join(", ")}</td>
+              <td style={{ fontWeight:700, color:"#166534" }}>{currency(r.grandTotal)}</td>
+              <td style={{ fontSize:11, color:"#9b8e82" }}>{r.createdByName||"—"}</td>
+              <td><span className="tag" style={{ background:"#f0ede8", color:"#6b5e52" }}>{r.branch}</span></td>
+            </tr>
+          ))}</tbody>
+        </table>
+        {rows.length===0 && <div style={{ color:"#9b8e82", fontSize:13, padding:20, textAlign:"center" }}>No lens sale bills yet.</div>}
+      </div>
+      {modal && (
+        <Modal title="Lens Sale Entry" onClose={()=>setModal(false)} onSave={submit} saveLabel="Save Bill" wide>
+          <div style={{ background:"linear-gradient(90deg,#1d4ed8,#3b82f6)", color:"#fff", padding:"10px 14px", borderRadius:10, marginBottom:14, fontWeight:700 }}>Lens Sale</div>
+
+          <div style={{ background:"#f0ede8", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
+            <label style={{ fontWeight:700 }}>🔗 Link to Patient (MR / Patient ID / Phone)</label>
+            <div style={{ display:"flex", gap:8, marginTop:6 }}>
+              <input type="text" value={form._lookup||""} onChange={e=>setForm(f=>({...f,_lookup:e.target.value}))} placeholder="MR-001 / PT-0001 / phone" style={{ flex:1 }} />
+              <button className="btn btn-dark btn-sm" onClick={lookupPatient}>Look Up & Fill</button>
+            </div>
+          </div>
+
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14, marginBottom:14 }}>
+            <div><label>Bill Series</label><input type="text" value={form.billSeries} onChange={F("billSeries")} /></div>
+            <div><label>Bill No</label><input type="text" value={form.billNo} onChange={F("billNo")} /></div>
+            <div><label>Date</label><input type="date" value={form.date} onChange={F("date")} /></div>
+            <div><label>Bill Type</label><select value={form.billType} onChange={F("billType")}>{["INCLUSIVE GST(L)","EXCLUSIVE GST(L)","NON-GST"].map(t=><option key={t}>{t}</option>)}</select></div>
+            <div><label>Godown</label><input type="text" value={form.godown} onChange={F("godown")} /></div>
+            <div><label>Booked By</label><input type="text" value={form.bookedBy} onChange={F("bookedBy")} /></div>
+            <div><label>Party A/C</label><input type="text" value={form.partyAC} onChange={F("partyAC")} /></div>
+            <div style={{ gridColumn:"span 2" }}><label>Address</label><input type="text" value={form.address} onChange={F("address")} /></div>
+            <div><label>Contact No</label><input type="text" value={form.contactNo} onChange={F("contactNo")} /></div>
+            <div><label>State Code</label><input type="text" value={form.stateCode} onChange={F("stateCode")} /></div>
+            <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div>
+          </div>
+
+          <div style={{ fontWeight:700, marginBottom:6, color:"#1d4ed8" }}>Particular (Lens lookup → Inventory · Lenses)</div>
+          <div style={{ overflowX:"auto", border:"1px solid #e8e2db", borderRadius:10 }}>
+            <table style={{ fontSize:12 }}>
+              <thead style={{ background:"#fafafa" }}><tr>
+                <th>SN</th><th>Code</th><th>Item Name</th><th>Unit</th><th>DIA</th><th>Eye</th><th>SPH</th><th>CYL</th><th>Axis</th><th>Add</th><th>Qty</th><th>Price</th><th>Dis%</th><th>Dis Amt</th><th>Total</th><th></th>
+              </tr></thead>
+              <tbody>{form.items.map((l,i) => {
+                const lt = lineTotal(l); const dis = (Number(l.qty)||0)*(Number(l.price)||0)*((Number(l.disPct)||0)/100);
+                return (<tr key={l.id}>
+                  <td>{i+1}</td>
+                  <td><select value={l.code} onChange={e=>pickLens(i,e.target.value)} style={{ minWidth:90, padding:"4px" }}><option value="">—</option>{lensStock.map(s=><option key={s.sku} value={s.sku}>{s.sku}</option>)}</select></td>
+                  <td><input type="text" value={l.name} onChange={e=>updLine(i,"name",e.target.value)} style={{ minWidth:140 }} /></td>
+                  <td><input type="text" value={l.unit} onChange={e=>updLine(i,"unit",e.target.value)} style={{ width:60 }} /></td>
+                  <td><input type="text" value={l.dia} onChange={e=>updLine(i,"dia",e.target.value)} style={{ width:50 }} /></td>
+                  <td><select value={l.eye} onChange={e=>updLine(i,"eye",e.target.value)} style={{ width:60 }}>{["RE","LE","RL","BE"].map(x=><option key={x}>{x}</option>)}</select></td>
+                  <td><input type="text" value={l.sph} onChange={e=>updLine(i,"sph",e.target.value)} style={{ width:55 }} /></td>
+                  <td><input type="text" value={l.cyl} onChange={e=>updLine(i,"cyl",e.target.value)} style={{ width:55 }} /></td>
+                  <td><input type="text" value={l.axis} onChange={e=>updLine(i,"axis",e.target.value)} style={{ width:55 }} /></td>
+                  <td><input type="text" value={l.addPwr} onChange={e=>updLine(i,"addPwr",e.target.value)} style={{ width:55 }} /></td>
+                  <td><input type="number" value={l.qty} onChange={e=>updLine(i,"qty",e.target.value)} style={{ width:55 }} /></td>
+                  <td><input type="number" value={l.price} onChange={e=>updLine(i,"price",e.target.value)} style={{ width:75 }} /></td>
+                  <td><input type="number" value={l.disPct} onChange={e=>updLine(i,"disPct",e.target.value)} style={{ width:55 }} /></td>
+                  <td style={{ fontFamily:"monospace" }}>{dis.toFixed(2)}</td>
+                  <td style={{ fontFamily:"monospace", fontWeight:700, color:"#166534" }}>{lt.toFixed(2)}</td>
+                  <td><button className="btn btn-danger btn-sm" onClick={()=>delLine(i)}>✕</button></td>
+                </tr>);
+              })}</tbody>
+            </table>
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between", marginTop:10 }}>
+            <button className="btn btn-outline btn-sm" onClick={addLine}>+ Add Line</button>
+            <div style={{ display:"flex", gap:18, fontWeight:700 }}>
+              <div>Taxable: <span style={{ color:"#1d4ed8" }}>{currency(taxable)}</span></div>
+              <div>Gross: <span style={{ color:"#166534" }}>{currency(grandTotal)}</span></div>
+            </div>
+          </div>
+
+          <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:14, marginTop:14 }}>
+            <div><label>Remarks</label><input type="text" value={form.remarks} onChange={F("remarks")} /></div>
+            <div><label>Del. Date</label><input type="date" value={form.deliveryDate} onChange={F("deliveryDate")} /></div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+
 
 function InventorySection({ session, data, mutate, can, audit, onSync, syncing }) {
   const isOwner = session.role === "owner";
@@ -2315,23 +2462,37 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
   const [sortDir, setSortDir] = useState("asc");
   const FS_FIELDS = [
     { key:"sku", label:"SKU" }, { key:"name", label:"Name" }, { key:"category", label:"Category" }, { key:"brand", label:"Brand" },
-    { key:"qty", label:"Qty" }, { key:"lensPower", label:"Lens Power" }, { key:"lensType", label:"Lens Type" }, { key:"boxNo", label:"Box No" },
-    { key:"price", label:"Price" }, { key:"location", label:"Location" }, { key:"branch", label:"Branch" },
+    { key:"qty", label:"Qty" }, { key:"sph", label:"SPH" }, { key:"cyl", label:"CYL" }, { key:"axis", label:"Axis" }, { key:"addPwr", label:"Add" },
+    { key:"frameType", label:"Frame Type" }, { key:"color", label:"Colour" }, { key:"accessoryType", label:"Accessory Type" },
+    { key:"lensType", label:"Lens Type" }, { key:"boxNo", label:"Box No" },
+    { key:"sellingPrice", label:"Selling Price" }, { key:"poPrice", label:"PO Price" }, { key:"location", label:"Location" }, { key:"branch", label:"Branch" },
   ];
   const [modal,  setModal]  = useState(null); const [msg, setMsg] = useState("");
-  const blank = { sku: "", name: "", category: "Frames", brand: "", qty: 0, reorder: 5, cost: 0, price: 0, location: "", lensPower: "", lensType: "Single Vision", boxNo: "" };
+  const blank = { sku: "", name: "", category: "Frames", brand: "", qty: 0, reorder: 5, sellingPrice: 0, poPrice: 0, location: "", sph: "", cyl: "", axis: "", addPwr: "", lensType: "Single Vision", boxNo: "", frameType: "Full Rim", color: "", accessoryType: "Spects Box" };
   const [form, setForm] = useState(blank);
   const cats = ["All", "Frames", "Contact Lenses", "Lenses", "Accessories"];
+  const FRAME_TYPES = ["Full Rim", "Half Rim", "Rimless", "Sports", "Kids"];
+  const ACCESSORY_TYPES = ["Spects Box", "Cloths", "Lens Cleaner Spray"];
+  const CAT_COLORS = { Frames: { bg:"#dbeafe", color:"#1d4ed8" }, "Contact Lenses": { bg:"#fae8ff", color:"#86198f" }, Lenses: { bg:"#dcfce7", color:"#166534" }, Accessories: { bg:"#fef3c7", color:"#92400e" } };
   const filtered = sortRows(rows.filter(s => (cat === "All" || s.category === cat) && matchSearch(s, search, FS_FIELDS, filterField)), sortKey, sortDir);
   const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
   
-  const open = s => { setForm(s ? { ...s } : { ...blank, branch: isOwner ? "KKD_Main Branch" : branch }); setModal(s || "add"); };
+  const open = s => { setForm(s ? { ...blank, ...s } : { ...blank, branch: isOwner ? "KKD_Main Branch" : branch }); setModal(s || "add"); };
   
   const save = () => {
-    const item = { ...form, qty: Number(form.qty), reorder: Number(form.reorder), cost: Number(form.cost), price: Number(form.price) };
+    const item = { ...form, qty: Number(form.qty), reorder: Number(form.reorder), sellingPrice: Number(form.sellingPrice), poPrice: Number(form.poPrice), price: Number(form.sellingPrice), cost: Number(form.poPrice) };
     if (modal === "add") { mutate("stock", arr => [...arr, { id: uid(), ...item, createdBy: session.id, createdByName: session.name }], { id: uid(), ...item, createdBy: session.id, createdByName: session.name }); audit("ADD", { type: "stock", sku: item.sku }); }
     else { mutate("stock", arr => arr.map(x => x.id === modal.id ? { ...modal, ...item } : x), { ...modal, ...item }); audit("EDIT", { type: "stock", id: modal.id }); }
     setModal(null);
+  };
+  
+  const catTag = (c) => { const s = CAT_COLORS[c] || { bg:"#f0ede8", color:"#6b5e52" }; return <span className="tag" style={{ background:s.bg, color:s.color, fontWeight:700 }}>{c}</span>; };
+  const detailText = (s) => {
+    if (s.category === "Lenses") return [s.sph && `SPH ${s.sph}`, s.cyl && `CYL ${s.cyl}`, s.axis && `Ax ${s.axis}`, s.addPwr && `Add ${s.addPwr}`].filter(Boolean).join(" · ") || (s.lensPower ? `Pwr ${s.lensPower}` : "—");
+    if (s.category === "Frames") return [s.frameType, s.color].filter(Boolean).join(" · ") || "—";
+    if (s.category === "Accessories") return s.accessoryType || "—";
+    if (s.category === "Contact Lenses") return s.lensPower || "—";
+    return "—";
   };
   
   return (
@@ -2345,13 +2506,16 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
           <button className="btn btn-outline btn-sm" onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")} title="Toggle ascending / descending">{sortDir === "asc" ? "↑ Asc" : "↓ Desc"}</button>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{cats.map(c => <button key={c} className={`btn btn-sm ${cat === c ? "btn-dark" : "btn-outline"}`} onClick={() => setCat(c)}>{c}</button>)}</div>
         </div>
-        <table><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>Qty</th><th>Lens Power</th><th>Lens Type</th><th>Box No</th><th>Price</th><th>Location</th><th>Branch</th><th>By</th>{(can("inventory", "edit") || isOwner) && <th></th>}</tr></thead>
+        <table><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>Qty</th><th>Details</th><th>Box No</th><th>Selling ₹</th><th>PO ₹</th><th>Location</th><th>Branch</th><th>By</th>{(can("inventory", "edit") || isOwner) && <th></th>}</tr></thead>
           <tbody>{filtered.map(s => (
             <tr key={s.id}>
-              <td style={{ fontFamily: "monospace", fontSize: 11 }}>{s.sku}</td><td style={{ fontWeight: 600 }}>{s.name}</td><td><span className="tag tag-blue">{s.category}</span></td>
-              <td><span style={{ fontWeight: 700, color: s.qty <= s.reorder ? "#dc2626" : "#16a34a" }}>{s.qty}</span></td><td style={{ fontFamily: "monospace" }}>{s.lensPower || "—"}</td>
-              <td>{s.lensType && s.category === "Lenses" ? <span className="tag tag-blue">{s.lensType}</span> : "—"}</td><td style={{ fontFamily: "monospace", fontSize: 12 }}>{s.boxNo || "—"}</td>
-              <td style={{ fontWeight: 600 }}>{currency(s.price)}</td><td style={{ fontSize: 12, color: "#9b8e82" }}>{s.location}</td>
+              <td style={{ fontFamily: "monospace", fontSize: 11 }}>{s.sku}</td><td style={{ fontWeight: 600 }}>{s.name}</td><td>{catTag(s.category)}</td>
+              <td><span style={{ fontWeight: 700, color: s.qty <= s.reorder ? "#dc2626" : "#16a34a" }}>{s.qty}</span></td>
+              <td style={{ fontFamily: "monospace", fontSize: 12 }}>{detailText(s)}</td>
+              <td style={{ fontFamily: "monospace", fontSize: 12 }}>{s.boxNo || "—"}</td>
+              <td style={{ fontWeight: 700, color:"#166534" }}>{currency(s.sellingPrice ?? s.price)}</td>
+              <td style={{ color:"#9b8e82" }}>{currency(s.poPrice ?? s.cost)}</td>
+              <td style={{ fontSize: 12, color: "#9b8e82" }}>{s.location}</td>
               <td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{s.branch}</span></td><td style={{ fontSize: 11, color: "#9b8e82" }}>{s.createdByName || "—"}</td>
               {(can("inventory", "edit") || isOwner) && (<td style={{ display: "flex", gap: 5 }}><button className="btn btn-outline btn-sm" onClick={() => open(s)}>Edit</button>{isOwner && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) { mutate("stock", arr => arr.filter(x => x.id !== s.id), null, s.id); audit("DELETE", { type: "stock", id: s.id }); } }}>✕</button>}</td>)}
             </tr>
@@ -2365,8 +2529,22 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
             <div className="full"><label>Name</label><input type="text" value={form.name} onChange={F("name")} /></div>
             <div><label>Brand</label><input type="text" value={form.brand} onChange={F("brand")} /></div><div><label>Location</label><input type="text" value={form.location} onChange={F("location")} /></div>
             <div><label>Qty</label><input type="number" value={form.qty} onChange={F("qty")} /></div><div><label>Reorder At</label><input type="number" value={form.reorder} onChange={F("reorder")} /></div>
-            <div><label>Cost (₹)</label><input type="number" value={form.cost} onChange={F("cost")} /></div><div><label>Price (₹)</label><input type="number" value={form.price} onChange={F("price")} /></div>
-            {form.category === "Lenses" && <><div><label>Lens Power</label><input type="text" placeholder="-2.50" value={form.lensPower} onChange={F("lensPower")} /></div><div><label>Lens Type</label><select value={form.lensType} onChange={F("lensType")}>{LENS_TYPES.map(l => <option key={l}>{l}</option>)}</select></div><div><label>Box Number</label><input type="text" placeholder="B-14" value={form.boxNo} onChange={F("boxNo")} /></div></>}
+            <div><label>Selling Price (₹)</label><input type="number" value={form.sellingPrice} onChange={F("sellingPrice")} /></div><div><label>Purchase Order Price (₹)</label><input type="number" value={form.poPrice} onChange={F("poPrice")} /></div>
+            {form.category === "Lenses" && <>
+              <div><label>SPH</label><input type="text" placeholder="-2.50" value={form.sph} onChange={F("sph")} /></div>
+              <div><label>CYL</label><input type="text" placeholder="-1.00" value={form.cyl} onChange={F("cyl")} /></div>
+              <div><label>Axis</label><input type="text" placeholder="0–180" value={form.axis} onChange={F("axis")} /></div>
+              <div><label>Add</label><input type="text" placeholder="+1.75" value={form.addPwr} onChange={F("addPwr")} /></div>
+              <div><label>Lens Type</label><select value={form.lensType} onChange={F("lensType")}>{LENS_TYPES.map(l => <option key={l}>{l}</option>)}</select></div>
+              <div><label>Box Number</label><input type="text" placeholder="B-14" value={form.boxNo} onChange={F("boxNo")} /></div>
+            </>}
+            {form.category === "Frames" && <>
+              <div><label>Type of Frame</label><select value={form.frameType} onChange={F("frameType")}>{FRAME_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
+              <div><label>Colour</label><input type="text" placeholder="e.g. Black / Gold" value={form.color} onChange={F("color")} /></div>
+            </>}
+            {form.category === "Accessories" && <>
+              <div><label>Accessory Type</label><select value={form.accessoryType} onChange={F("accessoryType")}>{ACCESSORY_TYPES.map(a => <option key={a}>{a}</option>)}</select></div>
+            </>}
           </div>
         </Modal>
       )}
