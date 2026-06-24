@@ -543,7 +543,36 @@ const DESIGNATIONS   = ["FRONT DESK STAFF", "OPTOM", "OPTOMOLOGIST", "MD", "COUN
 // Privileged designations: equal to MD/Owner access (Counselling Room excludes Manage Staff + Audit Log)
 const hasMDAccess   = (s) => !!s && (s.role === "owner" || s.designation === "MD" || s.designation === "COUNSELLING ROOM");
 const hasOwnerOrMD  = (s) => !!s && (s.role === "owner" || s.designation === "MD");
+// Cloud Sync access: only MD and DEVELOPER (plus owner role). Counselling Room and others excluded.
+const hasCloudAccess = (s) => !!s && (s.role === "owner" || s.designation === "MD" || s.designation === "DEVELOPER");
 const isCounselling = (s) => !!s && s.designation === "COUNSELLING ROOM";
+
+// Secret-input guard: hides text, blocks copy/cut/select-all/context-menu, allows backspace and ctrl+v paste.
+const SECRET_INPUT_PROPS = {
+  type: "password",
+  autoComplete: "new-password",
+  spellCheck: false,
+  autoCorrect: "off",
+  autoCapitalize: "off",
+  onCopy: (e) => { e.preventDefault(); },
+  onCut:  (e) => { e.preventDefault(); },
+  onContextMenu: (e) => { e.preventDefault(); },
+  onDragStart: (e) => { e.preventDefault(); },
+  onKeyDown: (e) => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod) {
+      const k = (e.key || "").toLowerCase();
+      // Block Ctrl/Cmd + C / X / A / Insert. Allow V (paste).
+      if (k === "c" || k === "x" || k === "a" || k === "insert") {
+        e.preventDefault();
+      }
+    }
+    if (e.shiftKey && (e.key === "Delete" || e.key === "Insert")) {
+      e.preventDefault();
+    }
+  },
+  style: { fontSize: 12, WebkitTextSecurity: "disc" },
+};
 
 const CS = { background: "#f0ede8", padding: "2px 6px", borderRadius: 4, fontFamily: "monospace", fontSize: 12 };
 
@@ -1432,7 +1461,7 @@ export default function App() {
       {view === "auditlog"     && hasOwnerOrMD(session) && <AuditLogSection auditLog={auditLog} accounts={accounts} />}
       {view === "dashbuilder"  && hasMDAccess(session) && <DashboardBuilder fieldVis={fieldVis} setFieldVis={setFieldVis} accounts={accounts} setAccounts={updateAccounts} />}
       {view === "users"        && hasOwnerOrMD(session) && <UsersSection accounts={accounts} setAccounts={updateAccounts} audit={audit} />}
-      {view === "supabase"     && hasMDAccess(session) && <SupabaseSection sbCreds={sbCreds} sbStatus={sbStatus} onConnect={connectSupabase} onSync={syncFromSupabase} onPush={pushToSupabase} />}
+      {view === "supabase"     && hasCloudAccess(session) && <SupabaseSection sbCreds={sbCreds} sbStatus={sbStatus} onConnect={connectSupabase} onSync={syncFromSupabase} onPush={pushToSupabase} />}
       {view === "launchguide"  && <LaunchGuide />}
       <ReminderAlerts session={session} data={data} setView={setViewNav} />
     </Shell>
@@ -1496,8 +1525,8 @@ function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
           {showCloud && (
             <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
               <div style={{ fontSize: 11, color: "#9b8e82" }}>Enter your Supabase credentials to sync data.</div>
-              <input type="text" placeholder="https://xxxx.supabase.co" value={cloudUrl} onChange={e => setCloudUrl(e.target.value)} style={{ fontSize: 12 }} />
-              <input type="password" placeholder="anon public key (eyJ…)" value={cloudKey} onChange={e => setCloudKey(e.target.value)} style={{ fontSize: 12 }} />
+              <input {...SECRET_INPUT_PROPS} placeholder="https://xxxx.supabase.co" value={cloudUrl} onChange={e => setCloudUrl(e.target.value)} />
+              <input {...SECRET_INPUT_PROPS} placeholder="anon public key (eyJ…)" value={cloudKey} onChange={e => setCloudKey(e.target.value)} />
               <button className="btn btn-dark btn-sm" onClick={connectCloud} disabled={loading}>{loading ? "Connecting…" : "Connect to Cloud"}</button>
               {cloudMsg && <div style={{ fontSize: 11, color: cloudMsg.includes("✓") ? "#16a34a" : "#dc2626" }}>{cloudMsg}</div>}
             </div>
@@ -1551,7 +1580,7 @@ function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastS
     { id: "dashbuilder", label: "Dashboard Builder",icon: "🏗", show: hasMDAccess(session) },
     { id: "dashcms",     label: "Dashboard CMS",    icon: "🎨", show: hasMDAccess(session) },
     { id: "users",       label: "Manage Staff",     icon: "👥", show: hasOwnerOrMD(session) },
-    { id: "supabase",    label: "Cloud Sync",       icon: "☁", show: hasMDAccess(session), badge: sbStatus === "error" ? "!" : 0, badgeColor: "#dc2626" },
+    { id: "supabase",    label: "Cloud Sync",       icon: "☁", show: hasCloudAccess(session), badge: sbStatus === "error" ? "!" : 0, badgeColor: "#dc2626" },
     { id: "launchguide", label: "Launch Guide",     icon: "🚀", show: true },
   ];
   const sbDot = { ok: "#16a34a", error: "#dc2626", testing: "#d97706", pushing: "#d97706", syncing: "#d97706" }[sbStatus] || "#9b8e82";
@@ -3642,7 +3671,7 @@ function SupabaseSection({ sbCreds, sbStatus, onConnect, onSync, onPush }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 20, marginBottom: 20 }}>
         <div className="card">
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontSize: 13 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: statusColor[sbStatus] || "#9b8e82", display: "inline-block" }} />Status: <strong>{sbStatus}</strong></div>
-          <div style={{ display: "grid", gap: 12 }}><div><label>Supabase URL</label><input type="text" value={url} onChange={e => setUrl(e.target.value)} /></div><div><label>Anon Key</label><input type="text" value={key} onChange={e => setKey(e.target.value)} /></div></div>
+          <div style={{ display: "grid", gap: 12 }}><div><label>Supabase URL</label><input {...SECRET_INPUT_PROPS} value={url} onChange={e => setUrl(e.target.value)} /></div><div><label>Anon Key</label><input {...SECRET_INPUT_PROPS} value={key} onChange={e => setKey(e.target.value)} /></div></div>
           {msg && <div style={{ marginTop: 10, fontSize: 13 }}>{msg}</div>}
           <div style={{ display: "flex", gap: 8, marginTop: 14 }}><button className="btn btn-dark btn-sm" onClick={connect}>🔌 Connect & Test</button><button className="btn btn-outline btn-sm" onClick={onSync}>⬇ Pull from DB</button><button className="btn btn-outline btn-sm" onClick={onPush}>⬆ Push to DB</button></div>
         </div>
