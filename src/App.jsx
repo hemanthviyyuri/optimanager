@@ -100,14 +100,268 @@ function MarkdownInvoice({ md }) {
   return <div className="invoice-preview" style={{ fontFamily:"'Inter',sans-serif", color:"#2c1810" }}>{out}</div>;
 }
 
-function InvoiceTemplateEditor({ row, onClose }) {
-  const [tpl, setTpl] = useState("A");
+// ===== Sri Surya Clinical (Dual Copy) — editable template config =====
+const DEFAULT_CLINIC_SETTINGS = {
+  shopName: "SRI SURYA EYE CARE",
+  tagline: "Contact Lens And Vision Clinic",
+  address: "Ground Floor, Arman Plaza, Maharaja Chowk, Durg (C.G) Pin-491001, Front of Bank of Baroda",
+  phone: "8871439741",
+  gstin: "",
+  logo: BRAND_LOGO,
+  terms: [
+    "Working hours - Open All Days 11:00 am to 9:00 pm.",
+    "(a) Order cannot be cancelled / revoked or transferred.",
+    "(b) No refund under any circumstances.",
+    "We do not guarantee any metallic frames / polish / colour.",
+    "Your material repaired only at your risk.",
+    "Anti-Reflection coating is vapour coating which we don't guarantee.",
+    "SRC denotes scratch resistant coating and not scratch proof.",
+    "Order for a half pair in photo chromatic lenses does not match exactly.",
+  ],
+  sections: { rxTable: true, pd: true, refBy: true, lensType: true, bookedBy: true, paymentMode: true, terms: true, balance: true, discount: true },
+  fontSize: 11,
+  paperSize: "A4",          // "A4" | "Thermal80"
+  copies: "dual",           // "dual" | "single"
+};
+const SS_SETTINGS_KEY = "ss_invoice_settings_v1";
+function loadClinicSettings() {
+  try {
+    const raw = localStorage.getItem(SS_SETTINGS_KEY);
+    if (!raw) return DEFAULT_CLINIC_SETTINGS;
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_CLINIC_SETTINGS,
+      ...parsed,
+      sections: { ...DEFAULT_CLINIC_SETTINGS.sections, ...(parsed.sections || {}) },
+      terms: Array.isArray(parsed.terms) ? parsed.terms : DEFAULT_CLINIC_SETTINGS.terms,
+    };
+  } catch { return DEFAULT_CLINIC_SETTINGS; }
+}
+function saveClinicSettings(s) {
+  try { localStorage.setItem(SS_SETTINGS_KEY, JSON.stringify(s)); } catch {}
+}
+
+// Build Rx + lookup context from the surrounding app data.
+function buildInvoiceLookup(row, allData) {
+  const safe = (v) => (v === undefined || v === null ? "" : String(v));
+  const mr  = safe(row.mrNo).toLowerCase();
+  const pid = safe(row.patientId).toLowerCase();
+  const phn = safe(row.phone);
+  const nm  = safe(row.patientName || row.name).toLowerCase();
+  const match = (r) =>
+    (mr && safe(r.mrNo).toLowerCase() === mr) ||
+    (pid && safe(r.patientId).toLowerCase() === pid) ||
+    (nm && safe(r.name).toLowerCase() === nm) ||
+    (phn && safe(r.phone) === phn);
+
+  const bills    = safeArray(allData?.patientBill).map(b => (typeof unpackKSheetRow === "function" ? unpackKSheetRow(b) : b));
+  const ksheet   = bills.find(match) || {};
+  const optical  = safeArray(allData?.opticals).find(match) || {};
+  const lensSale = safeArray(allData?.lensSale).find(match) || {};
+  const patient  = safeArray(allData?.patients).find(match) || {};
+
+  const rx = {
+    re: {
+      dvSph: ksheet.reSpherSub || ksheet.reSpherAR || "", dvCyl: ksheet.reCylSub || ksheet.reCylAR || "",
+      dvAxis: ksheet.reAxisSub || ksheet.reAxisAR || "", dvVn: ksheet.reVnSub || ksheet.reVnAR || "",
+      nvSph: ksheet.reSpherNV || "", nvCyl: ksheet.reCylNV || "", nvAxis: ksheet.reAxisNV || "", nvVn: ksheet.reVnNV || "",
+    },
+    le: {
+      dvSph: ksheet.leSpherSub || ksheet.leSpherAR || "", dvCyl: ksheet.leCylSub || ksheet.leCylAR || "",
+      dvAxis: ksheet.leAxisSub || ksheet.leAxisAR || "", dvVn: ksheet.leVnSub || ksheet.leVnAR || "",
+      nvSph: ksheet.leSpherNV || "", nvCyl: ksheet.leCylNV || "", nvAxis: ksheet.leAxisNV || "", nvVn: ksheet.leVnNV || "",
+    },
+    add: ksheet.add || "",
+    pd: ksheet.pd || optical.pd || "",
+  };
+
+  const lensType = optical.lensType || lensSale.lensType ||
+    (Array.isArray(lensSale.items) && lensSale.items[0]?.name) || "";
+  const frameNo  = optical.frameNo || "";
+  const optomName = optical.optomName || ksheet.optomName || patient.optomName || "";
+  const refBy    = ksheet.refBy || patient.ref || optical.refBy || "";
+  const bookedBy = lensSale.bookedBy || optical.bookedBy || row.createdByName || "";
+  const paymentMode = optical.advancePaymentMethod || row.paymentMode || "";
+  const address = row.address || patient.address || ksheet.address || optical.address || "";
+  const phoneOut = row.phone || patient.phone || ksheet.phone || optical.phone || "";
+  return { rx, lensType, frameNo, optomName, refBy, bookedBy, paymentMode, address, phone: phoneOut, ksheet, optical, lensSale, patient };
+}
+
+function ClinicalInvoiceCopy({ copyLabel, settings, row, ctx, items, sub, discount, total, paid, balance }) {
+  const S = settings.sections;
+  const fs = settings.fontSize || 11;
+  const cellPad = "3px 5px";
+  const cell = { border: "1px solid #111", padding: cellPad, fontSize: fs, verticalAlign: "top" };
+  const cellHead = { ...cell, fontWeight: 700, background: "#fff", textAlign: "center" };
+  const cellMini = { ...cell, fontSize: fs - 1, padding: "2px 4px", textAlign: "center" };
+  const labelBold = { fontWeight: 700 };
+
+  return (
+    <div className="ss-copy" style={{ border: "1.5px solid #111", padding: 8, fontFamily: "'Arial', sans-serif", color: "#000", fontSize: fs, lineHeight: 1.25, background: "#fff" }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid #111", paddingBottom: 4, marginBottom: 4 }}>
+        <div style={{ fontSize: fs - 1 }}>{settings.gstin ? `GSTIN: ${settings.gstin}` : ""}</div>
+        <div style={{ textAlign: "center", flex: 1 }}>
+          <div style={{ fontSize: fs - 1, fontWeight: 600 }}>Order Estimate</div>
+          <div style={{ fontSize: fs + 6, fontWeight: 800, letterSpacing: 1 }}>{settings.shopName}</div>
+          {settings.tagline && <div style={{ fontSize: fs }}>{settings.tagline}</div>}
+          {settings.address && <div style={{ fontSize: fs - 1 }}>{settings.address}</div>}
+          {settings.phone && <div style={{ fontSize: fs - 1, fontWeight: 700 }}>PHONE: {settings.phone}</div>}
+        </div>
+        <div style={{ fontSize: fs - 1, fontWeight: 700, minWidth: 70, textAlign: "right" }}>{copyLabel}</div>
+      </div>
+
+      {/* Bill / customer info */}
+      <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
+        <tbody>
+          <tr>
+            <td style={{ ...cell, width: "55%" }}><span style={labelBold}>Bill No.: </span>{row.id || row.billNo || "—"}</td>
+            <td style={cell}><span style={labelBold}>Bill Date: </span>{row.date || todayStr()}</td>
+          </tr>
+          <tr>
+            <td style={cell}><span style={labelBold}>Customer: </span>{row.patientName || ctx.patient.name || "—"}</td>
+            <td style={cell}><span style={labelBold}>Delivery Date: </span>{row.deliveryDate || row.date || ""}</td>
+          </tr>
+          <tr>
+            <td style={cell}><span style={labelBold}>Mobile: </span>{ctx.phone || "—"}</td>
+            <td style={cell}><span style={labelBold}>Address: </span>{ctx.address || "—"}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* Particulars */}
+      <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
+        <thead>
+          <tr>
+            <th style={{ ...cellHead, textAlign: "left", width: "55%" }}>Particulars_detail</th>
+            <th style={cellHead}>Qty</th>
+            <th style={cellHead}>Rate</th>
+            <th style={cellHead}>Dis.</th>
+            <th style={cellHead}>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.length === 0 && (
+            <tr><td colSpan={5} style={{ ...cell, textAlign: "center", color: "#666" }}>— No items —</td></tr>
+          )}
+          {items.map((l, i) => {
+            const q = Number(l.qty || 0), p = Number(l.price || 0), d = Number(l.discount || 0);
+            return (
+              <tr key={i}>
+                <td style={cell}>{l.name}</td>
+                <td style={{ ...cell, textAlign: "center" }}>{q}</td>
+                <td style={{ ...cell, textAlign: "right" }}>{p.toFixed(2)}</td>
+                <td style={{ ...cell, textAlign: "right" }}>{d.toFixed(2)}</td>
+                <td style={{ ...cell, textAlign: "right" }}>{(q * p - d).toFixed(2)}</td>
+              </tr>
+            );
+          })}
+          {S.discount && discount > 0 && (
+            <tr>
+              <td style={{ ...cell, textAlign: "right" }} colSpan={4}><span style={labelBold}>Discount Amt</span></td>
+              <td style={{ ...cell, textAlign: "right" }}>{discount.toFixed(2)}</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+
+      {/* Footer left/right */}
+      <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
+        <tbody>
+          <tr>
+            <td style={{ ...cell, width: "55%" }}>
+              {S.bookedBy && <div><span style={labelBold}>Bkd By: </span>{ctx.bookedBy || ctx.optomName || "—"}</div>}
+              {S.paymentMode && <div><span style={labelBold}>Payment Mode: </span>{ctx.paymentMode || "—"}</div>}
+              {S.lensType && <div><span style={labelBold}>Lens Type: </span>{ctx.lensType || "—"}</div>}
+            </td>
+            <td style={cell}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={labelBold}>Total:</span><span>{total.toFixed(2)}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={labelBold}>Paid Amount:</span><span>{paid.toFixed(2)}</span></div>
+              {S.balance && <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, color: "#b91c1c" }}><span>Bal. Amount:</span><span>{balance.toFixed(2)}</span></div>}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* Rx table */}
+      {S.rxTable && (
+        <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
+          <thead>
+            <tr>
+              <th style={cellMini} colSpan={5}>RIGHT EYE</th>
+              <th style={cellMini} colSpan={5}>LEFT EYE</th>
+            </tr>
+            <tr>
+              <th style={cellMini}></th><th style={cellMini}>SPH</th><th style={cellMini}>CYL</th><th style={cellMini}>AXIS</th><th style={cellMini}>V/N</th>
+              <th style={cellMini}></th><th style={cellMini}>SPH</th><th style={cellMini}>CYL</th><th style={cellMini}>AXIS</th><th style={cellMini}>V/N</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style={{ ...cellMini, fontWeight: 700 }}>DV</td>
+              <td style={cellMini}>{ctx.rx.re.dvSph || "—"}</td><td style={cellMini}>{ctx.rx.re.dvCyl || "—"}</td><td style={cellMini}>{ctx.rx.re.dvAxis || "—"}</td><td style={cellMini}>{ctx.rx.re.dvVn || "—"}</td>
+              <td style={{ ...cellMini, fontWeight: 700 }}>DV</td>
+              <td style={cellMini}>{ctx.rx.le.dvSph || "—"}</td><td style={cellMini}>{ctx.rx.le.dvCyl || "—"}</td><td style={cellMini}>{ctx.rx.le.dvAxis || "—"}</td><td style={cellMini}>{ctx.rx.le.dvVn || "—"}</td>
+            </tr>
+            <tr>
+              <td style={{ ...cellMini, fontWeight: 700 }}>NV</td>
+              <td style={cellMini}>{ctx.rx.re.nvSph || "—"}</td><td style={cellMini}>{ctx.rx.re.nvCyl || "—"}</td><td style={cellMini}>{ctx.rx.re.nvAxis || "—"}</td><td style={cellMini}>{ctx.rx.re.nvVn || "—"}</td>
+              <td style={{ ...cellMini, fontWeight: 700 }}>NV</td>
+              <td style={cellMini}>{ctx.rx.le.nvSph || "—"}</td><td style={cellMini}>{ctx.rx.le.nvCyl || "—"}</td><td style={cellMini}>{ctx.rx.le.nvAxis || "—"}</td><td style={cellMini}>{ctx.rx.le.nvVn || "—"}</td>
+            </tr>
+            <tr>
+              <td style={{ ...cellMini, fontWeight: 700 }}>ADD</td>
+              <td style={cellMini} colSpan={4}>{ctx.rx.add || "—"}</td>
+              <td style={{ ...cellMini, fontWeight: 700 }}>ADD</td>
+              <td style={cellMini} colSpan={4}>{ctx.rx.add || "—"}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+
+      {/* PD / Refered By */}
+      {(S.pd || S.refBy) && (
+        <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
+          <tbody>
+            <tr>
+              {S.pd && <td style={cell}><span style={labelBold}>PD: </span>{ctx.rx.pd || "—"}</td>}
+              {S.refBy && <td style={cell}><span style={labelBold}>Refered By: </span>{ctx.refBy || "—"}</td>}
+              <td style={cell}><span style={labelBold}>Optom: </span>{ctx.optomName || "—"}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+
+      {/* Terms */}
+      {S.terms && copyLabel === "Customer Copy" && settings.terms.length > 0 && (
+        <div style={{ marginTop: 4, fontSize: fs - 1, lineHeight: 1.3 }}>
+          <div style={{ fontWeight: 700 }}>Terms & Condition :</div>
+          <ol style={{ paddingLeft: 18, margin: "2px 0" }}>
+            {settings.terms.map((t, i) => <li key={i}>{t}</li>)}
+          </ol>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InvoiceTemplateEditor({ row, onClose, data: allData }) {
+  const [settings, setSettings] = useState(loadClinicSettings);
+  const [tpl, setTpl] = useState("D");
+  const [editing, setEditing] = useState(false);
   const items = Array.isArray(row.items) ? row.items : [];
   const sub = items.reduce((s, l) => s + Number(l.qty||0) * Number(l.price||0), 0);
   const discount = Number(row.discount || 0);
   const total = sub - discount;
-  const [fields, setFields] = useState({ showBalance: total > 0 && row.status !== "Paid", showDiscount: discount > 0 });
-  const data = {
+  const paid = Number(row.advance || row.paid || (row.status === "Paid" ? total : 0));
+  const balance = Math.max(0, total - paid);
+
+  useEffect(() => { saveClinicSettings(settings); }, [settings]);
+
+  const ctx = buildInvoiceLookup(row, allData);
+
+  // Legacy markdown templates (A/B/C) still available.
+  const legacyData = {
     CUSTOMER_NAME: row.patientName || "—",
     INVOICE_NUMBER: row.id || "—",
     DATE: row.date || todayStr(),
@@ -118,28 +372,133 @@ function InvoiceTemplateEditor({ row, onClose }) {
     ORDER_ID: row.orderId || row.id || "—",
     OPTICAL_STATUS: row.deliveryStatus || row.status || "—",
   };
-  const md = fillTemplate(INVOICE_TEMPLATES[tpl].md, data);
+
+  const TEMPLATE_OPTIONS = { ...INVOICE_TEMPLATES, D: { name: "Sri Surya Clinical (Dual Copy)" } };
+
+  const paperWidth = settings.paperSize === "Thermal80" ? "80mm" : "210mm";
+  const isDual = settings.copies === "dual" && settings.paperSize !== "Thermal80" && tpl === "D";
+
+  const printNow = () => {
+    document.body.classList.add("ss-printing");
+    setTimeout(() => {
+      window.print();
+      setTimeout(() => document.body.classList.remove("ss-printing"), 500);
+    }, 50);
+  };
+
+  const updateTerm = (i, v) => setSettings(s => ({ ...s, terms: s.terms.map((t, idx) => idx === i ? v : t) }));
+  const addTerm    = () => setSettings(s => ({ ...s, terms: [...s.terms, "New term"] }));
+  const removeTerm = (i) => setSettings(s => ({ ...s, terms: s.terms.filter((_, idx) => idx !== i) }));
+  const toggleSec  = (k) => setSettings(s => ({ ...s, sections: { ...s.sections, [k]: !s.sections[k] } }));
+  const onLogoFile = (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => setSettings(s => ({ ...s, logo: String(reader.result || "") }));
+    reader.readAsDataURL(f);
+  };
+
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(20,12,6,.55)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:14, padding:20, width:"min(820px, 95vw)", maxHeight:"92vh", overflow:"auto", boxShadow:"0 25px 60px rgba(0,0,0,.35)" }}>
-        <div style={{ display:"flex", gap:12, alignItems:"center", marginBottom:14, flexWrap:"wrap" }}>
+    <div style={{ position:"fixed", inset:0, background:"rgba(20,12,6,.55)", zIndex:9999, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:20, overflow:"auto" }} onClick={onClose}>
+      <style>{`
+        @media print {
+          body.ss-printing > *:not(.ss-print-root) { display: none !important; }
+          .ss-print-root, .ss-print-root * { visibility: visible; }
+          .ss-print-root { position: absolute !important; inset: 0 !important; background:#fff !important; padding:0 !important; box-shadow:none !important; }
+          .ss-print-toolbar, .ss-print-editor { display: none !important; }
+          .ss-print-sheet { box-shadow:none !important; padding:0 !important; border:none !important; }
+          @page { size: ${settings.paperSize === "Thermal80" ? "80mm auto" : "A4"}; margin: 8mm; }
+        }
+      `}</style>
+      <div className="ss-print-root" onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:14, padding:20, width:"min(1100px, 98vw)", maxHeight:"96vh", overflow:"auto", boxShadow:"0 25px 60px rgba(0,0,0,.35)" }}>
+        <div className="ss-print-toolbar" style={{ display:"flex", gap:10, alignItems:"center", marginBottom:14, flexWrap:"wrap" }}>
           <div style={{ fontWeight:700, fontSize:16 }}>Invoice Template Editor</div>
           <select value={tpl} onChange={e => setTpl(e.target.value)} style={{ padding:"6px 10px", borderRadius:8, border:"1.5px solid #e2ddd8" }}>
-            {Object.entries(INVOICE_TEMPLATES).map(([k,v]) => <option key={k} value={k}>{k} — {v.name}</option>)}
+            {Object.entries(TEMPLATE_OPTIONS).map(([k,v]) => <option key={k} value={k}>{k} — {v.name}</option>)}
           </select>
-          {Object.entries(fields).map(([k,v]) => (
-            <label key={k} style={{ display:"flex", alignItems:"center", gap:4, fontSize:12, color:"#6b5e52" }}>
-              <input type="checkbox" checked={v} onChange={() => setFields(f => ({...f, [k]: !f[k]}))} />{k}
-            </label>
-          ))}
+          {tpl === "D" && (
+            <>
+              <select value={settings.copies} onChange={e => setSettings(s => ({ ...s, copies: e.target.value }))} style={{ padding:"6px 10px", borderRadius:8, border:"1.5px solid #e2ddd8" }}>
+                <option value="dual">Dual Copy</option>
+                <option value="single">Single Copy</option>
+              </select>
+              <select value={settings.paperSize} onChange={e => setSettings(s => ({ ...s, paperSize: e.target.value }))} style={{ padding:"6px 10px", borderRadius:8, border:"1.5px solid #e2ddd8" }}>
+                <option value="A4">A4</option>
+                <option value="Thermal80">Thermal 80mm</option>
+              </select>
+              <label style={{ display:"flex", alignItems:"center", gap:4, fontSize:12 }}>
+                Font
+                <input type="number" min={8} max={16} value={settings.fontSize} onChange={e => setSettings(s => ({ ...s, fontSize: Math.max(8, Math.min(16, Number(e.target.value) || 11)) }))} style={{ width:50, padding:"4px 6px" }} />
+              </label>
+            </>
+          )}
           <div style={{ flex:1 }} />
-          <button className="btn btn-outline btn-sm" onClick={() => window.print()}>🖨 Print</button>
+          <button className="btn btn-sm" style={{ background: editing ? "#fde68a" : "#fff", border:"1.5px solid #d97706", color:"#92400e", fontWeight:700 }} onClick={() => setEditing(v => !v)}>✎ {editing ? "Done Editing" : "EDIT"}</button>
+          <button className="btn btn-outline btn-sm" onClick={printNow}>🖨 Print</button>
           <button className="btn btn-dark btn-sm" onClick={onClose}>Close</button>
         </div>
-        <div style={{ border:"1px solid #ece6dd", borderRadius:10, padding:18, background:"#fffdfa" }}>
-          <MarkdownInvoice md={md} />
-          {fields.showDiscount && discount > 0 && <div style={{ fontSize:12, color:"#9b8e82", marginTop:6 }}>Discount: {currency(discount)}</div>}
-          {fields.showBalance && <div style={{ marginTop:8, fontWeight:700, color:"#b91c1c" }}>Balance Due: {currency(total)}</div>}
+
+        {editing && tpl === "D" && (
+          <div className="ss-print-editor" style={{ border:"1px dashed #d97706", background:"#fffbeb", padding:14, borderRadius:10, marginBottom:14, display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, fontSize:13 }}>
+            <div style={{ gridColumn:"1 / -1", fontWeight:700, color:"#92400e" }}>Shop Header</div>
+            <label>Shop name<input value={settings.shopName} onChange={e => setSettings(s => ({ ...s, shopName: e.target.value }))} /></label>
+            <label>Tagline<input value={settings.tagline} onChange={e => setSettings(s => ({ ...s, tagline: e.target.value }))} /></label>
+            <label style={{ gridColumn:"1 / -1" }}>Address<textarea rows={2} value={settings.address} onChange={e => setSettings(s => ({ ...s, address: e.target.value }))} /></label>
+            <label>Phone<input value={settings.phone} onChange={e => setSettings(s => ({ ...s, phone: e.target.value }))} /></label>
+            <label>GSTIN<input value={settings.gstin} onChange={e => setSettings(s => ({ ...s, gstin: e.target.value }))} /></label>
+            <label style={{ gridColumn:"1 / -1" }}>Logo
+              <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                <img src={settings.logo} alt="" style={{ height:40, width:40, objectFit:"contain", border:"1px solid #e2ddd8", borderRadius:6 }} />
+                <input type="file" accept="image/*" onChange={onLogoFile} />
+                <button className="btn btn-sm" onClick={() => setSettings(s => ({ ...s, logo: BRAND_LOGO }))}>Reset</button>
+              </div>
+            </label>
+
+            <div style={{ gridColumn:"1 / -1", fontWeight:700, color:"#92400e", marginTop:6 }}>Toggle Sections</div>
+            <div style={{ gridColumn:"1 / -1", display:"flex", flexWrap:"wrap", gap:10 }}>
+              {Object.keys(settings.sections).map(k => (
+                <label key={k} style={{ display:"flex", alignItems:"center", gap:4, fontSize:12 }}>
+                  <input type="checkbox" checked={settings.sections[k]} onChange={() => toggleSec(k)} />{k}
+                </label>
+              ))}
+            </div>
+
+            <div style={{ gridColumn:"1 / -1", fontWeight:700, color:"#92400e", marginTop:6, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span>Terms & Conditions</span>
+              <button className="btn btn-sm" onClick={addTerm}>+ Add term</button>
+            </div>
+            <div style={{ gridColumn:"1 / -1", display:"grid", gap:6 }}>
+              {settings.terms.map((t, i) => (
+                <div key={i} style={{ display:"flex", gap:6 }}>
+                  <span style={{ width:22, fontSize:12, paddingTop:6 }}>{i+1}.</span>
+                  <input style={{ flex:1 }} value={t} onChange={e => updateTerm(i, e.target.value)} />
+                  <button className="btn btn-sm btn-danger" onClick={() => removeTerm(i)}>✕</button>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ gridColumn:"1 / -1", fontSize:11, color:"#92400e" }}>Changes auto-save to this device.</div>
+          </div>
+        )}
+
+        <div className="ss-print-sheet" style={{ border:"1px solid #ece6dd", borderRadius:10, padding:tpl === "D" ? 12 : 18, background:"#fffdfa" }}>
+          {tpl === "D" ? (
+            <div style={{ width: paperWidth, maxWidth: "100%", margin: "0 auto", display: isDual ? "grid" : "block", gridTemplateColumns: isDual ? "1fr 1fr" : "1fr", gap: 6 }}>
+              {isDual ? (
+                <>
+                  <ClinicalInvoiceCopy copyLabel="Store Copy" settings={settings} row={row} ctx={ctx} items={items} sub={sub} discount={discount} total={total} paid={paid} balance={balance} />
+                  <ClinicalInvoiceCopy copyLabel="Customer Copy" settings={settings} row={row} ctx={ctx} items={items} sub={sub} discount={discount} total={total} paid={paid} balance={balance} />
+                </>
+              ) : (
+                <ClinicalInvoiceCopy copyLabel="Customer Copy" settings={settings} row={row} ctx={ctx} items={items} sub={sub} discount={discount} total={total} paid={paid} balance={balance} />
+              )}
+            </div>
+          ) : (
+            <>
+              <MarkdownInvoice md={fillTemplate(INVOICE_TEMPLATES[tpl].md, legacyData)} />
+              {discount > 0 && <div style={{ fontSize:12, color:"#9b8e82", marginTop:6 }}>Discount: {currency(discount)}</div>}
+              {balance > 0 && <div style={{ marginTop:8, fontWeight:700, color:"#b91c1c" }}>Balance Due: {currency(balance)}</div>}
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -3010,7 +3369,7 @@ function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing })
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}><div style={{ flex: 1 }}><label>Discount (₹)</label><input type="number" value={form.discount} onChange={e => setForm(f => ({ ...f, discount: e.target.value }))} /></div><div style={{ flex: 1 }}><div style={{ fontSize: 11, color: "#9b8e82" }}>TOTAL</div><div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700 }}>{currency(sub - Number(form.discount))}</div></div></div>
         </Modal>
       )}
-      {invoiceRow && <InvoiceTemplateEditor row={invoiceRow} onClose={() => setInvoiceRow(null)} />}
+      {invoiceRow && <InvoiceTemplateEditor row={invoiceRow} data={data} onClose={() => setInvoiceRow(null)} />}
     </div>
   );
 }
