@@ -205,7 +205,7 @@ const DEFAULT_FIELD_VISIBILITY = {
   patients:     ["timestamp","date","time","mrNo","patientId","name","phone","address","gender","age","designation","aadharNo","ref","paymentAmount","paymentMode","paymentRefNo","branch","remarks","visitType"],
   patientBill:  ["timestamp","date","time","mrNo","patientId","name","phone","address","gender","age","complaint","pastHistory"],
   optometrist:  ["timestamp","mrNo","patientId","name","complaint","pastHistory"],
-  opticals:     ["timestamp","mrNo","patientId","name","phone","address","totalPrice","advance","advancePaymentMethod","transactionId","balance","optomName"],
+  opticals:     ["timestamp","billNo","mrNo","patientId","name","phone","address","totalPrice","discount","advance","advancePaymentMethod","transactionId","balance","deliveryStatus","optomName"],
   inventory:    ["sku","name","category","brand","qty","reorder","lensPower","lensType","boxNo","price","location"],
   invoices:     ["id","date","patientName","items","discount","status"],
 };
@@ -1512,7 +1512,7 @@ function DashboardBuilder({ fieldVis, setFieldVis, accounts, setAccounts }) {
     patients:    ["timestamp","date","time","mrNo","patientId","name","phone","address","gender","age","designation","aadharNo","ref","paymentAmount","paymentMode","paymentRefNo","branch","remarks","visitType"],
     patientBill: ["timestamp","date","time","mrNo","patientId","name","phone","address","gender","age","complaint","pastHistory"],
     optometrist: ["timestamp","mrNo","patientId","name","complaint","pastHistory"],
-    opticals:    ["timestamp","mrNo","patientId","name","phone","address","totalPrice","advance","advancePaymentMethod","transactionId","balance","optomName"],
+    opticals:    ["timestamp","billNo","mrNo","patientId","name","phone","address","totalPrice","discount","advance","advancePaymentMethod","transactionId","balance","deliveryStatus","optomName"],
     inventory:   ["sku","name","category","brand","qty","reorder","lensPower","lensType","boxNo","cost","price","location"],
     invoices:    ["id","date","patientName","items","discount","status"],
   };
@@ -2204,13 +2204,13 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
   const [sortKey, setSortKey] = useState("timestamp");
   const [sortDir, setSortDir] = useState("desc");
   const FS_FIELDS = [
-    { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
+    { key:"timestamp", label:"Date/Time" }, { key:"billNo", label:"Bill No" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
     { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"lensType", label:"Lens Type" }, { key:"frameNo", label:"Frame No" },
-    { key:"totalPrice", label:"Total Price" }, { key:"advance", label:"Advance" }, { key:"balance", label:"Balance" },
+    { key:"totalPrice", label:"Total Price" }, { key:"discount", label:"Discount" }, { key:"advance", label:"Advance" }, { key:"balance", label:"Balance" },
     { key:"deliveryStatus", label:"Delivery" }, { key:"optomName", label:"Rep" }, { key:"branch", label:"Branch" },
   ];
 
-  const blank = () => ({ timestamp: ts(), date: todayStr(), time: timeStr(), mrNo:"", patientId:"", name:"", phone:"", address:"", lensType:"Single Vision", frameNo:"", totalPrice:"", advance:"", advancePaymentMethod:"Cash", transactionId:"", balance:"", deliveryStatus:"Not Ready", optomName: session.name });
+  const blank = () => ({ timestamp: ts(), date: todayStr(), time: timeStr(), mrNo:"", patientId:"", name:"", phone:"", address:"", billNo:`OPT-${(rows.length||0)+1}/${new Date().getFullYear()}`, lensType:"Single Vision", frameNo:"", totalPrice:"", discount:"", advance:"", advancePaymentMethod:"Cash", transactionId:"", balance:"", deliveryStatus:"Not Ready", optomName: session.name });
   const F = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
   const lookupPatient = (query) => {
@@ -2225,7 +2225,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
     } else { setRxPreview(null); setMrLookup(`✓ Found: ${foundOp.name} — No K Sheet found yet`); }
   };
 
-  const calcBalance = () => { setForm(f => ({ ...f, balance: String(Math.max(0, (parseFloat(f.totalPrice)||0) - (parseFloat(f.advance)||0))) })); };
+  const calcBalance = () => { setForm(f => ({ ...f, balance: String(Math.max(0, (parseFloat(f.totalPrice)||0) - (parseFloat(f.discount)||0) - (parseFloat(f.advance)||0))) })); };
 
   const submit = () => {
     if (!form.name || !form.name.trim()) { setMsg("Patient name required."); return; }
@@ -2247,7 +2247,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
   const del = id => { if (confirm("Delete?")) { mutate("opticals", arr=>arr.filter(x=>x.id!==id), null, id); audit("DELETE",{type:"opticals",id}); } };
   const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField)), sortKey, sortDir);
 
-  const OPT_CSV_HEADERS = ["date","time","mrNo","patientId","name","phone","address","lensType","frameNo","totalPrice","advance","advancePaymentMethod","transactionId","balance","deliveryStatus","optomName","branch"];
+  const OPT_CSV_HEADERS = ["date","time","billNo","mrNo","patientId","name","phone","address","lensType","frameNo","totalPrice","discount","advance","advancePaymentMethod","transactionId","balance","deliveryStatus","optomName","branch"];
   const handleImport = () => {
     if (!can("opticals","add") && !isOwner) { setMsg("No permission to import."); return; }
     importCSVFile(records => {
@@ -2258,14 +2258,16 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
         const name = String(r.name||"").trim();
         if (!name) { skipped++; continue; }
         const totalPrice = r.totalPrice || "";
+        const discount = r.discount || "";
         const advance = r.advance || "";
-        const balance = r.balance || String(Math.max(0, (parseFloat(totalPrice)||0) - (parseFloat(advance)||0)));
+        const balance = r.balance || String(Math.max(0, (parseFloat(totalPrice)||0) - (parseFloat(discount)||0) - (parseFloat(advance)||0)));
         newRecords.push({
           id: uid(),
           timestamp: ts(), date: r.date || todayStr(), time: r.time || timeStr(),
+          billNo: r.billNo || "",
           mrNo: r.mrNo || "", patientId: r.patientId || "", name, phone: r.phone || "", address: r.address || "",
           lensType: r.lensType || "Single Vision", frameNo: r.frameNo || "",
-          totalPrice, advance, advancePaymentMethod: r.advancePaymentMethod || "Cash",
+          totalPrice, discount, advance, advancePaymentMethod: r.advancePaymentMethod || "Cash",
           transactionId: r.transactionId || "", balance,
           deliveryStatus: r.deliveryStatus || "Not Ready",
           optomName: r.optomName || session.name,
@@ -2289,17 +2291,19 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
           <thead><tr>
-            <th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th>
-            <th>Lens Type</th><th>Frame No</th><th>Total Price</th><th>Advance</th><th>Balance</th>
+            <th>Timestamp</th><th>Bill No</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th>
+            <th>Lens Type</th><th>Frame No</th><th>Total Price</th><th>Discount</th><th>Net Payable</th><th>Advance</th><th>Balance</th>
             <th>Delivery</th><th>Adv. Method</th><th>Payment Ref No</th><th>Rep</th><th>Branch</th><th>Actions</th>
           </tr></thead>
           <tbody>{filtered.map(r => (
             <tr key={r.id}>
-              <td style={{ fontSize:11,color:"#9b8e82",whiteSpace:"nowrap" }}>{r.timestamp}</td><td style={{ fontWeight:700,fontFamily:"monospace" }}>{r.mrNo||"—"}</td>
+              <td style={{ fontSize:11,color:"#9b8e82",whiteSpace:"nowrap" }}>{r.timestamp}</td><td style={{ fontWeight:700,fontFamily:"monospace",color:"#1d4ed8" }}>{r.billNo||"—"}</td><td style={{ fontWeight:700,fontFamily:"monospace" }}>{r.mrNo||"—"}</td>
               <td style={{ fontFamily:"monospace",color:"#1d4ed8" }}>{r.patientId||"—"}</td><td style={{ fontWeight:600 }}>{r.name}</td><td>{r.phone}</td>
               <td><span className="tag tag-blue" style={{ fontSize:10 }}>{r.lensType||"—"}</span></td>
               <td style={{ fontFamily:"monospace", fontSize:12 }}>{r.frameNo||"—"}</td>
-              <td style={{ fontWeight:700 }}>{r.totalPrice?`₹${r.totalPrice}`:"—"}</td><td>{r.advance?`₹${r.advance}`:"—"}</td>
+              <td style={{ fontWeight:700 }}>{r.totalPrice?`₹${r.totalPrice}`:"—"}</td><td>{r.discount?`₹${r.discount}`:"—"}</td>
+              <td style={{ fontWeight:700 }}>{r.totalPrice?`₹${Math.max(0,(parseFloat(r.totalPrice)||0)-(parseFloat(r.discount)||0))}`:"—"}</td>
+              <td>{r.advance?`₹${r.advance}`:"—"}</td>
               <td style={{ fontWeight:700,color:parseFloat(r.balance)>0?"#dc2626":"#16a34a" }}>{r.balance?`₹${r.balance}`:"—"}</td>
               <td><span className={`tag ${r.deliveryStatus==="Delivered"?"tag-green":r.deliveryStatus==="Not Ready"?"tag-red":"tag-yellow"}`} style={{ fontSize:10 }}>{r.deliveryStatus==="Fixing Completed But Not Delivered"?"Fixing Done":(r.deliveryStatus||"—")}</span></td>
               <td><span className="tag tag-blue">{r.advancePaymentMethod||"—"}</span></td><td style={{ fontSize:11,fontFamily:"monospace",color:"#9b8e82" }}>{r.transactionId||"—"}</td>
@@ -2317,12 +2321,17 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
           <div style={{ background:"#f0ede8", borderRadius:10, padding:"12px 14px", marginBottom:14 }}><label style={{ fontWeight:700 }}>🔗 Link to Patient</label><div style={{ display:"flex", gap:8, marginTop:6 }}><input type="text" placeholder="Enter MR-001 or PT-0001 or phone…" value={form._lookup||""} onChange={e=>setForm(f=>({...f,_lookup:e.target.value}))} style={{ flex:1 }} /><button className="btn btn-dark btn-sm" onClick={()=>lookupPatient(form._lookup||"")}>Look Up & Fill</button></div>{mrLookup && <div style={{ fontSize:12,marginTop:6,color:mrLookup.startsWith("✓")?"#16a34a":"#dc2626" }}>{mrLookup}</div>}</div>
           {rxPreview && (<div style={{ background:"#e0f2fe",borderRadius:10,padding:"12px 16px",marginBottom:14,fontSize:13 }}><div style={{ fontWeight:700,marginBottom:8,color:"#0369a1" }}>📋 Prescription from K Sheet</div><div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, fontFamily:"monospace" }}><div><span style={{ color:"#9b8e82",fontSize:11 }}>RE</span><br/>{rxPreview.RE}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>LE</span><br/>{rxPreview.LE}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>ADD</span><br/>{rxPreview.ADD}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>Lens Type</span><br/>{rxPreview.lensType}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>Frame No</span><br/>{rxPreview.frameNo}</div></div></div>)}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
-            <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div><div><label>Patient ID</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div><div></div>
+            <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div><div><label>Patient ID</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div><div><label>Bill No</label><input type="text" placeholder="e.g. OPT-1/2026" value={form.billNo} onChange={F("billNo")} /></div>
             <div style={{ gridColumn:"span 2" }}><label>Name</label><input type="text" value={form.name} onChange={F("name")} /></div><div><label>Phone</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} /></div>
             <div style={{ gridColumn:"1/-1" }}><label>Address</label><input type="text" value={form.address} onChange={F("address")} /></div>
             <div style={{ gridColumn:"span 2" }}><label>Lens Type</label><select value={form.lensType} onChange={F("lensType")}>{LENS_TYPES.map(l=><option key={l}>{l}</option>)}</select></div>
             <div><label>Frame No</label><input type="text" placeholder="e.g. FR-A12" value={form.frameNo} onChange={F("frameNo")} /></div>
-            <div><label>Total Price (₹) *</label><input type="number" value={form.totalPrice} onChange={F("totalPrice")} onBlur={calcBalance} /></div><div><label>Advance (₹)</label><input type="number" value={form.advance} onChange={F("advance")} onBlur={calcBalance} /></div><div><label>Balance (₹)</label><input type="number" value={form.balance} readOnly style={{ background:"#f0ede8" }} /></div>
+            <div style={{ gridColumn:"1/-1", display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14 }}>
+              <div><label>Total Price (₹) *</label><input type="number" value={form.totalPrice} onChange={F("totalPrice")} onBlur={calcBalance} /></div>
+              <div><label>Discount (₹)</label><input type="number" value={form.discount} onChange={F("discount")} onBlur={calcBalance} /></div>
+              <div><label>Advance (₹)</label><input type="number" value={form.advance} onChange={F("advance")} onBlur={calcBalance} /></div>
+              <div><label>Balance (₹)</label><input type="number" value={form.balance} readOnly style={{ background:"#f0ede8" }} /></div>
+            </div>
             <div><label>Advance Payment Method</label><select value={form.advancePaymentMethod} onChange={F("advancePaymentMethod")}>{["Cash","UPI","Card","Cheque","NA"].map(m=><option key={m}>{m}</option>)}</select></div>
             {(form.advancePaymentMethod==="UPI"||form.advancePaymentMethod==="Card"||form.advancePaymentMethod==="Cheque") && (<div><label>Payment Ref No{(form.advancePaymentMethod==="UPI"||form.advancePaymentMethod==="Card")?" *":""}</label><input type="text" placeholder="Transaction / Cheque No" value={form.transactionId} onChange={F("transactionId")} /></div>)}
             <div style={{ gridColumn:"1/-1" }}><label>Delivery Status</label><select value={form.deliveryStatus} onChange={F("deliveryStatus")}>{DELIVERY_STATUS.map(d=><option key={d}>{d}</option>)}</select></div>
@@ -2345,8 +2354,8 @@ function OpticalsStatusSection({ session, data, mutate, can, audit, onSync, sync
   const [sortKey, setSortKey] = useState("timestamp");
   const [sortDir, setSortDir] = useState("desc");
   const FS_FIELDS = [
-    { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
-    { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"totalPrice", label:"Total" }, { key:"advance", label:"Advance" },
+    { key:"timestamp", label:"Date/Time" }, { key:"billNo", label:"Bill No" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
+    { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"totalPrice", label:"Total" }, { key:"discount", label:"Discount" }, { key:"advance", label:"Advance" },
     { key:"advancePaymentMethod", label:"Payment Method" }, { key:"balance", label:"Balance" }, { key:"deliveryStatus", label:"Delivery Status" }, { key:"optomName", label:"Rep" },
   ];
   const [msg,    setMsg]    = useState("");
@@ -2355,8 +2364,25 @@ function OpticalsStatusSection({ session, data, mutate, can, audit, onSync, sync
   const canEdit = isOwner || can("opticals", "edit") || can("opticals", "add");
 
   const balanceOf = (r) => {
-    const b = r.balance !== "" && r.balance != null ? parseFloat(r.balance) : (parseFloat(r.totalPrice) || 0) - (parseFloat(r.advance) || 0);
+    const b = r.balance !== "" && r.balance != null ? parseFloat(r.balance) : (parseFloat(r.totalPrice) || 0) - (parseFloat(r.discount) || 0) - (parseFloat(r.advance) || 0);
     return Math.max(0, isNaN(b) ? 0 : b);
+  };
+
+  // Selling cost after discount (Net Payable) — what the patient actually owes for the order before advance/balance.
+  const netPayable = (r) => Math.max(0, (parseFloat(r.totalPrice) || 0) - (parseFloat(r.discount) || 0));
+
+  // K Sheet lookup — pulls the patient's subjective refraction (RE / LE / ADD) recorded by the optometrist,
+  // matched by MR No, Patient ID, or phone, so front desk / opticals staff can see the Rx without opening K Sheet.
+  const kSheetSub = (r) => {
+    const k = safeArray(data.patientBill).map(unpackKSheetRow).find(b =>
+      (r.mrNo && b.mrNo === r.mrNo) || (r.patientId && b.patientId === r.patientId) || (r.phone && b.phone === r.phone)
+    );
+    if (!k) return null;
+    return {
+      RE: `${k.reSpherSub || "—"}/${k.reCylSub || "—"}×${k.reAxisSub || "—"}`,
+      LE: `${k.leSpherSub || "—"}/${k.leCylSub || "—"}×${k.leAxisSub || "—"}`,
+      ADD: k.add || "—",
+    };
   };
 
   const commitRef = (row) => {
@@ -2404,23 +2430,27 @@ function OpticalsStatusSection({ session, data, mutate, can, audit, onSync, sync
 
   return (
     <div>
-      <SectionHeader title="Opticals Status" onSync={onSync} syncing={syncing} msg={msg} />
-      <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, MR No, Patient ID, phone…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
+      <SectionHeader title="Opticals Status" onSync={onSync} syncing={syncing} onExport={() => exportCSV(filtered.map(r => ({ billNo:r.billNo, mrNo:r.mrNo, patientId:r.patientId, name:r.name, phone:r.phone, totalPrice:r.totalPrice, discount:r.discount, netPayable:netPayable(r), advance:r.advance, balance:balanceOf(r), deliveryStatus:r.deliveryStatus, optomName:r.optomName })), "opticals_status.csv")} msg={msg} />
+      <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, MR No, Patient ID, phone, bill no…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
           <thead><tr>
-            <th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th>
-            <th>Total</th><th>Advance</th><th>Payment Method</th><th>Balance Payment</th><th>Payment Ref No</th><th>Delivery Status</th><th>Rep</th>
+            <th>Bill No</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th>
+            <th>Total</th><th>Discount</th><th>Net Payable</th><th>Advance</th><th>Payment Method</th><th>Balance Payment</th><th>Payment Ref No</th><th>Delivery Status</th><th>K Sheet Rx (Subjective)</th><th>Rep</th>
           </tr></thead>
           <tbody>{filtered.map(r => {
             const bal = balanceOf(r);
             const needRef = r.advancePaymentMethod === "Card" || r.advancePaymentMethod === "UPI";
+            const sub = kSheetSub(r);
             return (
               <tr key={r.id}>
+                <td style={{ fontWeight:700, fontFamily:"monospace", color:"#1d4ed8" }}>{r.billNo||"—"}</td>
                 <td style={{ fontWeight:700, fontFamily:"monospace" }}>{r.mrNo||"—"}</td>
                 <td style={{ fontFamily:"monospace", color:"#1d4ed8" }}>{r.patientId||"—"}</td>
                 <td style={{ fontWeight:600 }}>{r.name}</td><td>{r.phone||"—"}</td>
                 <td style={{ fontWeight:700 }}>{r.totalPrice?`₹${r.totalPrice}`:"—"}</td>
+                <td>{r.discount?`₹${r.discount}`:"—"}</td>
+                <td style={{ fontWeight:700 }}>{r.totalPrice?`₹${netPayable(r)}`:"—"}</td>
                 <td>{r.advance?`₹${r.advance}`:"—"}</td>
                 <td><span className="tag tag-blue">{r.advancePaymentMethod||"—"}</span></td>
                 <td style={{ fontWeight:700, color: bal>0?"#dc2626":"#16a34a" }}>{bal>0?`₹${bal}`:"Fully Paid"}</td>
@@ -2442,6 +2472,9 @@ function OpticalsStatusSection({ session, data, mutate, can, audit, onSync, sync
                     disabled={!canEdit}
                     style={{ width:200, padding:"5px 8px", fontSize:11, borderRadius:7, border:"1.5px solid #e2ddd8", background: r.deliveryStatus==="Delivered" ? "#dcfce7" : r.deliveryStatus==="Fixing Completed But Not Delivered" ? "#fef9c3" : "#fee2e2" }}
                   >{DELIVERY_STATUS.map(d => <option key={d} value={d}>{d}</option>)}</select>
+                </td>
+                <td style={{ fontSize:11, fontFamily:"monospace", whiteSpace:"nowrap" }}>
+                  {sub ? (<><div>RE {sub.RE}</div><div>LE {sub.LE}</div><div>ADD {sub.ADD}</div></>) : <span style={{ color:"#9b8e82" }}>No K Sheet</span>}
                 </td>
                 <td style={{ fontSize:11, color:"#9b8e82" }}>{r.optomName||"—"}</td>
               </tr>
@@ -2894,6 +2927,7 @@ function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing })
   const [form,  setForm]  = useState({ patientName: "", date: todayStr(), items: [], discount: 0 });
   const [lN, setLN] = useState(""); const [lQ, setLQ] = useState(1); const [lP, setLP] = useState(0);
   const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
   const [invoiceRow, setInvoiceRow] = useState(null);
   const ALLOWED_STATUSES = new Set(["paid","delivered","booked","pending"]);
   const handleGenerateInvoice = (inv) => {
@@ -2906,19 +2940,51 @@ function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing })
     setInvoiceRow(inv);
   };
   
-  const addLine = () => { if (!lN.trim()) return; setForm(f => ({ ...f, items: [...f.items, { name: lN, qty: Number(lQ), price: Number(lP) }] })); setLN(""); setLQ(1); setLP(0); };
+  const addLine = () => { if (!lN.trim()) { setErr("Enter an item name before clicking Add."); return; } setErr(""); setForm(f => ({ ...f, items: [...f.items, { name: lN, qty: Number(lQ) || 1, price: Number(lP) || 0 }] })); setLN(""); setLQ(1); setLP(0); };
   const sub = safeArray(form.items).reduce((s, l) => s + l.qty * l.price, 0);
   
   const save = () => {
-    if (!form.patientName || !form.items.length) return;
-    const record = { id: `INV-${uid().slice(0, 6).toUpperCase()}`, branch: isOwner ? "KKD_Main Branch" : branch, ...form, discount: Number(form.discount), approvalStatus: "approved", status: "Pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
+    const name = String(form.patientName || "").trim();
+    if (!name) { setErr("Patient name is required."); return; }
+    if (!form.items.length) { setErr("Add at least one item before creating the invoice — type the item name, qty & price, then click \"Add\"."); return; }
+    setErr("");
+    const record = { id: `INV-${uid().slice(0, 6).toUpperCase()}`, branch: isOwner ? "KKD_Main Branch" : branch, ...form, patientName: name, discount: Number(form.discount) || 0, approvalStatus: "approved", status: "Pending", createdBy: session.id, createdByName: session.name, createdAt: ts() };
     mutate("invoices", arr => [...arr, record], record); audit("ADD", { type: "invoices" }); setModal(false);
+    setMsg("Invoice created."); setTimeout(() => setMsg(""), 3000);
   };
   const total = inv => safeArray(inv.items).reduce((s, i) => s + i.qty * i.price, 0) - (inv.discount || 0);
+
+  const INV_CSV_HEADERS = ["patientName", "date", "itemName", "qty", "price", "discount"];
+  const handleImportInvoices = () => {
+    if (!can("invoices", "add") && !isOwner) { setMsg("No permission to import."); return; }
+    importCSVFile(records => {
+      if (!records.length) { setMsg("CSV is empty."); return; }
+      let added = 0, skipped = 0;
+      const newRecords = [];
+      for (const r of records) {
+        const patientName = String(r.patientName || "").trim();
+        const itemName = String(r.itemName || "").trim();
+        if (!patientName || !itemName) { skipped++; continue; }
+        newRecords.push({
+          id: `INV-${uid().slice(0, 6).toUpperCase()}`,
+          branch: isOwner ? "KKD_Main Branch" : branch,
+          patientName, date: r.date || todayStr(),
+          items: [{ name: itemName, qty: Number(r.qty) || 1, price: Number(r.price) || 0 }],
+          discount: Number(r.discount) || 0,
+          approvalStatus: "approved", status: "Pending",
+          createdBy: session.id, createdByName: session.name, createdAt: ts(),
+        });
+        added++;
+      }
+      if (newRecords.length) mutate("invoices", arr => [...arr, ...newRecords]);
+      audit("IMPORT_CSV", { type: "invoices", added, skipped });
+      setMsg(`Imported ${added} invoice(s). Skipped ${skipped} (missing patient or item name).`);
+    });
+  };
   
   return (
     <div>
-      <SectionHeader title="Sales & Invoices" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows, "invoices.csv")} onAdd={can("invoices", "add") ? () => { setForm({ patientName: "", date: todayStr(), items: [], discount: 0 }); setModal(true); } : null} msg={msg} />
+      <SectionHeader title="Sales & Invoices" onSync={onSync} syncing={syncing} onTemplate={() => downloadCSVTemplate(INV_CSV_HEADERS, "invoices_template.csv")} onImport={(can("invoices", "add") || isOwner) ? handleImportInvoices : null} onExport={() => exportCSV(rows, "invoices.csv")} onAdd={can("invoices", "add") ? () => { setForm({ patientName: "", date: todayStr(), items: [], discount: 0 }); setErr(""); setModal(true); } : null} msg={msg} />
       <div className="card" style={{ overflowX: "auto" }}>
         <table><thead><tr><th>Invoice</th><th>Date</th><th>Patient</th><th>Total</th><th>Status</th><th>By</th><th>Branch</th>{isOwner && <th></th>}</tr></thead>
           <tbody>{rows.map(inv => (
@@ -2936,6 +3002,7 @@ function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing })
       </div>
       {modal && (
         <Modal title="New Invoice" onClose={() => setModal(false)} onSave={save} saveLabel="Create Invoice" wide>
+          {err && <div style={{ marginBottom: 14, fontSize: 13, padding: "8px 14px", borderRadius: 8, background: "#fee2e2", color: "#dc2626" }}>{err}</div>}
           <div className="form-grid" style={{ marginBottom: 14 }}><div><label>Patient Name</label><input type="text" value={form.patientName} onChange={e => setForm(f => ({ ...f, patientName: e.target.value }))} /></div><div><label>Date</label><input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div></div>
           <label>Add Item</label>
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}><input type="text" placeholder="Item name" value={lN} onChange={e => setLN(e.target.value)} style={{ flex: 2 }} /><input type="number" placeholder="Qty" value={lQ} onChange={e => setLQ(e.target.value)} style={{ width: 60 }} /><input type="number" placeholder="₹" value={lP} onChange={e => setLP(e.target.value)} style={{ width: 90 }} /><button className="btn btn-dark btn-sm" onClick={addLine}>Add</button></div>
