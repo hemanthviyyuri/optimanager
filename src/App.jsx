@@ -10,6 +10,142 @@ const BRAND_TAG  = "powered by OptiManager HMS";
 // ════════════════════════════════════════════════════════════════════════
 const APP_VER  = "4.10";
 const BRANCHES = ["KKD_Main Branch"];
+// ===== Invoice Templates (Markdown, placeholder-based) =====
+const INVOICE_PLACEHOLDERS = ["CUSTOMER_NAME","INVOICE_NUMBER","DATE","ITEM_DESCRIPTION","QUANTITY","PRICE","TOTAL_AMOUNT","ORDER_ID","OPTICAL_STATUS"];
+const INVOICE_TEMPLATES = {
+  A: { name: "Standard Clinical", md:
+`![logo](BRAND_LOGO)
+
+# MYOPTICAL — Clinical Invoice
+**Invoice #:** [INVOICE_NUMBER]  **Date:** [DATE]  **Order:** [ORDER_ID]
+**Patient:** [CUSTOMER_NAME]  **Status:** [OPTICAL_STATUS]
+
+| Description | Qty | Price |
+|---|---:|---:|
+| [ITEM_DESCRIPTION] | [QUANTITY] | [PRICE] |
+
+**Total Payable: [TOTAL_AMOUNT]**` },
+  B: { name: "Retail POS", md:
+`![logo](BRAND_LOGO)
+**MYOPTICAL — RETAIL POS**
+Bill: [INVOICE_NUMBER] | [DATE]
+Cust: [CUSTOMER_NAME] | Order: [ORDER_ID]
+--------------------------------
+[ITEM_DESCRIPTION]  x[QUANTITY]  [PRICE]
+--------------------------------
+TOTAL  [TOTAL_AMOUNT]
+Status: [OPTICAL_STATUS]` },
+  C: { name: "Modern Corporate", md:
+`![logo](BRAND_LOGO) **MYOPTICAL**
+
+## Tax Invoice  \`[INVOICE_NUMBER]\`
+Issued **[DATE]** · Order **[ORDER_ID]** · Status **[OPTICAL_STATUS]**
+
+**Billed To:** [CUSTOMER_NAME]
+
+| # | Item | Qty | Price |
+|---|---|---:|---:|
+| 1 | [ITEM_DESCRIPTION] | [QUANTITY] | [PRICE] |
+
+> **Amount Due — [TOTAL_AMOUNT]**` },
+};
+const fillTemplate = (md, data) =>
+  INVOICE_PLACEHOLDERS.reduce((acc, k) => acc.split(`[${k}]`).join(String(data[k] ?? "")), md);
+
+// Minimal markdown → JSX renderer (handles #/##, **bold**, tables, ![logo], hr).
+function MarkdownInvoice({ md }) {
+  const lines = md.split("\n");
+  const out = [];
+  let i = 0;
+  const inline = (s) => {
+    const parts = s.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+    return parts.map((p, k) => {
+      if (p.startsWith("**")) return <strong key={k}>{p.slice(2, -2)}</strong>;
+      if (p.startsWith("`")) return <code key={k} style={{ background:"#f3f0ec", padding:"1px 5px", borderRadius:4 }}>{p.slice(1, -1)}</code>;
+      return <span key={k}>{p}</span>;
+    });
+  };
+  while (i < lines.length) {
+    const ln = lines[i];
+    if (/^!\[logo\]\(BRAND_LOGO\)/.test(ln)) {
+      const rest = ln.replace(/^!\[logo\]\(BRAND_LOGO\)/, "").trim();
+      out.push(<div key={i} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+        <img src={BRAND_LOGO} alt="MYOPTICAL" style={{ height:48, width:"auto", objectFit:"contain", WebkitPrintColorAdjust:"exact", printColorAdjust:"exact" }} />
+        {rest && <span style={{ fontSize:16 }}>{inline(rest)}</span>}
+      </div>);
+      i++; continue;
+    }
+    if (ln.startsWith("# "))  { out.push(<h2 key={i} style={{ margin:"6px 0", fontFamily:"'Playfair Display',serif" }}>{inline(ln.slice(2))}</h2>); i++; continue; }
+    if (ln.startsWith("## ")) { out.push(<h3 key={i} style={{ margin:"6px 0" }}>{inline(ln.slice(3))}</h3>); i++; continue; }
+    if (ln.startsWith("> "))  { out.push(<blockquote key={i} style={{ borderLeft:"3px solid #d6cfc6", margin:"8px 0", padding:"4px 10px", background:"#faf9f7" }}>{inline(ln.slice(2))}</blockquote>); i++; continue; }
+    if (/^[-=]{3,}$/.test(ln.trim())) { out.push(<hr key={i} style={{ border:"none", borderTop:"1px dashed #c8bfb4", margin:"6px 0" }} />); i++; continue; }
+    if (ln.startsWith("|") && lines[i+1] && /^\|[\s\-:|]+\|$/.test(lines[i+1])) {
+      const head = ln.split("|").slice(1, -1).map(s => s.trim());
+      const body = [];
+      i += 2;
+      while (i < lines.length && lines[i].startsWith("|")) {
+        body.push(lines[i].split("|").slice(1, -1).map(s => s.trim())); i++;
+      }
+      out.push(
+        <table key={`t${i}`} style={{ width:"100%", borderCollapse:"collapse", margin:"8px 0", fontSize:13 }}>
+          <thead><tr>{head.map((h,k) => <th key={k} style={{ borderBottom:"1.5px solid #2c1810", textAlign:"left", padding:"6px 8px" }}>{inline(h)}</th>)}</tr></thead>
+          <tbody>{body.map((r,ri) => <tr key={ri}>{r.map((c,ci) => <td key={ci} style={{ borderBottom:"1px solid #ece6dd", padding:"6px 8px" }}>{inline(c)}</td>)}</tr>)}</tbody>
+        </table>
+      );
+      continue;
+    }
+    if (ln.trim() === "") { out.push(<div key={i} style={{ height:6 }} />); i++; continue; }
+    out.push(<div key={i} style={{ margin:"3px 0", fontSize:13 }}>{inline(ln)}</div>); i++;
+  }
+  return <div className="invoice-preview" style={{ fontFamily:"'Inter',sans-serif", color:"#2c1810" }}>{out}</div>;
+}
+
+function InvoiceTemplateEditor({ row, onClose }) {
+  const [tpl, setTpl] = useState("A");
+  const items = Array.isArray(row.items) ? row.items : [];
+  const sub = items.reduce((s, l) => s + Number(l.qty||0) * Number(l.price||0), 0);
+  const discount = Number(row.discount || 0);
+  const total = sub - discount;
+  const [fields, setFields] = useState({ showBalance: total > 0 && row.status !== "Paid", showDiscount: discount > 0 });
+  const data = {
+    CUSTOMER_NAME: row.patientName || "—",
+    INVOICE_NUMBER: row.id || "—",
+    DATE: row.date || todayStr(),
+    ITEM_DESCRIPTION: items.map(l => `${l.name} ×${l.qty}`).join(", ") || "—",
+    QUANTITY: items.reduce((s,l) => s + Number(l.qty||0), 0),
+    PRICE: currency(sub),
+    TOTAL_AMOUNT: currency(total),
+    ORDER_ID: row.orderId || row.id || "—",
+    OPTICAL_STATUS: row.deliveryStatus || row.status || "—",
+  };
+  const md = fillTemplate(INVOICE_TEMPLATES[tpl].md, data);
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(20,12,6,.55)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:14, padding:20, width:"min(820px, 95vw)", maxHeight:"92vh", overflow:"auto", boxShadow:"0 25px 60px rgba(0,0,0,.35)" }}>
+        <div style={{ display:"flex", gap:12, alignItems:"center", marginBottom:14, flexWrap:"wrap" }}>
+          <div style={{ fontWeight:700, fontSize:16 }}>Invoice Template Editor</div>
+          <select value={tpl} onChange={e => setTpl(e.target.value)} style={{ padding:"6px 10px", borderRadius:8, border:"1.5px solid #e2ddd8" }}>
+            {Object.entries(INVOICE_TEMPLATES).map(([k,v]) => <option key={k} value={k}>{k} — {v.name}</option>)}
+          </select>
+          {Object.entries(fields).map(([k,v]) => (
+            <label key={k} style={{ display:"flex", alignItems:"center", gap:4, fontSize:12, color:"#6b5e52" }}>
+              <input type="checkbox" checked={v} onChange={() => setFields(f => ({...f, [k]: !f[k]}))} />{k}
+            </label>
+          ))}
+          <div style={{ flex:1 }} />
+          <button className="btn btn-outline btn-sm" onClick={() => window.print()}>🖨 Print</button>
+          <button className="btn btn-dark btn-sm" onClick={onClose}>Close</button>
+        </div>
+        <div style={{ border:"1px solid #ece6dd", borderRadius:10, padding:18, background:"#fffdfa" }}>
+          <MarkdownInvoice md={md} />
+          {fields.showDiscount && discount > 0 && <div style={{ fontSize:12, color:"#9b8e82", marginTop:6 }}>Discount: {currency(discount)}</div>}
+          {fields.showBalance && <div style={{ marginTop:8, fontWeight:700, color:"#b91c1c" }}>Balance Due: {currency(total)}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const SECTIONS = ["patients","patientBill","optometrist","opticals","inventory","invoices","alerts"];
 const SECTION_LABELS = { patients:"OP Registration", patientBill:"K Sheet Entry", optometrist:"Optometrist", opticals:"Opticals", inventory:"Inventory", purchaseOrders:"Purchase Orders", invoices:"Sales & Invoices", alerts:"Low Stock Alerts" };
 const LENS_TYPES     = ["Single Vision","Bifocal","Progressive","Anti-Reflective","Photochromic","Blue Cut","UV400","Polarized","High Index 1.60","High Index 1.67","High Index 1.74","Trivex","Polycarbonate","Toric (Contact)","Multifocal (Contact)"];
@@ -647,38 +783,6 @@ function ReminderAlerts({ session, data, setView }) {
   );
 }
 
-
-
-
-/* =========================
-   INVOICE MODULE FOUNDATION
-   ========================= */
-
-export const canGenerateInvoice = (order) => {
-  const status = String(
-    order?.deliveryStatus ||
-    order?.status ||
-    order?.opticalStatus ||
-    ""
-  ).toLowerCase();
-
-  return status === "booked" || status === "delivered";
-};
-
-export const INVOICE_TEMPLATE_TYPES = {
-  STANDARD: "standard",
-  RETAIL: "retail",
-  CORPORATE: "corporate"
-};
-
-export const DEFAULT_INVOICE_EDITOR_STATE = {
-  template: INVOICE_TEMPLATE_TYPES.STANDARD,
-  showLogo: true,
-  showBalance: true,
-  showAdvance: true,
-  showPrescription: true,
-  showPatientInfo: true
-};
 
 
 export default function App() {
@@ -2790,6 +2894,17 @@ function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing })
   const [form,  setForm]  = useState({ patientName: "", date: todayStr(), items: [], discount: 0 });
   const [lN, setLN] = useState(""); const [lQ, setLQ] = useState(1); const [lP, setLP] = useState(0);
   const [msg, setMsg] = useState("");
+  const [invoiceRow, setInvoiceRow] = useState(null);
+  const ALLOWED_STATUSES = new Set(["paid","delivered","booked","pending"]);
+  const handleGenerateInvoice = (inv) => {
+    const status = String(inv.deliveryStatus || inv.status || "").toLowerCase();
+    if (!ALLOWED_STATUSES.has(status)) {
+      setMsg(`Cannot generate invoice — status "${status||"unknown"}" must be Booked, Pending, Paid or Delivered.`);
+      setTimeout(() => setMsg(""), 4000);
+      return;
+    }
+    setInvoiceRow(inv);
+  };
   
   const addLine = () => { if (!lN.trim()) return; setForm(f => ({ ...f, items: [...f.items, { name: lN, qty: Number(lQ), price: Number(lP) }] })); setLN(""); setLQ(1); setLP(0); };
   const sub = safeArray(form.items).reduce((s, l) => s + l.qty * l.price, 0);
@@ -2811,6 +2926,7 @@ function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing })
               <td style={{ fontWeight: 700 }}>{inv.id}</td><td>{inv.date}</td><td>{inv.patientName}</td><td style={{ fontWeight: 700 }}>{currency(total(inv))}</td>
               <td><span className={`tag ${inv.status === "Paid" ? "tag-green" : "tag-yellow"}`}>{inv.status}</span></td><td style={{ fontSize: 11, color: "#9b8e82" }}>{inv.createdByName || "—"}</td><td><span className="tag" style={{ background: "#f0ede8", color: "#6b5e52" }}>{inv.branch}</span></td>
               <td style={{ display: "flex", gap: 5 }}>
+                <button className="btn btn-sm" style={{ background:"#1f2937", color:"#fff", border:"none", fontWeight:700 }} onClick={() => handleGenerateInvoice(inv)}>🧾 Generate Invoice</button>
                 {(isOwner || can("invoices", "edit")) && inv.status === "Pending" && <button className="btn btn-sm" style={{ background: "#dcfce7", color: "#16a34a", border: "none", fontWeight: 700 }} onClick={() => mutate("invoices", arr => arr.map(i => i.id === inv.id ? { ...i, status: "Paid" } : i))}>✓ Paid</button>}
                 {isOwner && <button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete?")) mutate("invoices", arr => arr.filter(i => i.id !== inv.id), null, inv.id); }}>✕</button>}
               </td>
@@ -2827,6 +2943,7 @@ function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing })
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}><div style={{ flex: 1 }}><label>Discount (₹)</label><input type="number" value={form.discount} onChange={e => setForm(f => ({ ...f, discount: e.target.value }))} /></div><div style={{ flex: 1 }}><div style={{ fontSize: 11, color: "#9b8e82" }}>TOTAL</div><div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700 }}>{currency(sub - Number(form.discount))}</div></div></div>
         </Modal>
       )}
+      {invoiceRow && <InvoiceTemplateEditor row={invoiceRow} onClose={() => setInvoiceRow(null)} />}
     </div>
   );
 }
