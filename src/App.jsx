@@ -551,6 +551,8 @@ const GCSS = `
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Playfair+Display:wght@500;700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
 ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#c8bfb0;border-radius:3px}
+/* Perf: skip rendering off-screen table rows (big win at 6k+ rows) */
+tbody tr{content-visibility:auto;contain-intrinsic-size:0 44px}
 input,select,textarea,button{font-family:inherit}button{cursor:pointer}
 .nav-item{display:flex;align-items:center;gap:9px;padding:8px 13px;border-radius:9px;font-size:13px;font-weight:500;color:#6b5e52;border:none;background:none;width:100%;text-align:left;transition:all .18s}
 .nav-item:hover{background:#e8e2db;color:#1a1714}.nav-item.active{background:#1a1714;color:#f0ede8}
@@ -1212,11 +1214,13 @@ export default function App() {
   // Sidebar / manual navigation always clears the today highlight.
   const setViewNav = useCallback((v) => { setNavToday(false); setView(v); }, []);
 
-  useEffect(() => { LS.set("opti_accounts", accounts); }, [accounts]);
-  useEffect(() => { LS.set("opti_data_v4",  data);     }, [data]);
-  useEffect(() => { LS.set("opti_audit",    auditLog); }, [auditLog]);
-  useEffect(() => { LS.set("opti_fields",   fieldVis); }, [fieldVis]);
-  useEffect(() => { LS.set("opti_dash_cms", dashCms);  }, [dashCms]);
+  // Debounced saves — avoid JSON.stringify of the whole dataset on every keystroke.
+  // At 6k–100k rows this was the main cause of slow menus + UI freezes.
+  useEffect(() => { const t = setTimeout(() => LS.set("opti_accounts", accounts), 400); return () => clearTimeout(t); }, [accounts]);
+  useEffect(() => { const t = setTimeout(() => LS.set("opti_data_v4",  data),     600); return () => clearTimeout(t); }, [data]);
+  useEffect(() => { const t = setTimeout(() => LS.set("opti_audit",    auditLog), 600); return () => clearTimeout(t); }, [auditLog]);
+  useEffect(() => { const t = setTimeout(() => LS.set("opti_fields",   fieldVis), 400); return () => clearTimeout(t); }, [fieldVis]);
+  useEffect(() => { const t = setTimeout(() => LS.set("opti_dash_cms", dashCms),  400); return () => clearTimeout(t); }, [dashCms]);
   useEffect(() => { LS.set("opti_sb",       sbCreds);  }, [sbCreds]);
 
   const syncFromCloud = async (url, key) => {
