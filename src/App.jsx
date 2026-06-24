@@ -118,10 +118,11 @@ const DEFAULT_CLINIC_SETTINGS = {
     "SRC denotes scratch resistant coating and not scratch proof.",
     "Order for a half pair in photo chromatic lenses does not match exactly.",
   ],
-  sections: { rxTable: true, pd: true, refBy: true, lensType: true, bookedBy: true, paymentMode: true, terms: true, balance: true, discount: true },
+  sections: { rxTable: true, pd: true, refBy: true, lensType: true, bookedBy: true, paymentMode: true, terms: true, balance: true, discount: true, logo: true },
   fontSize: 11,
   paperSize: "A4",          // "A4" | "Thermal80"
   copies: "dual",           // "dual" | "single"
+  textAlign: "left",        // "left" | "center"
 };
 const SS_SETTINGS_KEY = "ss_invoice_settings_v1";
 function loadClinicSettings() {
@@ -151,8 +152,8 @@ function buildInvoiceLookup(row, allData) {
   const match = (r) =>
     (mr && safe(r.mrNo).toLowerCase() === mr) ||
     (pid && safe(r.patientId).toLowerCase() === pid) ||
-    (nm && safe(r.name).toLowerCase() === nm) ||
-    (phn && safe(r.phone) === phn);
+    (nm && (safe(r.name).toLowerCase() === nm || safe(r.partyAC).toLowerCase() === nm)) ||
+    (phn && (safe(r.phone) === phn || safe(r.contactNo) === phn));
 
   const bills    = safeArray(allData?.patientBill).map(b => (typeof unpackKSheetRow === "function" ? unpackKSheetRow(b) : b));
   const ksheet   = bills.find(match) || {};
@@ -160,31 +161,48 @@ function buildInvoiceLookup(row, allData) {
   const lensSale = safeArray(allData?.lensSale).find(match) || {};
   const patient  = safeArray(allData?.patients).find(match) || {};
 
+  // Per-eye lens-sale lines fallback for Rx
+  const lsItems = Array.isArray(lensSale.items) ? lensSale.items : [];
+  const reLine = lsItems.find(l => l.eye === "RE" || l.eye === "BE" || l.eye === "RL") || {};
+  const leLine = lsItems.find(l => l.eye === "LE" || l.eye === "BE" || l.eye === "RL") || {};
+
+  const pick = (...vals) => { for (const v of vals) if (v !== undefined && v !== null && String(v).trim() !== "") return v; return ""; };
+
   const rx = {
     re: {
-      dvSph: ksheet.reSpherSub || ksheet.reSpherAR || "", dvCyl: ksheet.reCylSub || ksheet.reCylAR || "",
-      dvAxis: ksheet.reAxisSub || ksheet.reAxisAR || "", dvVn: ksheet.reVnSub || ksheet.reVnAR || "",
+      dvSph: pick(ksheet.reSpherSub, ksheet.reSpherAR, reLine.sph),
+      dvCyl: pick(ksheet.reCylSub, ksheet.reCylAR, reLine.cyl),
+      dvAxis: pick(ksheet.reAxisSub, ksheet.reAxisAR, reLine.axis),
+      dvVn: pick(ksheet.reVnSub, ksheet.reVnAR),
       nvSph: ksheet.reSpherNV || "", nvCyl: ksheet.reCylNV || "", nvAxis: ksheet.reAxisNV || "", nvVn: ksheet.reVnNV || "",
     },
     le: {
-      dvSph: ksheet.leSpherSub || ksheet.leSpherAR || "", dvCyl: ksheet.leCylSub || ksheet.leCylAR || "",
-      dvAxis: ksheet.leAxisSub || ksheet.leAxisAR || "", dvVn: ksheet.leVnSub || ksheet.leVnAR || "",
+      dvSph: pick(ksheet.leSpherSub, ksheet.leSpherAR, leLine.sph),
+      dvCyl: pick(ksheet.leCylSub, ksheet.leCylAR, leLine.cyl),
+      dvAxis: pick(ksheet.leAxisSub, ksheet.leAxisAR, leLine.axis),
+      dvVn: pick(ksheet.leVnSub, ksheet.leVnAR),
       nvSph: ksheet.leSpherNV || "", nvCyl: ksheet.leCylNV || "", nvAxis: ksheet.leAxisNV || "", nvVn: ksheet.leVnNV || "",
     },
-    add: ksheet.add || "",
-    pd: ksheet.pd || optical.pd || "",
+    add: pick(ksheet.add, reLine.addPwr, leLine.addPwr),
+    pd: pick(ksheet.pd, optical.pd),
   };
 
-  const lensType = optical.lensType || lensSale.lensType ||
-    (Array.isArray(lensSale.items) && lensSale.items[0]?.name) || "";
+  const lensType = pick(optical.lensType, lensSale.lensType, lsItems[0]?.name);
   const frameNo  = optical.frameNo || "";
-  const optomName = optical.optomName || ksheet.optomName || patient.optomName || "";
-  const refBy    = ksheet.refBy || patient.ref || optical.refBy || "";
-  const bookedBy = lensSale.bookedBy || optical.bookedBy || row.createdByName || "";
-  const paymentMode = optical.advancePaymentMethod || row.paymentMode || "";
-  const address = row.address || patient.address || ksheet.address || optical.address || "";
-  const phoneOut = row.phone || patient.phone || ksheet.phone || optical.phone || "";
-  return { rx, lensType, frameNo, optomName, refBy, bookedBy, paymentMode, address, phone: phoneOut, ksheet, optical, lensSale, patient };
+  const optomName = pick(optical.optomName, ksheet.optomName, patient.optomName, lensSale.createdByName, lensSale.bookedBy);
+  const refBy    = pick(ksheet.refBy, patient.ref, optical.refBy);
+  const bookedBy = pick(lensSale.bookedBy, optical.optomName, row.createdByName);
+  const paymentMode = pick(optical.advancePaymentMethod, row.paymentMode, lensSale.paymentMode);
+  const address = pick(row.address, optical.address, lensSale.address, patient.address, ksheet.address);
+  const phoneOut = pick(row.phone, optical.phone, lensSale.contactNo, patient.phone, ksheet.phone);
+  const customerName = pick(row.patientName, row.name, optical.name, lensSale.partyAC, patient.name);
+
+  // Totals fallback chain
+  const totalPrice = Number(pick(row.totalPrice, optical.totalPrice, lensSale.grandTotal, 0)) || 0;
+  const advancePaid = Number(pick(row.advance, row.paid, optical.advance, 0)) || 0;
+  const balanceAmt = Number(pick(row.balance, optical.balance, Math.max(0, totalPrice - advancePaid))) || 0;
+
+  return { rx, lensType, frameNo, optomName, refBy, bookedBy, paymentMode, address, phone: phoneOut, customerName, totalPrice, advancePaid, balanceAmt, ksheet, optical, lensSale, patient };
 }
 
 function ClinicalInvoiceCopy({ copyLabel, settings, row, ctx, items, sub, discount, total, paid, balance }) {
@@ -196,17 +214,23 @@ function ClinicalInvoiceCopy({ copyLabel, settings, row, ctx, items, sub, discou
   const cellMini = { ...cell, fontSize: fs - 1, padding: "2px 4px", textAlign: "center" };
   const labelBold = { fontWeight: 700 };
 
+  const rootTextAlign = settings.textAlign === "center" ? "center" : "left";
   return (
-    <div className="ss-copy" style={{ border: "1.5px solid #111", padding: 8, fontFamily: "'Arial', sans-serif", color: "#000", fontSize: fs, lineHeight: 1.25, background: "#fff" }}>
+    <div className="ss-copy" style={{ border: "1.5px solid #111", padding: 8, fontFamily: "'Arial', sans-serif", color: "#000", fontSize: fs, lineHeight: 1.25, background: "#fff", textAlign: rootTextAlign }}>
       {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid #111", paddingBottom: 4, marginBottom: 4 }}>
-        <div style={{ fontSize: fs - 1 }}>{settings.gstin ? `GSTIN: ${settings.gstin}` : ""}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #111", paddingBottom: 4, marginBottom: 4, gap: 6 }}>
+        <div style={{ width: 70, display: "flex", alignItems: "center", justifyContent: "flex-start" }}>
+          {S.logo !== false && settings.logo
+            ? <img src={settings.logo} alt="logo" crossOrigin="anonymous" style={{ height: 46, width: 46, objectFit: "contain" }} />
+            : (settings.gstin ? <span style={{ fontSize: fs - 1 }}>GSTIN: {settings.gstin}</span> : null)}
+        </div>
         <div style={{ textAlign: "center", flex: 1 }}>
           <div style={{ fontSize: fs - 1, fontWeight: 600 }}>Order Estimate</div>
           <div style={{ fontSize: fs + 6, fontWeight: 800, letterSpacing: 1 }}>{settings.shopName}</div>
           {settings.tagline && <div style={{ fontSize: fs }}>{settings.tagline}</div>}
           {settings.address && <div style={{ fontSize: fs - 1 }}>{settings.address}</div>}
           {settings.phone && <div style={{ fontSize: fs - 1, fontWeight: 700 }}>PHONE: {settings.phone}</div>}
+          {S.logo !== false && settings.logo && settings.gstin && <div style={{ fontSize: fs - 1 }}>GSTIN: {settings.gstin}</div>}
         </div>
         <div style={{ fontSize: fs - 1, fontWeight: 700, minWidth: 70, textAlign: "right" }}>{copyLabel}</div>
       </div>
@@ -219,7 +243,7 @@ function ClinicalInvoiceCopy({ copyLabel, settings, row, ctx, items, sub, discou
             <td style={cell}><span style={labelBold}>Bill Date: </span>{row.date || todayStr()}</td>
           </tr>
           <tr>
-            <td style={cell}><span style={labelBold}>Customer: </span>{row.patientName || ctx.patient.name || "—"}</td>
+            <td style={cell}><span style={labelBold}>Customer: </span>{ctx.customerName || row.patientName || "—"}</td>
             <td style={cell}><span style={labelBold}>Delivery Date: </span>{row.deliveryDate || row.date || ""}</td>
           </tr>
           <tr>
@@ -275,9 +299,9 @@ function ClinicalInvoiceCopy({ copyLabel, settings, row, ctx, items, sub, discou
               {S.lensType && <div><span style={labelBold}>Lens Type: </span>{ctx.lensType || "—"}</div>}
             </td>
             <td style={cell}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={labelBold}>Total:</span><span>{total.toFixed(2)}</span></div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={labelBold}>Paid Amount:</span><span>{paid.toFixed(2)}</span></div>
-              {S.balance && <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, color: "#b91c1c" }}><span>Bal. Amount:</span><span>{balance.toFixed(2)}</span></div>}
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={labelBold}>Total:</span><span>{(total || ctx.totalPrice).toFixed(2)}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={labelBold}>Advance Paid:</span><span>{(paid || ctx.advancePaid).toFixed(2)}</span></div>
+              {S.balance && <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, color: "#b91c1c" }}><span>Bal. Amount:</span><span>{(balance || ctx.balanceAmt).toFixed(2)}</span></div>}
             </td>
           </tr>
         </tbody>
@@ -382,8 +406,8 @@ function InvoiceTemplateEditor({ row, onClose, data: allData }) {
     document.body.classList.add("ss-printing");
     setTimeout(() => {
       window.print();
-      setTimeout(() => document.body.classList.remove("ss-printing"), 500);
-    }, 50);
+      setTimeout(() => document.body.classList.remove("ss-printing"), 800);
+    }, 80);
   };
 
   const updateTerm = (i, v) => setSettings(s => ({ ...s, terms: s.terms.map((t, idx) => idx === i ? v : t) }));
@@ -398,14 +422,16 @@ function InvoiceTemplateEditor({ row, onClose, data: allData }) {
   };
 
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(20,12,6,.55)", zIndex:9999, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:20, overflow:"auto" }} onClick={onClose}>
+    <div className="ss-modal-overlay" style={{ position:"fixed", inset:0, background:"rgba(20,12,6,.55)", zIndex:9999, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:20, overflow:"auto" }} onClick={onClose}>
       <style>{`
         @media print {
-          body.ss-printing > *:not(.ss-print-root) { display: none !important; }
-          .ss-print-root, .ss-print-root * { visibility: visible; }
-          .ss-print-root { position: absolute !important; inset: 0 !important; background:#fff !important; padding:0 !important; box-shadow:none !important; }
+          html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+          body * { visibility: hidden !important; }
+          .ss-print-root, .ss-print-root * { visibility: visible !important; }
+          .ss-modal-overlay { position: static !important; background: transparent !important; padding: 0 !important; overflow: visible !important; display: block !important; }
+          .ss-print-root { position: absolute !important; left: 0 !important; top: 0 !important; right: 0 !important; width: 100% !important; max-height: none !important; overflow: visible !important; box-shadow: none !important; border-radius: 0 !important; padding: 0 !important; background: #fff !important; }
           .ss-print-toolbar, .ss-print-editor { display: none !important; }
-          .ss-print-sheet { box-shadow:none !important; padding:0 !important; border:none !important; }
+          .ss-print-sheet { box-shadow:none !important; padding:0 !important; border:none !important; background: #fff !important; }
           @page { size: ${settings.paperSize === "Thermal80" ? "80mm auto" : "A4"}; margin: 8mm; }
         }
       `}</style>
@@ -429,6 +455,10 @@ function InvoiceTemplateEditor({ row, onClose, data: allData }) {
                 Font
                 <input type="number" min={8} max={16} value={settings.fontSize} onChange={e => setSettings(s => ({ ...s, fontSize: Math.max(8, Math.min(16, Number(e.target.value) || 11)) }))} style={{ width:50, padding:"4px 6px" }} />
               </label>
+              <select value={settings.textAlign || "left"} onChange={e => setSettings(s => ({ ...s, textAlign: e.target.value }))} style={{ padding:"6px 10px", borderRadius:8, border:"1.5px solid #e2ddd8" }} title="Text alignment">
+                <option value="left">⬅ Align Left</option>
+                <option value="center">⬌ Align Middle</option>
+              </select>
             </>
           )}
           <div style={{ flex:1 }} />
