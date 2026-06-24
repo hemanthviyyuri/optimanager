@@ -581,6 +581,18 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#faf9f7}
 .section-title{font-family:'Playfair Display',serif;font-size:21px;font-weight:700;margin-bottom:18px}
 p{line-height:1.7}
 @media(max-width:768px){.form-grid{grid-template-columns:1fr}}
+.mobile-menu-btn{display:none;align-items:center;justify-content:center;width:42px;height:42px;border-radius:10px;border:1px solid #e8e2db;background:#fff;font-size:20px;cursor:pointer;flex-shrink:0}
+.mobile-topbar{display:none;align-items:center;gap:12px;padding:10px 14px;background:#fff;border-bottom:1px solid #e8e2db;position:sticky;top:0;z-index:40}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90}
+@media(max-width:900px){
+  .app-shell{flex-direction:column !important}
+  .app-sidebar{position:fixed !important;top:0;left:0;height:100vh !important;transform:translateX(-100%);transition:transform .25s ease;z-index:100;box-shadow:2px 0 16px rgba(0,0,0,.18)}
+  .app-sidebar.open{transform:translateX(0)}
+  .app-main{max-width:100vw !important;padding:16px !important}
+  .mobile-menu-btn{display:inline-flex}
+  .mobile-topbar{display:flex}
+  .sidebar-overlay.open{display:block}
+}
 `;
 
 const DEFAULT_ACCOUNTS = [
@@ -1513,6 +1525,7 @@ function LoginScreen({ accounts, onLogin, sbCreds, setSbCreds }) {
 
 function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastSync, onManualSync, children }) {
   const isOwner = session.role === "owner";
+  const [navOpen, setNavOpen] = useState(false);
   const NAV = [
     { id: "dashboard",    label: "Dashboard",        icon: "⬡", show: true },
     { id: "patients",     label: "OP Registration",  icon: "◉", show: can("patients", "view") },
@@ -1540,9 +1553,18 @@ function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastS
   const sbDot = { ok: "#16a34a", error: "#dc2626", testing: "#d97706", pushing: "#d97706", syncing: "#d97706" }[sbStatus] || "#9b8e82";
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", fontFamily: "'DM Sans',sans-serif", background: "#f0ede8", color: "#1a1714" }}>
+    <div className="app-shell" style={{ display: "flex", minHeight: "100vh", fontFamily: "'DM Sans',sans-serif", background: "#f0ede8", color: "#1a1714" }}>
       <style>{GCSS}</style>
-      <aside style={{ width: 236, background: "#fff", borderRight: "1px solid #e8e2db", padding: "18px 10px", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh", flexShrink: 0, overflowY: "auto" }}>
+      <div className="mobile-topbar">
+        <button className="mobile-menu-btn" onClick={() => setNavOpen(true)} aria-label="Open menu">☰</button>
+        <img src={BRAND_LOGO} alt={BRAND_NAME} style={{ width: 32, height: 32, borderRadius: "50%", objectFit: "cover" }} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 14, fontWeight: 700, lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{BRAND_NAME}</div>
+          <div style={{ fontSize: 10, color: "#9b8e82" }}>v{APP_VER}</div>
+        </div>
+      </div>
+      <div className={`sidebar-overlay ${navOpen ? "open" : ""}`} onClick={() => setNavOpen(false)} />
+      <aside className={`app-sidebar ${navOpen ? "open" : ""}`} style={{ width: 236, background: "#fff", borderRight: "1px solid #e8e2db", padding: "18px 10px", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh", flexShrink: 0, overflowY: "auto" }}>
         <div style={{ padding: "0 8px 14px", borderBottom: "1px solid #f0ede8", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
           <img src={BRAND_LOGO} alt={BRAND_NAME} style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
           <div style={{ minWidth: 0 }}>
@@ -1557,7 +1579,7 @@ function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastS
         </div>
         {NAV.filter(n => n.id === "divider" || n.show).map(n =>
           n.id === "divider" ? <div key="div" style={{ margin: "6px 8px", borderTop: "1px solid #f0ede8" }} /> : 
-          <button key={n.id} className={`nav-item ${view === n.id ? "active" : ""}`} onClick={() => setView(n.id)}>
+          <button key={n.id} className={`nav-item ${view === n.id ? "active" : ""}`} onClick={() => { setView(n.id); setNavOpen(false); }}>
             <span style={{ fontSize: 13 }}>{n.icon}</span>{n.label}
             {n.badge > 0 && <span className="badge" style={{ marginLeft: "auto", background: n.badgeColor || "#e55e3a" }}>{n.badge}</span>}
           </button>
@@ -1568,7 +1590,7 @@ function Shell({ session, onLogout, view, setView, can, sbStatus, syncing, lastS
           <button className="btn btn-outline btn-sm" style={{ width: "100%" }} onClick={onLogout}>🔒 Logout</button>
         </div>
       </aside>
-      <main style={{ flex: 1, padding: "26px 30px", overflowY: "auto", maxWidth: "calc(100vw - 236px)" }}>{children}</main>
+      <main className="app-main" style={{ flex: 1, padding: "26px 30px", overflowY: "auto", maxWidth: "calc(100vw - 236px)" }}>{children}</main>
     </div>
   );
 }
