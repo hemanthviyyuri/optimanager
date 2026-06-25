@@ -225,7 +225,7 @@ function ClinicalInvoiceCopy({ copyLabel, settings, row, ctx, items, sub, discou
             : (settings.gstin ? <span style={{ fontSize: fs - 1 }}>GSTIN: {settings.gstin}</span> : null)}
         </div>
         <div style={{ textAlign: "center", flex: 1 }}>
-          <div style={{ fontSize: fs - 1, fontWeight: 600 }}>Order Estimate</div>
+          <div style={{ fontSize: fs - 1, fontWeight: 600 }}>BILL FORM</div>
           <div style={{ fontSize: fs + 6, fontWeight: 800, letterSpacing: 1 }}>{settings.shopName}</div>
           {settings.tagline && <div style={{ fontSize: fs }}>{settings.tagline}</div>}
           {settings.address && <div style={{ fontSize: fs - 1 }}>{settings.address}</div>}
