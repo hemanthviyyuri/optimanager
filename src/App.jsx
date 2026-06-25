@@ -4235,6 +4235,5 @@ function CounsellingSection({ session, data, mutate, audit, onSync, syncing }) {
           </div>
         </Modal>
       )}
-    </div>
-  );
+    </div>  );
 }
