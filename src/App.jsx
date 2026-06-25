@@ -327,12 +327,7 @@ function ClinicalInvoiceCopy({ copyLabel, settings, row, ctx, items, sub, discou
               <td style={{ ...cellMini, fontWeight: 700 }}>DV</td>
               <td style={cellMini}>{ctx.rx.le.dvSph || "—"}</td><td style={cellMini}>{ctx.rx.le.dvCyl || "—"}</td><td style={cellMini}>{ctx.rx.le.dvAxis || "—"}</td><td style={cellMini}>{ctx.rx.le.dvVn || "—"}</td>
             </tr>
-            <tr>
-              <td style={{ ...cellMini, fontWeight: 700 }}>NV</td>
-              <td style={cellMini}>{ctx.rx.re.nvSph || "—"}</td><td style={cellMini}>{ctx.rx.re.nvCyl || "—"}</td><td style={cellMini}>{ctx.rx.re.nvAxis || "—"}</td><td style={cellMini}>{ctx.rx.re.nvVn || "—"}</td>
-              <td style={{ ...cellMini, fontWeight: 700 }}>NV</td>
-              <td style={cellMini}>{ctx.rx.le.nvSph || "—"}</td><td style={cellMini}>{ctx.rx.le.nvCyl || "—"}</td><td style={cellMini}>{ctx.rx.le.nvAxis || "—"}</td><td style={cellMini}>{ctx.rx.le.nvVn || "—"}</td>
-            </tr>
+            {/* NV row intentionally hidden on printed / downloaded invoice (per request) */}
             <tr>
               <td style={{ ...cellMini, fontWeight: 700 }}>ADD</td>
               <td style={cellMini} colSpan={4}>{ctx.rx.add || "—"}</td>
@@ -369,10 +364,28 @@ function ClinicalInvoiceCopy({ copyLabel, settings, row, ctx, items, sub, discou
   );
 }
 
+const SS_WA_TEMPLATE_KEY = "ss_invoice_whatsapp_template_v1";
+const DEFAULT_WA_TEMPLATE = `Hello {{customerName}},
+
+Thank you for visiting *{{shopName}}*.
+Here are your order details:
+
+Bill No: {{billNo}}
+Date: {{billDate}}
+Total: ₹{{total}}
+Advance Paid: ₹{{paid}}
+*Balance Due: ₹{{balance}}*
+
+For any queries please call {{phone}}.
+— {{shopName}}`;
+
 function InvoiceTemplateEditor({ row, onClose, data: allData }) {
   const [settings, setSettings] = useState(loadClinicSettings);
   const [tpl, setTpl] = useState("D");
   const [editing, setEditing] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+  const [waTemplate, setWaTemplate] = useState(() => { try { return localStorage.getItem(SS_WA_TEMPLATE_KEY) || DEFAULT_WA_TEMPLATE; } catch { return DEFAULT_WA_TEMPLATE; } });
+  const [waPhone, setWaPhone] = useState("");
   const items = Array.isArray(row.items) ? row.items : [];
   const sub = items.reduce((s, l) => s + Number(l.qty||0) * Number(l.price||0), 0);
   const discount = Number(row.discount || 0);
@@ -381,8 +394,32 @@ function InvoiceTemplateEditor({ row, onClose, data: allData }) {
   const balance = Math.max(0, total - paid);
 
   useEffect(() => { saveClinicSettings(settings); }, [settings]);
+  useEffect(() => { try { localStorage.setItem(SS_WA_TEMPLATE_KEY, waTemplate); } catch {} }, [waTemplate]);
 
   const ctx = buildInvoiceLookup(row, allData);
+  useEffect(() => { setWaPhone(String(ctx.phone || "").replace(/\D/g, "")); }, [ctx.phone]);
+
+  const renderWaMessage = () => {
+    const map = {
+      customerName: ctx.customerName || row.patientName || "Customer",
+      shopName: settings.shopName || "",
+      billNo: row.id || "—",
+      billDate: row.date || todayStr(),
+      total: (total || ctx.totalPrice || 0).toFixed(2),
+      paid: (paid || ctx.advancePaid || 0).toFixed(2),
+      balance: (balance || ctx.balanceAmt || 0).toFixed(2),
+      phone: settings.phone || "",
+      address: settings.address || "",
+      items: items.map(l => `${l.name} x${l.qty} = ₹${(l.qty*l.price).toFixed(2)}`).join("\n") || "—",
+    };
+    return waTemplate.replace(/\{\{(\w+)\}\}/g, (_, k) => (map[k] !== undefined ? String(map[k]) : `{{${k}}}`));
+  };
+  const openWhatsApp = () => {
+    const msg = encodeURIComponent(renderWaMessage());
+    const phone = String(waPhone || "").replace(/\D/g, "");
+    const url = phone ? `https://wa.me/${phone}?text=${msg}` : `https://wa.me/?text=${msg}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
 
   // Legacy markdown templates (A/B/C) still available.
   const legacyData = {
@@ -462,6 +499,7 @@ function InvoiceTemplateEditor({ row, onClose, data: allData }) {
             </>
           )}
           <div style={{ flex:1 }} />
+          <button className="btn btn-sm" style={{ background:"#dcfce7", border:"1.5px solid #16a34a", color:"#166534", fontWeight:700 }} onClick={() => setShowShare(true)} title="Share on WhatsApp">📤 Share</button>
           <button className="btn btn-sm" style={{ background: editing ? "#fde68a" : "#fff", border:"1.5px solid #d97706", color:"#92400e", fontWeight:700 }} onClick={() => setEditing(v => !v)}>✎ {editing ? "Done Editing" : "EDIT"}</button>
           <button className="btn btn-outline btn-sm" onClick={printNow}>🖨 Print</button>
           <button className="btn btn-dark btn-sm" onClick={onClose}>Close</button>
@@ -531,6 +569,35 @@ function InvoiceTemplateEditor({ row, onClose, data: allData }) {
           )}
         </div>
       </div>
+      {showShare && (
+        <div onClick={() => setShowShare(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.55)", zIndex:10000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:14, padding:20, width:"min(620px, 96vw)", maxHeight:"92vh", overflow:"auto", boxShadow:"0 25px 60px rgba(0,0,0,.4)" }}>
+            <div style={{ display:"flex", alignItems:"center", marginBottom:12 }}>
+              <div style={{ fontWeight:700, fontSize:17 }}>📤 Share via WhatsApp</div>
+              <div style={{ flex:1 }} />
+              <button className="btn btn-sm" onClick={() => setShowShare(false)}>✕</button>
+            </div>
+            <div style={{ display:"grid", gap:10, fontSize:13 }}>
+              <label style={{ display:"grid", gap:4 }}>
+                <span style={{ fontWeight:600, color:"#6b5e52" }}>Recipient phone (with country code, digits only)</span>
+                <input type="tel" value={waPhone} onChange={e => setWaPhone(e.target.value)} placeholder="e.g. 919876543210" style={{ padding:"8px 10px", border:"1.5px solid #e2ddd8", borderRadius:8 }} />
+              </label>
+              <label style={{ display:"grid", gap:4 }}>
+                <span style={{ fontWeight:600, color:"#6b5e52" }}>Message template (placeholders: {"{{customerName}} {{shopName}} {{billNo}} {{billDate}} {{total}} {{paid}} {{balance}} {{phone}} {{address}} {{items}}"})</span>
+                <textarea rows={10} value={waTemplate} onChange={e => setWaTemplate(e.target.value)} style={{ padding:"8px 10px", border:"1.5px solid #e2ddd8", borderRadius:8, fontFamily:"monospace", fontSize:12 }} />
+              </label>
+              <div>
+                <div style={{ fontWeight:600, color:"#6b5e52", marginBottom:4 }}>Preview</div>
+                <pre style={{ background:"#f8f6f2", border:"1px solid #e8e2db", padding:10, borderRadius:8, whiteSpace:"pre-wrap", fontFamily:"inherit", fontSize:13, margin:0 }}>{renderWaMessage()}</pre>
+              </div>
+              <div style={{ display:"flex", gap:8, justifyContent:"flex-end", marginTop:6 }}>
+                <button className="btn btn-outline btn-sm" onClick={() => setWaTemplate(DEFAULT_WA_TEMPLATE)}>Reset template</button>
+                <button className="btn btn-sm" style={{ background:"#25D366", color:"#fff", fontWeight:700, border:"none" }} onClick={openWhatsApp}>🟢 Open WhatsApp</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3342,6 +3409,28 @@ function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing })
   const [modal, setModal] = useState(false);
   const [form,  setForm]  = useState({ patientName: "", date: todayStr(), items: [], discount: 0 });
   const [lN, setLN] = useState(""); const [lQ, setLQ] = useState(1); const [lP, setLP] = useState(0);
+  const [showSuggest, setShowSuggest] = useState(false);
+  const stockRows = safeArray(data.stock).filter(s => (isOwner || s.branch === branch));
+  const formatStockLabel = (s) => {
+    const parts = [s.name];
+    const modelNo = s.sku || s.modelNo || s.boxNo;
+    if (s.category === "Frames" && modelNo) parts.push(`Model: ${modelNo}`);
+    else if (modelNo) parts.push(modelNo);
+    if (s.category === "Lenses" && s.lensType) parts.push(s.lensType);
+    return parts.filter(Boolean).join(" · ");
+  };
+  const suggestions = (() => {
+    const q = lN.trim().toLowerCase();
+    if (!q) return [];
+    return stockRows
+      .filter(s => (s.name || "").toLowerCase().includes(q) || (s.sku || "").toLowerCase().includes(q) || (s.brand || "").toLowerCase().includes(q))
+      .slice(0, 8);
+  })();
+  const pickStockItem = (s) => {
+    setLN(formatStockLabel(s));
+    if (s.price !== undefined && s.price !== null && s.price !== "") setLP(Number(s.price) || 0);
+    setShowSuggest(false);
+  };
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [invoiceRow, setInvoiceRow] = useState(null);
@@ -3421,7 +3510,31 @@ function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing })
           {err && <div style={{ marginBottom: 14, fontSize: 13, padding: "8px 14px", borderRadius: 8, background: "#fee2e2", color: "#dc2626" }}>{err}</div>}
           <div className="form-grid" style={{ marginBottom: 14 }}><div><label>Patient Name</label><input type="text" value={form.patientName} onChange={e => setForm(f => ({ ...f, patientName: e.target.value }))} /></div><div><label>Date</label><input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div></div>
           <label>Add Item</label>
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}><input type="text" placeholder="Item name" value={lN} onChange={e => setLN(e.target.value)} style={{ flex: 2 }} /><input type="number" placeholder="Qty" value={lQ} onChange={e => setLQ(e.target.value)} style={{ width: 60 }} /><input type="number" placeholder="₹" value={lP} onChange={e => setLP(e.target.value)} style={{ width: 90 }} /><button className="btn btn-dark btn-sm" onClick={addLine}>Add</button></div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems:"flex-start" }}>
+            <div style={{ flex: 2, position: "relative" }}>
+              <input type="text" placeholder="Item name — type to search frames / lenses" value={lN}
+                onChange={e => { setLN(e.target.value); setShowSuggest(true); }}
+                onFocus={() => setShowSuggest(true)}
+                onBlur={() => setTimeout(() => setShowSuggest(false), 180)}
+                style={{ width:"100%" }} />
+              {showSuggest && suggestions.length > 0 && (
+                <div style={{ position:"absolute", top:"100%", left:0, right:0, background:"#fff", border:"1.5px solid #e2ddd8", borderRadius:8, marginTop:4, maxHeight:220, overflowY:"auto", zIndex:50, boxShadow:"0 8px 24px rgba(0,0,0,.12)" }}>
+                  {suggestions.map(s => (
+                    <div key={s.id} onMouseDown={() => pickStockItem(s)} style={{ padding:"8px 10px", cursor:"pointer", borderBottom:"1px solid #f3efe9", display:"flex", justifyContent:"space-between", gap:8, fontSize:13 }}>
+                      <div>
+                        <div style={{ fontWeight:600 }}>{s.name} {s.category === "Frames" && (s.sku || s.modelNo) ? <span style={{ color:"#1d4ed8" }}>· Model {s.sku || s.modelNo}</span> : null}</div>
+                        <div style={{ fontSize:11, color:"#9b8e82" }}>{[s.category, s.brand, s.category === "Lenses" && s.lensType, `Qty ${s.qty ?? 0}`].filter(Boolean).join(" · ")}</div>
+                      </div>
+                      <div style={{ fontWeight:700, whiteSpace:"nowrap" }}>{s.price ? currency(Number(s.price)) : "—"}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <input type="number" placeholder="Qty" value={lQ} onChange={e => setLQ(e.target.value)} style={{ width: 60 }} />
+            <input type="number" placeholder="₹" value={lP} onChange={e => setLP(e.target.value)} style={{ width: 90 }} />
+            <button className="btn btn-dark btn-sm" onClick={addLine}>Add</button>
+          </div>
           {form.items.length > 0 && <div style={{ background: "#faf9f7", borderRadius: 10, padding: "10px 14px", marginBottom: 12 }}>{form.items.map((l, i) => <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}><span>{l.name} × {l.qty}</span><span style={{ fontWeight: 600 }}>{currency(l.qty * l.price)}</span></div>)}<div style={{ borderTop: "1px solid #e8e2db", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontWeight: 700 }}><span>Sub</span><span>{currency(sub)}</span></div></div>}
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}><div style={{ flex: 1 }}><label>Discount (₹)</label><input type="number" value={form.discount} onChange={e => setForm(f => ({ ...f, discount: e.target.value }))} /></div><div style={{ flex: 1 }}><div style={{ fontSize: 11, color: "#9b8e82" }}>TOTAL</div><div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 700 }}>{currency(sub - Number(form.discount))}</div></div></div>
         </Modal>
