@@ -40,6 +40,18 @@ function writeJSON(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
 }
 
+// ---------- Simple pub/sub (so UI can react to connect/disconnect/config changes) ----------
+const listeners = new Set();
+function notify() {
+  for (const fn of listeners) {
+    try { fn(); } catch {}
+  }
+}
+export function subscribe(callback) {
+  listeners.add(callback);
+  return () => listeners.delete(callback); // unsubscribe
+}
+
 // ---------- Config ----------
 export function getConfig() {
   return readJSON(LS.cfg, { clientId: "", autoSync: false });
@@ -47,8 +59,12 @@ export function getConfig() {
 export function setConfig(patch) {
   const next = { ...getConfig(), ...patch };
   writeJSON(LS.cfg, next);
+  notify();
   return next;
 }
+// Aliases expected by some UI components.
+export const loadConfig = getConfig;
+export const saveConfig = setConfig;
 
 // ---------- Sync map (patientId -> Google resourceName) ----------
 export function getSyncMap() { return readJSON(LS.map, {}); }
@@ -69,6 +85,7 @@ function getToken() {
 function saveToken(tokenResponse) {
   const expires_at = Date.now() + (tokenResponse.expires_in || 3600) * 1000;
   writeJSON(LS.token, { access_token: tokenResponse.access_token, expires_at });
+  notify();
 }
 export function isConnected() { return !!getToken(); }
 export function signOut() {
@@ -77,7 +94,10 @@ export function signOut() {
   if (t?.access_token && window.google?.accounts?.oauth2?.revoke) {
     try { window.google.accounts.oauth2.revoke(t.access_token, () => {}); } catch {}
   }
+  notify();
 }
+// Alias expected by some UI components.
+export function disconnect() { return signOut(); }
 
 // ---------- Load GIS script once ----------
 let gisPromise = null;
@@ -119,6 +139,11 @@ export async function signIn() {
       reject(e);
     }
   });
+}
+// Alias expected by some UI components. `opts.interactive` is accepted but
+// ignored since signIn() always uses the interactive consent flow.
+export async function connect(opts = {}) {
+  return signIn();
 }
 
 async function ensureToken() {
@@ -243,6 +268,8 @@ export async function autoSyncIfEnabled(patient) {
     return false;
   }
 }
+// Alias expected by some UI components.
+export const autoSyncPatient = autoSyncIfEnabled;
 
 export async function syncMany(patients, onProgress) {
   const total = patients.length;
