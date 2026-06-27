@@ -978,6 +978,8 @@ function sbReady() { return _sb !== null; }
 let _sbRealtimeClient = null;
 let _sbRealtimeChannel = null;
 let _sbRealtimeKey = "";
+let _sbRealtimeConnected = false; // true only while the channel is actually SUBSCRIBED
+function isRealtimeConnected() { return _sbRealtimeConnected; }
 async function startRealtime(url, key, onChange) {
   if (typeof window === "undefined" || !url || !key) return;
   const sig = `${url}::${key}`;
@@ -997,14 +999,15 @@ async function startRealtime(url, key, onChange) {
     ch.on("postgres_changes", { event: "*", schema: "public" }, () => {
       try { onChange && onChange(); } catch {}
     });
-    ch.subscribe();
+    ch.subscribe((status) => { _sbRealtimeConnected = (status === "SUBSCRIBED"); });
     _sbRealtimeChannel = ch;
-  } catch (e) { /* realtime is best-effort; polling remains as fallback */ }
+  } catch (e) { _sbRealtimeConnected = false; /* realtime is best-effort; polling remains as fallback */ }
 }
 function stopRealtime() {
   try { if (_sbRealtimeChannel && _sbRealtimeClient) _sbRealtimeClient.removeChannel(_sbRealtimeChannel); } catch {}
   _sbRealtimeChannel = null;
   _sbRealtimeKey = "";
+  _sbRealtimeConnected = false;
 }
 
 const SB_TABLES = {
@@ -1624,8 +1627,15 @@ export default function App() {
     };
     startRealtime(sbCreds.url, sbCreds.key, onLiveChange);
 
-    // Fallback poll (in case realtime is not enabled on the project / drops).
-    const id = setInterval(() => syncRef.current(sbCreds.url, sbCreds.key), 8000);
+    // Fallback poll — only fires when realtime genuinely isn't connected
+    // (e.g. dropped, or disabled on the project). Each cycle re-downloads
+    // every table in full, so this must stay infrequent: it's a safety net,
+    // not the primary sync path. Previously ran every 8s unconditionally,
+    // which was re-fetching the entire database ~7x/minute per open tab —
+    // the main driver of excess egress.
+    const id = setInterval(() => {
+      if (!isRealtimeConnected()) syncRef.current(sbCreds.url, sbCreds.key);
+    }, 90000);
     return () => {
       clearInterval(id);
       if (liveTimer) clearTimeout(liveTimer);
