@@ -2707,7 +2707,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
   const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField) && inDateRange(r, dateFrom, dateTo)), sortKey, sortDir);
 
   const KS_CSV_HEADERS = [
-    "date","time","mrNo","patientId","name","phone","address","gender","age","complaint","pastHistory",
+    "date","time","mrNo","patientId","relationType","relationName","name","phone","address","gender","age","complaint","pastHistory",
     "iop","bp","ducts","rbs","dilatedWith","dilatedContinuee","optom",
     "vaOd","vaOs","retinoscopyOd","retinoscopyOs",
     "reSpherAR","reCylAR","reAxisAR","leSpherAR","leCylAR","leAxisAR",
