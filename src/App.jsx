@@ -2397,6 +2397,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, h
     { key:"paymentMode", label:"Payment" }, { key:"paymentAmount", label:"Amount" }, { key:"ref", label:"Ref/Camp" }, { key:"visitType", label:"Visit" }, { key:"branch", label:"Branch" },
   ];
   const [dupWarning, setDupWarning] = useState(null);
+  const [nameDupWarning, setNameDupWarning] = useState(null);
 
 
   const nextPatientId = () => {
@@ -2417,16 +2418,28 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, h
     (r.mrNo && k.mrNo === r.mrNo) || (r.patientId && k.patientId === r.patientId) || (r.phone && k.phone === r.phone)
   ) || null;
 
-  const F = k => e => { setForm(f => ({ ...f, [k]: e.target.value })); setDupWarning(null); };
+  const F = k => e => { setForm(f => ({ ...f, [k]: e.target.value })); setDupWarning(null); setNameDupWarning(null); };
   const T = k => () => setTouch(t => ({ ...t, [k]: true }));
+
+  const handleNameBlur = () => {
+    setTouch(t => ({ ...t, name: true }));
+    const nm = String(form.name || "").trim().toLowerCase();
+    if (!nm) { setNameDupWarning(null); return; }
+    const match = safeArray(data.patients).find(p => String(p.name || "").trim().toLowerCase() === nm && p.id !== form.id);
+    setNameDupWarning(match
+      ? { msg: `⚠ Name already exists — "${match.name}" (MR No: ${match.mrNo || "—"}, Patient ID: ${match.patientId || "—"}). Please confirm this isn't a duplicate entry.` }
+      : null);
+  };
 
   const handlePhoneBlur = () => {
     setTouch(t => ({ ...t, phone: true }));
     const match = safeArray(data.patients).find(p => p.phone === form.phone && p.id !== form.id);
     if (match && form.phone && form.phone.length === 10) {
       const newCount = (match.visitCount || 1) + 1;
-      setDupWarning({ msg: `⚠ Existing patient found: ${match.name} (${match.patientId}) — Visit #${newCount}`, patient: match, visitCount: newCount });
+      setDupWarning({ msg: `⚠ Phone number already exists — matched to ${match.name} (MR No: ${match.mrNo || "—"}, Patient ID: ${match.patientId}). Marking this as Visit #${newCount}.`, patient: match, visitCount: newCount });
       setForm(f => ({ ...f, visitType: newCount === 2 ? "2nd Visit" : newCount === 3 ? "3rd Visit" : `${newCount}th Visit`, visitCount: newCount }));
+    } else {
+      setDupWarning(null);
     }
     // Auto-fill gender / age from the K Sheet when available
     const k = safeArray(data.patientBill).map(unpackKSheetRow).find(kr => kr.phone === form.phone || (form.mrNo && kr.mrNo === form.mrNo));
@@ -2567,6 +2580,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, h
 
       {modal && (
         <Modal title="OP Registration" onClose={() => setModal(false)} onSave={submit} saveLabel="Save Registration" wide>
+          {nameDupWarning && <div style={{ marginBottom:14, background:"#fef9c3", border:"1px solid #fde68a", borderRadius:10, padding:"10px 14px", fontSize:13, color:"#a16207", fontWeight:600 }}>{nameDupWarning.msg}</div>}
           {dupWarning && <div style={{ marginBottom:14, background:"#fef9c3", border:"1px solid #fde68a", borderRadius:10, padding:"10px 14px", fontSize:13, color:"#a16207", fontWeight:600 }}>{dupWarning.msg}</div>}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
             <div><label>Timestamp (Auto)</label><input type="text" value={form.timestamp} readOnly /></div>
@@ -2574,8 +2588,8 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, h
             <div><label>Time</label><input type="time" value={form.time} onChange={F("time")} /></div>
             <div><label>MR No (Manual) *</label><input type="text" placeholder="Enter MR Number" value={form.mrNo} onChange={F("mrNo")} onBlur={T("mrNo")} style={{ ...vStyle(form.mrNo, v => v.trim().length > 0, touch.mrNo), fontWeight: 700 }} />{vMsg(form.mrNo, v => v.trim().length > 0, touch.mrNo, "Required.")}</div>
             <div><label>Patient ID (Auto Generated)</label><input type="text" value={form.patientId} readOnly style={{ fontWeight: 700 }} /></div>
-            <div><label>Visit Type</label><select value={form.visitType} onChange={F("visitType")}>{["New Patient","2nd Visit","3rd Visit","4th Visit","5th Visit","Review","Camp"].map(v => <option key={v}>{v}</option>)}</select></div>
-            <div style={{ gridColumn:"1/-1" }}><label>Name *</label><input type="text" value={form.name} onChange={F("name")} onBlur={T("name")} style={vStyle(form.name, v => v.trim().length > 0, touch.name)} />{vMsg(form.name, v => v.trim().length > 0, touch.name, "Required.")}</div>
+            <div><label>Visit Type</label><select value={form.visitType} onChange={F("visitType")}>{["New Patient","2nd Visit","3rd Visit","4th Visit","5th Visit","Review","Camp","MEDICOVER"].map(v => <option key={v}>{v}</option>)}</select></div>
+            <div style={{ gridColumn:"1/-1" }}><label>Name *</label><input type="text" value={form.name} onChange={F("name")} onBlur={handleNameBlur} style={vStyle(form.name, v => v.trim().length > 0, touch.name)} />{vMsg(form.name, v => v.trim().length > 0, touch.name, "Required.")}</div>
             <div><label>Phone * (10 digits)</label><input type="text" maxLength={10} value={form.phone} onChange={F("phone")} onBlur={handlePhoneBlur} style={vStyle(form.phone, validate.phone, touch.phone)} />{vMsg(form.phone, validate.phone, touch.phone, "10 digits, not starting 0.")}</div>
             <div><label>Gender</label><select value={form.gender || ""} onChange={F("gender")}><option value="">— Select —</option><option>Male</option><option>Female</option><option>Other</option></select></div>
             <div><label>Age</label><input type="number" min="0" placeholder="Age" value={form.age || ""} onChange={F("age")} /></div>
