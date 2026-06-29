@@ -2957,7 +2957,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
                 <div><label>IOP</label><input type="text" value={form.iop} onChange={F("iop")} /></div><div><label>BP</label><input type="text" value={form.bp} onChange={F("bp")} /></div>
                 <div><label>Ducts</label><input type="text" value={form.ducts} onChange={F("ducts")} /></div><div><label>RBS</label><input type="text" value={form.rbs} onChange={F("rbs")} /></div>
                 <div style={{ gridColumn:"span 2" }}><label>Dilated with (D/T/H/C)</label><input type="text" value={form.dilatedWith} onChange={F("dilatedWith")} /></div>
-                <div style={{ gridColumn:"span 2" }}><label>Dilated Continuee</label><input type="text" value={form.dilatedContinuee} onChange={F("dilatedContinuee")} /></div>
+                <div style={{ gridColumn:"span 2" }}><label>Colour Vision</label><input type="text" value={form.dilatedContinuee} onChange={F("dilatedContinuee")} /></div>
                 <div style={{ gridColumn:"span 2" }}><label>Optom Name</label><input type="text" value={form.optom} onChange={F("optom")} /></div>
               </div>
             </div>
@@ -4322,7 +4322,7 @@ function PatientFullView({ patient, kSheet, kSheetCount, meta }) {
         <Row label="Ducts" value={get("ducts")} />
         <Row label="RBS" value={get("rbs")} />
         <Row label="Dilated With" value={get("dilatedWith")} />
-        <Row label="Dilated Continuee" value={get("dilatedContinuee")} />
+        <Row label="Colour Vision" value={get("dilatedContinuee")} />
       </Section>
 
       <Section title="3. Acuity & Retinoscopy" cols={4}>
