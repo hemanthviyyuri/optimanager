@@ -1179,7 +1179,7 @@ async function sbInsert(table, row) {
 }
 
 const now      = () => new Date();
-const ts       = (d = now()) => `${d.toLocaleDateString("en-IN")} ${d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+const ts       = (d = now()) => { const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
 const todayStr = () => now().toISOString().split("T")[0];
 const timeStr  = () => now().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 const currency = (n) => `₹${Number(n || 0).toFixed(2)}`;
