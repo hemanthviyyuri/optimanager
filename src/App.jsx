@@ -2479,27 +2479,76 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, h
       if (!records.length) { setMsg("CSV is empty."); return; }
       let added = 0, skipped = 0;
       const existing = safeArray(data.patients);
-      const startNum = (() => {
+      const normKey = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+
+      // Auto-ID counter — continue from highest existing PT-#### number.
+      let counter = (() => {
         const nums = existing.map(p => parseInt((p.patientId||"").replace(/\D/g,""))).filter(n => !isNaN(n));
         return nums.length ? Math.max(...nums) : 0;
       })();
-      let counter = startNum;
+
+      // Index existing patients by (name|phone) → { patientId, visits }.
+      // Visits counts every prior record for that person regardless of date.
+      const personIndex = new Map();
+      for (const p of existing) {
+        const k = `${normKey(p.name)}|${normKey(p.phone)}`;
+        if (!k.replace("|","")) continue;
+        const prev = personIndex.get(k);
+        if (prev) {
+          prev.visits += 1;
+          if (!prev.patientId && p.patientId) prev.patientId = p.patientId;
+        } else {
+          personIndex.set(k, { patientId: p.patientId || "", visits: 1 });
+        }
+      }
+
       const newRecords = [];
       for (const r of records) {
-        // Import EVERY row — duplicate MR No is allowed (reset daily) and
-        // missing fields are kept blank. Only Patient ID + date are ensured.
-        const mrNo = String(r.mrNo||"").trim();
-        const name = String(r.name||"").trim();
-        const phone = String(r.phone||"").trim();
-        counter += 1;
+        const mrNo  = String(r.mrNo  || "").trim();
+        const name  = String(r.name  || "").trim();
+        const phone = String(r.phone || "").trim();
+        const date  = r.date || todayStr();
+
+        // --- Auto patient-id + visit logic ---------------------------------
+        let patientId = String(r.patientId || "").trim();
+        let visitCount = 1;
+        let visitType = r.visitType || "";
+
+        if (!patientId) {
+          const key = `${normKey(name)}|${normKey(phone)}`;
+          const hasIdentity = !!(normKey(name) || normKey(phone));
+          if (hasIdentity && personIndex.has(key)) {
+            // Existing person — reuse their patientId, bump visit count.
+            const entry = personIndex.get(key);
+            entry.visits += 1;
+            if (!entry.patientId) {
+              counter += 1;
+              entry.patientId = `PT-${String(counter).padStart(4, "0")}`;
+            }
+            patientId = entry.patientId;
+            visitCount = entry.visits;
+          } else {
+            // New patient — generate fresh id and register in index.
+            counter += 1;
+            patientId = `PT-${String(counter).padStart(4, "0")}`;
+            visitCount = 1;
+            if (hasIdentity) personIndex.set(key, { patientId, visits: 1 });
+          }
+        }
+
+        // Visit type: Camp wins; otherwise derive from visit count unless CSV provided one.
+        const isCamp = String(visitType).toLowerCase() === "camp" || String(r.ref || "").trim() !== "";
+        if (isCamp) visitType = "Camp";
+        else if (!visitType) visitType = visitOrdinalLabel(visitCount);
+
         const rec = {
           id: uid(),
-          timestamp: ts(), date: r.date || todayStr(), time: r.time || timeStr(),
-          mrNo, patientId: r.patientId || `PT-${String(counter).padStart(4,"0")}`,
+          timestamp: ts(), date, time: r.time || timeStr(),
+          mrNo, patientId,
           name, phone, address: r.address || "",
           gender: r.gender || "", age: r.age || "",
           designation: r.designation || "", aadharNo: r.aadharNo || "",
-          visitType: r.visitType || "New Patient", visitCount: 1,
+          visitType, visitCount,
           ref: r.ref || "",
           paymentMode: r.paymentMode || "Cash",
           paymentAmount: r.paymentAmount || "",
