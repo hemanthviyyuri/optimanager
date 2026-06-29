@@ -1185,6 +1185,18 @@ const timeStr  = () => now().toLocaleTimeString("en-IN", { hour: "2-digit", minu
 const currency = (n) => `₹${Number(n || 0).toFixed(2)}`;
 const uid      = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
+// Human-friendly timestamp for display: "2026-06-29 22:03:02" -> "27 Jun 2026, 10:03 pm"
+const fmtStamp = (v) => {
+  if (!v) return "";
+  const s = String(v).replace("T", " ");
+  const m = s.match(/(\d{4})-(\d{2})-(\d{2})[ ]?(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return s;
+  const [, y, mo, d, hh, mm] = m;
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  let h = Number(hh); const ap = h >= 12 ? "pm" : "am"; h = h % 12 || 12;
+  return `${d} ${months[Number(mo) - 1]} ${y}, ${h}:${mm} ${ap}`;
+};
+
 // HTML date inputs only display yyyy-mm-dd. Imported CSV/view data can be dd-mm-yyyy.
 const toISODate = (value) => {
   if (!value) return "";
@@ -2678,13 +2690,14 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, h
         const latest = kSheets[0] || null;
         return (
           <Modal title={`Patient · ${viewRow.name || viewRow.mrNo || ""}`} onClose={() => setViewRow(null)} onSave={() => setViewRow(null)} saveLabel="Close" xl>
-            <PatientFullView patient={viewRow} kSheet={latest} kSheetCount={kSheets.length} />
+            <PatientFullView patient={viewRow} kSheet={latest} kSheetCount={kSheets.length} meta={viewRow} />
           </Modal>
         );
       })()}
 
       {modal && (
         <Modal title="OP Registration" onClose={() => setModal(false)} onSave={submit} saveLabel="Save Registration" wide>
+          <RecordMeta record={form} align="flex-start" />
           {nameDupWarning && <div style={{ marginBottom:14, background:"#fef9c3", border:"1px solid #fde68a", borderRadius:10, padding:"10px 14px", fontSize:13, color:"#a16207", fontWeight:600 }}>{nameDupWarning.msg}</div>}
           {dupWarning && <div style={{ marginBottom:14, background:"#fef9c3", border:"1px solid #fde68a", borderRadius:10, padding:"10px 14px", fontSize:13, color:"#a16207", fontWeight:600 }}>{dupWarning.msg}</div>}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
@@ -2905,6 +2918,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
       </div>
       {modal && (
         <Modal title="K Sheet Entry" onClose={()=>setModal(false)} onSave={submit} saveLabel="Save K Sheet" xl>
+          <RecordMeta record={form} align="flex-start" />
           <div style={{ display:"flex", gap:6, marginBottom:18, flexWrap:"wrap" }}>{TABS.map(t => <button key={t.id} className={`btn btn-sm ${tab===t.id?"btn-dark":"btn-outline"}`} onClick={()=>setTab(t.id)}>{t.label}</button>)}</div>
           
           {tab==="basic" && (
@@ -3010,7 +3024,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
       )}
       {viewRow && (
         <Modal title={`K Sheet · ${viewRow.name || viewRow.mrNo || ""}`} onClose={()=>setViewRow(null)} onSave={()=>setViewRow(null)} saveLabel="Close" xl>
-          <PatientFullView patient={viewRow} kSheet={viewRow} />
+          <PatientFullView patient={viewRow} kSheet={viewRow} meta={viewRow} />
         </Modal>
       )}
     </div>
@@ -3077,6 +3091,7 @@ function OptometristSection({ session, data, mutate, can, audit, onSync, syncing
       </div>
       {modal && (
         <Modal title="Optometrist Entry" onClose={()=>setModal(false)} onSave={submit} saveLabel="Save">
+          <RecordMeta record={form} align="flex-start" />
           <div style={{ background:"#f0ede8", borderRadius:10, padding:"12px 14px", marginBottom:14 }}><label style={{ fontWeight:700 }}>🔗 Look Up Patient</label><div style={{ display:"flex", gap:8, marginTop:6 }}><input type="text" placeholder="Enter MR-001 or PT-0001 or phone…" value={form._lookup||""} onChange={e=>setForm(f=>({...f,_lookup:e.target.value}))} style={{ flex:1 }} /><button className="btn btn-dark btn-sm" onClick={()=>lookupPatient(form._lookup||"")}>Look Up</button></div>{mrLookup && <div style={{ fontSize:12,marginTop:6,color:mrLookup.startsWith("✓")?"#16a34a":"#dc2626" }}>{mrLookup}</div>}</div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
             <div><label>MR No</label><input type="text" value={form.mrNo} onChange={F("mrNo")} /></div><div><label>Patient ID</label><input type="text" value={form.patientId} onChange={F("patientId")} /></div>
@@ -3222,6 +3237,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
       </div>
       {modal && (
         <Modal title="Opticals Entry" onClose={()=>setModal(false)} onSave={submit} saveLabel="Save Entry" wide>
+          <RecordMeta record={form} align="flex-start" />
           <div style={{ background:"#f0ede8", borderRadius:10, padding:"12px 14px", marginBottom:14 }}><label style={{ fontWeight:700 }}>🔗 Link to Patient</label><div style={{ display:"flex", gap:8, marginTop:6 }}><input type="text" placeholder="Enter MR-001 or PT-0001 or phone…" value={form._lookup||""} onChange={e=>setForm(f=>({...f,_lookup:e.target.value}))} style={{ flex:1 }} /><button className="btn btn-dark btn-sm" onClick={()=>lookupPatient(form._lookup||"")}>Look Up & Fill</button></div>{mrLookup && <div style={{ fontSize:12,marginTop:6,color:mrLookup.startsWith("✓")?"#16a34a":"#dc2626" }}>{mrLookup}</div>}</div>
           {rxPreview && (<div style={{ background:"#e0f2fe",borderRadius:10,padding:"12px 16px",marginBottom:14,fontSize:13 }}><div style={{ fontWeight:700,marginBottom:8,color:"#0369a1" }}>📋 Prescription from K Sheet</div><div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, fontFamily:"monospace" }}><div><span style={{ color:"#9b8e82",fontSize:11 }}>RE</span><br/>{rxPreview.RE}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>LE</span><br/>{rxPreview.LE}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>ADD</span><br/>{rxPreview.ADD}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>Lens Type</span><br/>{rxPreview.lensType}</div><div><span style={{ color:"#9b8e82",fontSize:11 }}>Frame No</span><br/>{rxPreview.frameNo}</div></div></div>)}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
@@ -3340,7 +3356,7 @@ function OpticalsStatusSection({ session, data, mutate, can, audit, onSync, sync
         <table>
           <thead><tr>
             <th>Bill No</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th>
-            <th>Total</th><th>Discount</th><th>Net Payable</th><th>Advance</th><th>Payment Method</th><th>Balance Payment</th><th>Payment Ref No</th><th>Delivery Status</th><th>K Sheet Rx (Subjective)</th><th>Rep</th>
+            <th>Total</th><th>Discount</th><th>Net Payable</th><th>Advance</th><th>Payment Method</th><th>Balance Payment</th><th>Payment Ref No</th><th>Delivery Status</th><th>K Sheet Rx (Subjective)</th><th>Rep</th><th>Created By</th>
           </tr></thead>
           <tbody>{filtered.map(r => {
             const bal = balanceOf(r);
@@ -3381,6 +3397,7 @@ function OpticalsStatusSection({ session, data, mutate, can, audit, onSync, sync
                   {sub ? (<><div>RE {sub.RE}</div><div>LE {sub.LE}</div><div>ADD {sub.ADD}</div></>) : <span style={{ color:"#9b8e82" }}>No K Sheet</span>}
                 </td>
                 <td style={{ fontSize:11, color:"#9b8e82" }}>{r.optomName||"—"}</td>
+                <td style={{ fontSize:11, color:"#9b8e82", whiteSpace:"nowrap" }}>{r.createdByName ? (<><div style={{ fontWeight:600, color:"#6b5e52" }}>{r.createdByName}{r.createdBy ? ` (${r.createdBy})` : ""}</div>{r.createdAt && <div>{fmtStamp(r.createdAt)}</div>}</>) : "—"}</td>
               </tr>
             );
           })}</tbody>
@@ -3467,6 +3484,7 @@ function LensSaleSection({ session, data, mutate, can, audit, onSync, syncing })
       {modal && (
         <Modal title="Lens Sale Entry" onClose={()=>setModal(false)} onSave={submit} saveLabel="Save Bill" wide>
           <div style={{ background:"linear-gradient(90deg,#1d4ed8,#3b82f6)", color:"#fff", padding:"10px 14px", borderRadius:10, marginBottom:14, fontWeight:700 }}>Lens Sale</div>
+          <RecordMeta record={form} align="flex-start" />
 
           <div style={{ background:"#f0ede8", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
             <label style={{ fontWeight:700 }}>🔗 Link to Patient (MR / Patient ID / Phone)</label>
@@ -3691,6 +3709,7 @@ function PurchaseOrderSection({ session, data, mutate, can, audit, onSync, synci
       {modal && (
         <Modal title={modal === "add" ? "New Purchase Order" : "Edit Purchase Order"} onClose={() => setModal(null)} onSave={save} saveLabel="Save PO" wide>
           <div style={{ background:"linear-gradient(90deg,#166534,#16a34a)", color:"#fff", padding:"10px 14px", borderRadius:10, marginBottom:14, fontWeight:700 }}>Purchase Order · {form.category}</div>
+          <RecordMeta record={form} align="flex-start" />
 
           <div className="form-grid">
             <div><label>PO No *</label><input type="text" value={form.poNo} onChange={F("poNo")} /></div>
@@ -3804,6 +3823,7 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
       </div>
       {modal && (
         <Modal title={modal === "add" ? "Add Stock" : "Edit Stock"} onClose={() => setModal(null)} onSave={save} saveLabel="Save Inventory">
+          <RecordMeta record={form} align="flex-start" />
           <div className="form-grid">
             <div><label>SKU</label><input type="text" value={form.sku} onChange={F("sku")} /></div>
             <div><label>Category</label><select value={form.category} onChange={F("category")}>{["Frames", "Contact Lenses", "Lenses", "Accessories"].map(c => <option key={c}>{c}</option>)}</select></div>
@@ -4206,11 +4226,32 @@ function SectionHeader({ title, onAdd, onExport, onImport, onTemplate, onSync, s
   );
 }
 
+// ── Reusable "who created / last edited this record" banner ──────────
+// Shows staff user id + name + timestamp for any record that carries the
+// standard createdBy / createdByName / createdAt (+ updated*) fields.
+function RecordMeta({ record, align = "flex-end" }) {
+  const r = record || {};
+  if (!r.createdBy && !r.createdByName && !r.createdAt && !r.updatedAt) return null;
+  const item = (label, color, body) => (
+    <span style={{ display:"inline-flex", alignItems:"center", gap:5 }}>
+      <span style={{ fontWeight:800, textTransform:"uppercase", letterSpacing:".05em", fontSize:9, color }}>{label}</span>
+      <span style={{ fontFamily:"monospace", color:"#3b2f25" }}>{body}</span>
+    </span>
+  );
+  return (
+    <div style={{ display:"flex", flexWrap:"wrap", gap:"6px 18px", justifyContent:align, alignItems:"center", marginBottom:14, padding:"8px 12px", background:"#f8f6f2", border:"1px solid #ece6df", borderRadius:8, fontSize:11.5, color:"#6b5e52" }}>
+      {(r.createdByName || r.createdBy) && item("Created by", "#1d4ed8", `${r.createdByName || "—"}${r.createdBy ? ` (${r.createdBy})` : ""}`)}
+      {r.createdAt && item("On", "#9b8e82", fmtStamp(r.createdAt))}
+      {(r.updatedByName || r.updatedAt) && item("Last edited", "#b45309", `${r.updatedByName || "—"}${r.updatedBy ? ` (${r.updatedBy})` : ""}${r.updatedAt ? ` · ${fmtStamp(r.updatedAt)}` : ""}`)}
+    </div>
+  );
+}
+
 // ── Read-only grouped view of a patient + K-Sheet record ─────────────
 // Mirrors the 5 K-Sheet tabs:
 //   1. Patient Info, 2. History & Vitals, 3. Acuity & Retinoscopy,
 //   4. AR & Subjective, 5. Eye Exam (MD)
-function PatientFullView({ patient, kSheet, kSheetCount }) {
+function PatientFullView({ patient, kSheet, kSheetCount, meta }) {
   const k = kSheet || {};
   const p = patient || {};
   const get = (key) => {
@@ -4231,6 +4272,7 @@ function PatientFullView({ patient, kSheet, kSheetCount }) {
   );
   return (
     <div>
+      <RecordMeta record={meta || kSheet || patient} />
       {typeof kSheetCount === "number" && (
         <div style={{ marginBottom: 14, fontSize: 12, color:"#6b5e52" }}>
           {kSheetCount > 0
@@ -4411,9 +4453,9 @@ function PatientStatusSection({ session, data, onSync, syncing }) {
       </div>
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
-          <thead><tr><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Branch</th><th>Registered</th><th>Current Status</th></tr></thead>
+          <thead><tr><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Branch</th><th>Registered</th><th>Current Status</th><th>Created By</th></tr></thead>
           <tbody>
-            {filtered.length === 0 && <tr><td colSpan={7} style={{ textAlign:"center", color:"#9b8e82", padding:24 }}>No patients match.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={8} style={{ textAlign:"center", color:"#9b8e82", padding:24 }}>No patients match.</td></tr>}
             {filtered.map(p => (
               <tr key={p.id}>
                 <td style={{ fontFamily:"monospace", fontWeight:700 }}>{p.mrNo || "—"}</td>
@@ -4423,6 +4465,7 @@ function PatientStatusSection({ session, data, onSync, syncing }) {
                 <td><span className="tag" style={{ background:"#f0ede8", color:"#6b5e52" }}>{p.branch}</span></td>
                 <td style={{ fontSize:11, color:"#9b8e82" }}>{p.date}</td>
                 <td><span className="tag" style={{ background:p._status.bg, color:p._status.color }}>{p._status.label}</span></td>
+                <td style={{ fontSize:11, color:"#9b8e82", whiteSpace:"nowrap" }}>{p.createdByName ? (<><div style={{ fontWeight:600, color:"#6b5e52" }}>{p.createdByName}{p.createdBy ? ` (${p.createdBy})` : ""}</div>{p.createdAt && <div>{fmtStamp(p.createdAt)}</div>}</>) : "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -4638,6 +4681,7 @@ function CounsellingSection({ session, data, mutate, audit, onSync, syncing }) {
 
       {modal && (
         <Modal title={form.id ? "Edit Counselling Entry" : "New Counselling Entry"} onClose={() => setModal(false)} onSave={submit} saveLabel={form.id ? "Update Entry" : "Save Entry"} wide>
+          <RecordMeta record={form} align="flex-start" />
           <div style={{ background: "#f0ede8", borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
             <label style={{ fontWeight: 700 }}>🔗 Look Up Patient</label>
             <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
