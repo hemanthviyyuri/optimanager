@@ -1338,6 +1338,56 @@ function dedupePatientVisits(rows) {
   }
   return out;
 }
+
+// ── Quick filter tabs (View All / Today New OP / Camp / Medicover etc.) ──
+const QUICK_FILTERS = [
+  { id: "all",              label: "View All" },
+  { id: "todayNew",         label: "Today New OP" },
+  { id: "camp",             label: "All Camp" },
+  { id: "todayCampRevisit", label: "Today Camp/Revisit" },
+  { id: "medicover",        label: "Medicover All" },
+  { id: "todayMedicover",   label: "Today Medicover" },
+];
+function QuickFilterTabs({ value, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "6px 0 10px" }}>
+      {QUICK_FILTERS.map(f => (
+        <button
+          key={f.id}
+          className={`btn btn-sm ${value === f.id ? "btn-dark" : "btn-outline"}`}
+          onClick={() => onChange(f.id)}
+        >{f.label}</button>
+      ))}
+    </div>
+  );
+}
+// Resolve visit type for a row. For OP Registration rows, use the row's own
+// visitType; for K Sheet / Opticals / Counselling rows, look up the matching
+// patient (by MR No / Patient ID / phone) and use that patient's visitType.
+function resolveVisitType(row, patients) {
+  if (row && row.visitType) return row.visitType;
+  const ps = safeArray(patients);
+  const m = ps.find(p =>
+    (row.mrNo && p.mrNo && String(p.mrNo).toLowerCase() === String(row.mrNo).toLowerCase()) ||
+    (row.patientId && p.patientId && String(p.patientId).toLowerCase() === String(row.patientId).toLowerCase()) ||
+    (row.phone && p.phone && p.phone === row.phone)
+  );
+  return m?.visitType || "";
+}
+function matchesQuickFilter(row, quickFilter, patients) {
+  if (!quickFilter || quickFilter === "all") return true;
+  const vt = String(resolveVisitType(row, patients) || "").toLowerCase().trim();
+  const today = isTodayDate(row.date || row.timestamp);
+  const isNew = vt === "" || vt === "new patient" || vt === "new";
+  const isRevisit = /visit/.test(vt) && !isNew; // 2nd Visit, 3rd Visit, ... or "Review"
+  const isReview = vt === "review";
+  if (quickFilter === "todayNew") return today && isNew;
+  if (quickFilter === "camp") return vt === "camp";
+  if (quickFilter === "todayCampRevisit") return today && (vt === "camp" || isRevisit || isReview);
+  if (quickFilter === "medicover") return vt === "medicover";
+  if (quickFilter === "todayMedicover") return today && vt === "medicover";
+  return true;
+}
 function sortRows(rows, key, dir) {
   if (!key) return rows;
   const mul = dir === "asc" ? 1 : -1;
@@ -2390,6 +2440,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, h
   const [sortDir, setSortDir] = useState("desc");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [quickFilter, setQuickFilter] = useState("all");
   const FS_FIELDS = [
     { key:"date", label:"Date" }, { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
     { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"gender", label:"Gender" }, { key:"age", label:"Age" },
@@ -2569,7 +2620,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, h
 
 
   const deduped = dedupePatientVisits(rows);
-  const filtered = sortRows(deduped.filter(r => matchSearch(r, search, FS_FIELDS, filterField) && inDateRange(r, dateFrom, dateTo)), sortKey, sortDir);
+  const filtered = sortRows(deduped.filter(r => matchSearch(r, search, FS_FIELDS, filterField) && inDateRange(r, dateFrom, dateTo) && matchesQuickFilter(r, quickFilter, data.patients)), sortKey, sortDir);
 
   return (
     <div>
@@ -2583,6 +2634,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, h
         onAdd={can("patients","add") ? () => { setForm(blank()); setTouch({}); setMsg(""); setDupWarning(null); setModal(true); } : null}
         msg={msg}
       />
+      <QuickFilterTabs value={quickFilter} onChange={setQuickFilter} />
       <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, phone, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} />
 
       <div className="card" style={{ overflowX:"auto" }}>
@@ -2674,6 +2726,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
   const [sortDir, setSortDir] = useState("desc");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [quickFilter, setQuickFilter] = useState("all");
   const FS_FIELDS = [
     { key:"date", label:"Date" }, { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
     { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"gender", label:"Gender" }, { key:"age", label:"Age" },
@@ -2767,7 +2820,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
     : desig === "OPTOM"
       ? ALL_TABS.filter(t => t.id !== "eye")
       : ALL_TABS.filter(t => t.id === "basic"); // FRONT DESK STAFF → patient info only
-  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField) && inDateRange(r, dateFrom, dateTo)), sortKey, sortDir);
+  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField) && inDateRange(r, dateFrom, dateTo) && matchesQuickFilter(r, quickFilter, data.patients)), sortKey, sortDir);
 
   const KS_CSV_HEADERS = [
     "date","time","mrNo","patientId","relationType","relationName","name","phone","address","gender","age","complaint","pastHistory",
@@ -2821,6 +2874,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
         msg={msg}
       />
 
+      <QuickFilterTabs value={quickFilter} onChange={setQuickFilter} />
       <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, phone, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
@@ -3045,6 +3099,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
   const [mrLookup, setMrLookup] = useState("");
   const [search,   setSearch]   = useState("");
   const [filterField, setFilterField] = useState("");
+  const [quickFilter, setQuickFilter] = useState("all");
   const [sortKey, setSortKey] = useState("timestamp");
   const [sortDir, setSortDir] = useState("desc");
   const FS_FIELDS = [
@@ -3089,7 +3144,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
   const canEdit = isOwner || can("opticals","edit");
 
   const del = id => { if (confirm("Delete?")) { mutate("opticals", arr=>arr.filter(x=>x.id!==id), null, id); audit("DELETE",{type:"opticals",id}); } };
-  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField)), sortKey, sortDir);
+  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField) && matchesQuickFilter(r, quickFilter, data.patients)), sortKey, sortDir);
 
   const OPT_CSV_HEADERS = ["date","time","billNo","mrNo","patientId","name","phone","address","lensType","frameNo","totalPrice","discount","advance","advancePaymentMethod","transactionId","balance","deliveryStatus","optomName","branch"];
   const handleImport = () => {
@@ -3131,6 +3186,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
   return (
     <div>
       <SectionHeader title="Opticals" onSync={onSync} syncing={syncing} onTemplate={() => downloadCSVTemplate(OPT_CSV_HEADERS, "opticals_template.csv")} onImport={(can("opticals","add") || isOwner) ? handleImport : null} onExport={() => exportCSV(rows.map(({id,...r})=>r),"opticals.csv")} onAdd={can("opticals","add") ? () => { setForm(blank()); setMsg(""); setRxPreview(null); setMrLookup(""); setModal(true); } : null} msg={msg} />
+      <QuickFilterTabs value={quickFilter} onChange={setQuickFilter} />
       <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
@@ -4490,6 +4546,7 @@ function CounsellingSection({ session, data, mutate, audit, onSync, syncing }) {
   const [filterField, setFilterField] = useState("");
   const [sortKey, setSortKey] = useState("timestamp");
   const [sortDir, setSortDir] = useState("desc");
+  const [quickFilter, setQuickFilter] = useState("all");
   const FS_FIELDS = [
     { key:"timestamp", label:"Date/Time" }, { key:"mrNo", label:"MR No" }, { key:"patientId", label:"Patient ID" },
     { key:"name", label:"Name" }, { key:"phone", label:"Phone" }, { key:"advice", label:"Advice" }, { key:"remarks", label:"Remarks" },
@@ -4538,7 +4595,7 @@ function CounsellingSection({ session, data, mutate, audit, onSync, syncing }) {
   const del = id => { if (confirm("Delete counselling entry?")) { mutate("counselling", arr => safeArray(arr).filter(x => x.id !== id)); audit("DELETE", { type: "counselling", id }); } };
   const openEdit = (row) => { setForm({ ...row }); setMrLookup(""); setMsg(""); setModal(true); };
 
-  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField)), sortKey, sortDir);
+  const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField) && matchesQuickFilter(r, quickFilter, data.patients)), sortKey, sortDir);
 
   return (
     <div>
@@ -4546,6 +4603,7 @@ function CounsellingSection({ session, data, mutate, audit, onSync, syncing }) {
         onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "counselling.csv")}
         onAdd={() => { setForm(blank()); setMrLookup(""); setMsg(""); setModal(true); }} msg={msg} />
 
+      <QuickFilterTabs value={quickFilter} onChange={setQuickFilter} />
       <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, MR No, Patient ID, phone…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
 
       <div className="card" style={{ overflowX: "auto" }}>
