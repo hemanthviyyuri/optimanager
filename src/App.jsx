@@ -1331,8 +1331,12 @@ function dedupePatientVisits(rows) {
       (a, b) => (rowTime(a.date) || rowTime(a.timestamp)) - (rowTime(b.date) || rowTime(b.timestamp))
     );
     uniq.forEach((r, i) => {
-      const camp = norm(r.visitType) === "camp" || String(r.ref || "").trim() !== "";
-      const visitType = camp ? "Camp" : visitOrdinalLabel(i + 1);
+      const vt = norm(r.visitType);
+      const camp = vt === "camp" || String(r.ref || "").trim() !== "";
+      // Preserve explicitly-chosen special visit types; only auto-number
+      // the default ordinal flow (New Patient / Nth Visit).
+      const special = vt === "medicover" || vt === "review";
+      const visitType = special ? r.visitType : (camp ? "Camp" : visitOrdinalLabel(i + 1));
       out.push({ ...r, visitType, visitCount: i + 1 });
     });
   }
