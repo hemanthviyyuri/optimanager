@@ -2841,7 +2841,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
 
   const KS_CSV_HEADERS = [
     "date","time","mrNo","patientId","relationType","relationName","name","phone","address","gender","age","complaint","pastHistory",
-    "iop","bp","ducts","rbs","dilatedWith","dilatedContinuee","optom",
+    "iop","bp","ducts","rbs","dilatedWith","Colour Vision","optom",
     "vaOd","vaOs","retinoscopyOd","retinoscopyOs",
     "reSpherAR","reCylAR","reAxisAR","leSpherAR","leCylAR","leAxisAR",
     "reSpherSub","reCylSub","reAxisSub","leSpherSub","leCylSub","leAxisSub","add",
@@ -2855,6 +2855,10 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
       let added = 0, skipped = 0;
       const newRecords = [];
       for (const r of records) {
+        if (r["Colour Vision"] !== undefined && r.dilatedContinuee === undefined) {
+          r.dilatedContinuee = r["Colour Vision"];
+          delete r["Colour Vision"];
+        }
         const name = String(r.name||"").trim();
         const mrNo = String(r.mrNo||"").trim();
         if (!name || !mrNo) { skipped++; continue; }
