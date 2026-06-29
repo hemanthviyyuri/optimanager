@@ -2645,7 +2645,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
       );
       const prior = priorSheets.sort((a,b) => (b.timestamp||"").localeCompare(a.timestamp||""))[0];
       setForm(f => {
-        const base = { ...f, mrNo: found.mrNo || f.mrNo, patientId: found.patientId || f.patientId, name: found.name, phone: found.phone, address: found.address || found.town || "" };
+        const base = { ...f, mrNo: found.mrNo || f.mrNo, patientId: found.patientId || f.patientId, name: found.name, phone: found.phone, address: found.address || found.town || "", date: toISODate(found.date) || f.date };
         if (!prior) return base;
         // Merge prior K Sheet fields (skip identifiers/timestamps and internal/meta keys)
         const skip = new Set(["id","timestamp","date","time","by","branch","status","createdBy","createdByName","createdAt","_lookup"]);
