@@ -2653,6 +2653,7 @@ function PatientsSection({ session, data, mutate, can, audit, onSync, syncing, h
       <QuickFilterTabs value={quickFilter} onChange={setQuickFilter} />
       <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, phone, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} />
 
+      <BulkBar filtered={filtered} label="patient(s)" onDeleteAll={(rows)=>{ const ids=new Set(rows.map(r=>r.id)); mutate("patients", arr=>arr.filter(x=>!ids.has(x.id))); audit("DELETE_BULK",{type:"patients",count:rows.length}); }} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
           <thead><tr><th>Date</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Designation</th><th>Aadhar No</th><th>Address</th><th>Payment</th><th>Payment Ref No</th><th>Amount</th><th>Ref/Camp</th><th>Visit</th><th>Branch</th><th>Remarks</th><th></th></tr></thead>
@@ -2911,6 +2912,7 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
 
       <QuickFilterTabs value={quickFilter} onChange={setQuickFilter} />
       <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, phone, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} />
+      <BulkBar filtered={filtered} label="K Sheet(s)" onDeleteAll={(rows)=>{ const ids=new Set(rows.map(r=>r.id)); mutate("patientBill", arr=>arr.filter(x=>!ids.has(x.id))); audit("DELETE_BULK",{type:"patientBill",count:rows.length}); }} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
           <thead><tr><th>Date</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Gender</th><th>Age</th><th>Complaint</th><th>IOP</th><th>Optom</th><th>By</th><th>Branch</th><th>Actions</th></tr></thead>
@@ -3093,6 +3095,7 @@ function OptometristSection({ session, data, mutate, can, audit, onSync, syncing
     <div>
       <SectionHeader title="Optometrist" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({id,...r})=>r),"optometrist.csv")} onAdd={can("optometrist","add") ? () => { setForm(blank()); setMsg(""); setMrLookup(""); setModal(true); } : null} msg={msg} />
       <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
+      <BulkBar filtered={filtered} label="optometrist record(s)" onDeleteAll={(rows)=>{ const ids=new Set(rows.map(r=>r.id)); mutate("optometrist", arr=>arr.filter(x=>!ids.has(x.id))); audit("DELETE_BULK",{type:"optometrist",count:rows.length}); }} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
           <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Complaint</th><th>Past History</th><th>Optometrist</th><th>Branch</th>{isOwner&&<th></th>}</tr></thead>
@@ -3225,6 +3228,7 @@ function OpticalsSection({ session, data, mutate, can, audit, onSync, syncing })
       <SectionHeader title="Opticals" onSync={onSync} syncing={syncing} onTemplate={() => downloadCSVTemplate(OPT_CSV_HEADERS, "opticals_template.csv")} onImport={(can("opticals","add") || isOwner) ? handleImport : null} onExport={() => exportCSV(rows.map(({id,...r})=>r),"opticals.csv")} onAdd={can("opticals","add") ? () => { setForm(blank()); setMsg(""); setRxPreview(null); setMrLookup(""); setModal(true); } : null} msg={msg} />
       <QuickFilterTabs value={quickFilter} onChange={setQuickFilter} />
       <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, MR No, Patient ID…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
+      <BulkBar filtered={filtered} label="opticals record(s)" onDeleteAll={(rows)=>{ const ids=new Set(rows.map(r=>r.id)); mutate("opticals", arr=>arr.filter(x=>!ids.has(x.id))); audit("DELETE_BULK",{type:"opticals",count:rows.length}); }} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
           <thead><tr>
@@ -3370,6 +3374,7 @@ function OpticalsStatusSection({ session, data, mutate, can, audit, onSync, sync
     <div>
       <SectionHeader title="Opticals Status" onSync={onSync} syncing={syncing} onExport={() => exportCSV(filtered.map(r => ({ billNo:r.billNo, mrNo:r.mrNo, patientId:r.patientId, name:r.name, phone:r.phone, totalPrice:r.totalPrice, discount:r.discount, netPayable:netPayable(r), advance:r.advance, balance:balanceOf(r), deliveryStatus:r.deliveryStatus, optomName:r.optomName })), "opticals_status.csv")} msg={msg} />
       <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, MR No, Patient ID, phone, bill no…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
+      <BulkBar filtered={filtered} label="status row(s)" canDelete={false} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
           <thead><tr>
@@ -3482,6 +3487,7 @@ function LensSaleSection({ session, data, mutate, can, audit, onSync, syncing })
   return (
     <div>
       <SectionHeader title="Lens Sale" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({id,items,...r})=>({...r, items: JSON.stringify(items)})),"lens_sale.csv")} onAdd={can("opticals","add") ? () => { setForm(blank()); setMsg(""); setModal(true); } : null} msg={msg} />
+      <BulkBar filtered={filtered} label="lens sale(s)" onDeleteAll={(rows)=>{ const ids=new Set(rows.map(r=>r.id)); mutate("lensSale", arr=>arr.filter(x=>!ids.has(x.id))); audit("DELETE_BULK",{type:"lensSale",count:rows.length}); }} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
           <thead><tr><th>Bill No</th><th>Date</th><th>Party</th><th>MR No</th><th>Items</th><th>Total ₹</th><th>By</th><th>Branch</th></tr></thead>
@@ -3688,6 +3694,7 @@ function PurchaseOrderSection({ session, data, mutate, can, audit, onSync, synci
   return (
     <div>
       <SectionHeader title="Purchase Orders (PO)" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({id,...r})=>r), "purchase_orders.csv")} onAdd={can("inventory","add") ? () => open(null) : null} msg={msg} />
+      <BulkBar filtered={filtered} label="purchase order(s)" onDeleteAll={(rows)=>{ const ids=new Set(rows.map(r=>r.id)); mutate("purchaseOrders", arr=>arr.filter(x=>!ids.has(x.id))); audit("DELETE_BULK",{type:"purchaseOrders",count:rows.length}); }} />
       <div className="card" style={{ overflowX:"auto" }}>
         <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap" }}>
           <input type="text" placeholder="Search PO / SKU / party / tracking…" value={search} onChange={e=>setSearch(e.target.value)} style={{ maxWidth:280 }} />
@@ -3816,6 +3823,7 @@ function InventorySection({ session, data, mutate, can, audit, onSync, syncing }
   return (
     <div>
       <SectionHeader title="Inventory" onSync={onSync} syncing={syncing} onExport={() => exportCSV(rows.map(({ id, ...r }) => r), "inventory.csv")} onAdd={can("inventory", "add") ? () => open(null) : null} msg={msg} />
+      <BulkBar filtered={filtered} label="stock item(s)" onDeleteAll={(rows)=>{ const ids=new Set(rows.map(r=>r.id)); mutate("stock", arr=>arr.filter(x=>!ids.has(x.id))); audit("DELETE_BULK",{type:"stock",count:rows.length}); }} />
       <div className="card" style={{ overflowX: "auto" }}>
         <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
           <input type="text" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} style={{ maxWidth: 200 }} />
@@ -3949,6 +3957,7 @@ function InvoicesSection({ session, data, mutate, can, audit, onSync, syncing })
   return (
     <div>
       <SectionHeader title="Sales & Invoices" onSync={onSync} syncing={syncing} onTemplate={() => downloadCSVTemplate(INV_CSV_HEADERS, "invoices_template.csv")} onImport={(can("invoices", "add") || isOwner) ? handleImportInvoices : null} onExport={() => exportCSV(rows, "invoices.csv")} onAdd={can("invoices", "add") ? () => { setForm({ patientName: "", date: todayStr(), items: [], discount: 0 }); setErr(""); setModal(true); } : null} msg={msg} />
+      <BulkBar filtered={filtered} label="invoice(s)" onDeleteAll={(rows)=>{ const ids=new Set(rows.map(r=>r.id)); mutate("invoices", arr=>arr.filter(x=>!ids.has(x.id))); audit("DELETE_BULK",{type:"invoices",count:rows.length}); }} />
       <div className="card" style={{ overflowX: "auto" }}>
         <table><thead><tr><th>Invoice</th><th>Date</th><th>Patient</th><th>Total</th><th>Status</th><th>By</th><th>Branch</th>{isOwner && <th></th>}</tr></thead>
           <tbody>{rows.map(inv => (
@@ -4054,6 +4063,7 @@ function TasksSection({ session, data, mutate, audit, accounts, onSync, syncing 
   return (
     <div>
       <SectionHeader title="Tasks" onSync={onSync} syncing={syncing} onAdd={isOwner ? () => { setForm(blank()); setMsg(""); setModal(true); } : null} msg={msg} />
+      <BulkBar filtered={filtered} label="task(s)" onDeleteAll={(rows)=>{ const ids=new Set(rows.map(r=>r.id)); mutate("tasks", arr=>arr.filter(x=>!ids.has(x.id))); audit("DELETE_BULK",{type:"tasks",count:rows.length}); }} />
       <div style={{ display:"flex", gap:8, marginBottom:16 }}>{["all","pending","overdue","done"].map(f => (<button key={f} className={`btn btn-sm ${filter===f?"btn-dark":"btn-outline"}`} onClick={()=>setFilter(f)}>{f.charAt(0).toUpperCase()+f.slice(1)}</button>))}</div>
       <div style={{ display:"grid", gap:10 }}>
         {filtered.length === 0 && <div style={{ color:"#9b8e82", fontSize:13, padding:20, textAlign:"center" }}>No tasks here.</div>}
@@ -4115,6 +4125,7 @@ function RemindersSection({ session, data, mutate, audit, onSync, syncing }) {
   return (
     <div>
       <SectionHeader title="Reminders" onSync={onSync} syncing={syncing} onAdd={() => { setForm(blank()); setMsg(""); setMrLookup(""); setModal(true); }} msg={msg} />
+      <BulkBar filtered={filtered} label="reminder(s)" onDeleteAll={(rows)=>{ const ids=new Set(rows.map(r=>r.id)); mutate("reminders", arr=>arr.filter(x=>!ids.has(x.id))); audit("DELETE_BULK",{type:"reminders",count:rows.length}); }} />
       <div style={{ display:"flex", gap:8, marginBottom:16 }}>{["upcoming","done","all"].map(f => (<button key={f} className={`btn btn-sm ${filter===f?"btn-dark":"btn-outline"}`} onClick={()=>setFilter(f)}>{f.charAt(0).toUpperCase()+f.slice(1)}</button>))}</div>
       <div style={{ display:"grid", gap:10 }}>
         {filtered.length === 0 && <div style={{ color:"#9b8e82", fontSize:13, padding:20, textAlign:"center" }}>No reminders here.</div>}
@@ -4240,6 +4251,35 @@ function SectionHeader({ title, onAdd, onExport, onImport, onTemplate, onSync, s
         </div>
       </div>
       {msg && <div style={{ marginTop: 8, fontSize: 13, padding: "8px 14px", borderRadius: 8, background: "#dcfce7", color: "#16a34a" }}>{msg}</div>}
+    </div>
+  );
+}
+
+function BulkBar({ filtered, onDeleteAll, label = "records", canDelete = true }) {
+  const [allSelected, setAllSelected] = React.useState(false);
+  const count = Array.isArray(filtered) ? filtered.length : 0;
+  React.useEffect(() => { if (count === 0) setAllSelected(false); }, [count]);
+  const handleDelete = () => {
+    if (!allSelected || count === 0) return;
+    if (!confirm(`Delete all ${count} ${label} currently shown? This cannot be undone.`)) return;
+    onDeleteAll && onDeleteAll(filtered);
+    setAllSelected(false);
+  };
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:14, padding:"8px 14px", margin:"0 0 12px", background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:8, fontSize:13, flexWrap:"wrap" }}>
+      <label style={{ display:"flex", alignItems:"center", gap:6, cursor: count===0?"not-allowed":"pointer", fontWeight:600, color:"#7c2d12" }}>
+        <input type="checkbox" checked={allSelected} onChange={e => setAllSelected(e.target.checked)} disabled={count === 0} />
+        Select All
+      </label>
+      <span style={{ color:"#9a3412", fontWeight:700 }}>Showing {count} {label}</span>
+      {canDelete && onDeleteAll && (
+        <button
+          className="btn btn-sm"
+          style={{ marginLeft:"auto", background: allSelected && count>0 ? "#dc2626" : "#fca5a5", color:"#fff", border:"none", cursor: allSelected && count>0 ? "pointer" : "not-allowed", fontWeight:700 }}
+          onClick={handleDelete}
+          disabled={!allSelected || count === 0}
+        >🗑 Delete All Selected ({allSelected ? count : 0})</button>
+      )}
     </div>
   );
 }
@@ -4469,6 +4509,7 @@ function PatientStatusSection({ session, data, onSync, syncing }) {
         <button className={`btn btn-sm ${statusF==="ALL"?"btn-dark":"btn-outline"}`} onClick={()=>setStatusF("ALL")}>All Statuses</button>
         <div style={{ fontSize:12, color:"#9b8e82", marginLeft:"auto" }}>{filtered.length} patient(s)</div>
       </div>
+      <BulkBar filtered={filtered} label="patient(s)" canDelete={false} />
       <div className="card" style={{ overflowX:"auto" }}>
         <table>
           <thead><tr><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Branch</th><th>Registered</th><th>Current Status</th><th>Created By</th></tr></thead>
@@ -4671,6 +4712,7 @@ function CounsellingSection({ session, data, mutate, audit, onSync, syncing }) {
       <QuickFilterTabs value={quickFilter} onChange={setQuickFilter} />
       <FilterSortBar search={search} setSearch={setSearch} placeholder="🔍 Search by name, MR No, Patient ID, phone…" fields={FS_FIELDS} filterField={filterField} setFilterField={setFilterField} sortKey={sortKey} setSortKey={setSortKey} sortDir={sortDir} setSortDir={setSortDir} />
 
+      <BulkBar filtered={filtered} label="counselling entry(ies)" onDeleteAll={(rows)=>{ const ids=new Set(rows.map(r=>r.id)); mutate("counselling", arr=>safeArray(arr).filter(x=>!ids.has(x.id))); audit("DELETE_BULK",{type:"counselling",count:rows.length}); }} />
       <div className="card" style={{ overflowX: "auto" }}>
         <table>
           <thead><tr><th>Timestamp</th><th>MR No</th><th>Patient ID</th><th>Name</th><th>Phone</th><th>Advice (Counselling Room)</th><th>Remarks</th><th>Counsellor</th><th>Branch</th><th></th></tr></thead>
