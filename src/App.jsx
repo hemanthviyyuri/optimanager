@@ -2839,12 +2839,26 @@ function PatientBillSection({ session, data, mutate, can, audit, onSync, syncing
       : ALL_TABS.filter(t => t.id === "basic"); // FRONT DESK STAFF → patient info only
   const filtered = sortRows(rows.filter(r => matchSearch(r, search, FS_FIELDS, filterField) && inDateRange(r, dateFrom, dateTo) && matchesQuickFilter(r, quickFilter, data.patients)), sortKey, sortDir);
 
+  // Headers MUST mirror every field captured in the K Sheet Entry form (see `blank()` above)
+  // so the downloadable template lets users fill in the exact same columns.
   const KS_CSV_HEADERS = [
     "date","time","mrNo","patientId","relationType","relationName","name","phone","address","gender","age","complaint","pastHistory",
+    // Medical History & Rx
+    "htn","htnRx","dm","dmRx","cad","cadRx","asthmatic","asthmaticRx","allergies","allergiesRx","others","othersRx",
+    // Vitals & Dilation  (dilatedContinuee is exposed in the UI as "Colour Vision" — keep header name for back-compat with importer)
     "iop","bp","ducts","rbs","dilatedWith","Colour Vision","optom",
-    "vaOd","vaOs","retinoscopyOd","retinoscopyOs",
+    // PG
+    "pgOd","pgOdAdd","pgOs","pgOsAdd",
+    // Visual Acuity OD / OS
+    "vaOd","odCpgp","odPh","odNv","odPgp",
+    "vaOs","osCpgp","osPh","osPv","osPgp",
+    // Retinoscopy
+    "retinoscopyOd","retinoscopyOs",
+    // AR
     "reSpherAR","reCylAR","reAxisAR","leSpherAR","leCylAR","leAxisAR",
+    // Subjective
     "reSpherSub","reCylSub","reAxisSub","leSpherSub","leCylSub","leAxisSub","add",
+    // Eye Exam (MD)
     "eyelids","conjunctiva","cornea","anteriorChamber","iris","pupil","lens","ocularMovements","fundus","advice","ophthalmologist",
     "branch",
   ];
